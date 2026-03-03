@@ -1,0 +1,425 @@
+//! SSH session management using russh
+
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+
+use tokio::sync::mpsc;
+
+use crate::terminal::{CellAttrs, TerminalGrid, VteHandler};
+use crate::config::{self, AuthMethod};
+
+/// Commands sent from the synchronous GUI thread to the async SSH task
+enum SshCommand {
+    Write(Vec<u8>),
+    Resize { cols: u32, rows: u32 },
+    Disconnect,
+}
+
+/// SSH connection state
+#[derive(Debug, Clone)]
+pub enum SshConnectionState {
+    Connecting,
+    Authenticating,
+    Connected,
+    Disconnected(String),
+    Error(String),
+}
+
+/// russh client handler with known_hosts verification
+pub struct SshClient {
+    host: String,
+    port: u16,
+}
+
+impl SshClient {
+    pub fn new(host: &str, port: u16) -> Self {
+        Self {
+            host: host.to_string(),
+            port,
+        }
+    }
+}
+
+impl russh::client::Handler for SshClient {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        server_public_key: &russh::keys::ssh_key::PublicKey,
+    ) -> Result<bool, Self::Error> {
+        match russh::keys::check_known_hosts(&self.host, self.port, server_public_key) {
+            Ok(true) => {
+                // Host key matches known_hosts
+                Ok(true)
+            }
+            Ok(false) => {
+                // Host not in known_hosts — auto-learn the key
+                log::info!(
+                    "New host key for {}:{}, adding to known_hosts",
+                    self.host, self.port
+                );
+                if let Err(e) =
+                    russh::keys::known_hosts::learn_known_hosts(&self.host, self.port, server_public_key)
+                {
+                    log::warn!("Failed to save host key: {}", e);
+                }
+                Ok(true)
+            }
+            Err(e) => {
+                // Key changed (possible MITM) or file error
+                if let russh::keys::Error::KeyChanged { line } = &e {
+                    log::error!(
+                        "HOST KEY CHANGED for {}:{} at known_hosts line {}!",
+                        self.host, self.port, line
+                    );
+                    return Err(russh::Error::Keys(e));
+                }
+                log::warn!("known_hosts check error: {}", e);
+                Ok(true)
+            }
+        }
+    }
+}
+
+/// Connect and authenticate an SSH session, returning the handle.
+/// Shared by SshSession, test_connection, and SFTP.
+pub async fn connect_and_authenticate(
+    host: &str,
+    port: u16,
+    username: &str,
+    auth: &AuthMethod,
+    display_name: &str,
+) -> Result<russh::client::Handle<SshClient>, String> {
+    let config = Arc::new(russh::client::Config::default());
+    let addr = format!("{}:{}", host, port);
+
+    let mut handle = russh::client::connect(config, &addr, SshClient::new(host, port))
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("KeyChanged") || msg.contains("key changed") {
+                format!("Host key verification failed: server key has changed for {}:{}. This could indicate a MITM attack. Remove the old key from ~/.ssh/known_hosts to connect.", host, port)
+            } else {
+                format!("Connect failed: {}", e)
+            }
+        })?;
+
+    let auth_ok = match auth {
+        AuthMethod::Password { password } => {
+            handle
+                .authenticate_password(username, password)
+                .await
+                .map(|r| r.success())
+                .map_err(|e| format!("Auth error: {}", e))?
+        }
+        AuthMethod::Key { key_path, passphrase, key_in_keychain } => {
+            let pw = if passphrase.is_empty() {
+                None
+            } else {
+                Some(passphrase.as_str())
+            };
+
+            let expanded_path = if key_path.starts_with('~') {
+                if let Some(home) = dirs::home_dir() {
+                    home.join(&key_path[2..])
+                } else {
+                    std::path::PathBuf::from(key_path)
+                }
+            } else {
+                std::path::PathBuf::from(key_path)
+            };
+
+            let key_pair = if *key_in_keychain {
+                // Try keychain first, fall back to key file on disk
+                if let Some(key_content) = config::load_credential(host, port, username, "privatekey", display_name) {
+                    russh::keys::decode_secret_key(&key_content, pw)
+                        .map_err(|e| format!("Key decode failed: {}", e))?
+                } else if !key_path.is_empty() {
+                    log::warn!("Private key not found in keychain, falling back to file: {}", key_path);
+                    russh::keys::load_secret_key(&expanded_path, pw)
+                        .map_err(|e| format!("Key load failed (fallback): {}", e))?
+                } else {
+                    return Err("Private key not found in keychain and no key path configured".to_string());
+                }
+            } else {
+                russh::keys::load_secret_key(&expanded_path, pw)
+                    .map_err(|e| format!("Key load failed: {}", e))?
+            };
+
+            let rsa_hash = handle
+                .best_supported_rsa_hash()
+                .await
+                .ok()
+                .flatten()
+                .flatten();
+            let key_with_hash =
+                russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key_pair), rsa_hash);
+
+            handle
+                .authenticate_publickey(username, key_with_hash)
+                .await
+                .map(|r| r.success())
+                .map_err(|e| format!("Auth error: {}", e))?
+        }
+        AuthMethod::None => return Err("No authentication configured".to_string()),
+    };
+
+    if auth_ok {
+        Ok(handle)
+    } else {
+        Err("Authentication failed".to_string())
+    }
+}
+
+/// SSH session that mirrors RealPtySession's interface
+pub struct SshSession {
+    pub grid: Arc<Mutex<TerminalGrid>>,
+    cmd_tx: mpsc::UnboundedSender<SshCommand>,
+    pub state: Arc<Mutex<SshConnectionState>>,
+    /// Remote shell path detected via exec channel (e.g. "/bin/zsh")
+    pub shell_hint: Arc<Mutex<Option<String>>>,
+}
+
+impl SshSession {
+    pub fn connect(
+        runtime: &tokio::runtime::Runtime,
+        host: String,
+        port: u16,
+        username: String,
+        auth: AuthMethod,
+        display_name: String,
+        cols: u16,
+        rows: u16,
+    ) -> Self {
+        let grid = Arc::new(Mutex::new(TerminalGrid::new(cols as usize, rows as usize)));
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let state = Arc::new(Mutex::new(SshConnectionState::Connecting));
+        let alive = Arc::new(AtomicBool::new(true));
+        let shell_hint = Arc::new(Mutex::new(None::<String>));
+
+        let grid_clone = Arc::clone(&grid);
+        let state_clone = Arc::clone(&state);
+        let alive_clone = Arc::clone(&alive);
+        let shell_hint_clone = Arc::clone(&shell_hint);
+
+        runtime.spawn(async move {
+            Self::ssh_task(
+                host, port, username, auth, display_name, cols, rows, grid_clone, cmd_rx,
+                state_clone, alive_clone, shell_hint_clone,
+            )
+            .await;
+        });
+
+        Self {
+            grid,
+            cmd_tx,
+            state,
+            shell_hint,
+        }
+    }
+
+    async fn ssh_task(
+        host: String,
+        port: u16,
+        username: String,
+        auth: AuthMethod,
+        display_name: String,
+        cols: u16,
+        rows: u16,
+        grid: Arc<Mutex<TerminalGrid>>,
+        mut cmd_rx: mpsc::UnboundedReceiver<SshCommand>,
+        state: Arc<Mutex<SshConnectionState>>,
+        alive: Arc<AtomicBool>,
+        shell_hint: Arc<Mutex<Option<String>>>,
+    ) {
+        let set_state = |s: SshConnectionState| {
+            if let Ok(mut st) = state.lock() {
+                *st = s;
+            }
+        };
+
+        // 1. Connect + Authenticate using shared helper
+        set_state(SshConnectionState::Authenticating);
+
+        let handle = match connect_and_authenticate(&host, port, &username, &auth, &display_name).await {
+            Ok(h) => h,
+            Err(e) => {
+                set_state(SshConnectionState::Error(e));
+                alive.store(false, Ordering::Relaxed);
+                return;
+            }
+        };
+
+        // 3. Detect remote shell via a short-lived exec channel
+        if let Ok(mut exec_ch) = handle.channel_open_session().await {
+            if exec_ch.exec(false, "echo $SHELL").await.is_ok() {
+                let mut output = Vec::new();
+                loop {
+                    match exec_ch.wait().await {
+                        Some(russh::ChannelMsg::Data { data }) => output.extend_from_slice(&data),
+                        Some(russh::ChannelMsg::Eof)
+                        | Some(russh::ChannelMsg::Close)
+                        | None => break,
+                        _ => {}
+                    }
+                }
+                let shell_path = String::from_utf8_lossy(&output).trim().to_string();
+                if !shell_path.is_empty() {
+                    if let Ok(mut h) = shell_hint.lock() {
+                        *h = Some(shell_path);
+                    }
+                }
+            }
+        }
+
+        // 4. Open channel + request PTY + shell
+        let mut channel = match handle.channel_open_session().await {
+            Ok(ch) => ch,
+            Err(e) => {
+                set_state(SshConnectionState::Error(format!(
+                    "Channel open failed: {}",
+                    e
+                )));
+                alive.store(false, Ordering::Relaxed);
+                return;
+            }
+        };
+
+        if let Err(e) = channel
+            .request_pty(false, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])
+            .await
+        {
+            set_state(SshConnectionState::Error(format!(
+                "PTY request failed: {}",
+                e
+            )));
+            alive.store(false, Ordering::Relaxed);
+            return;
+        }
+
+        if let Err(e) = channel.request_shell(false).await {
+            set_state(SshConnectionState::Error(format!(
+                "Shell request failed: {}",
+                e
+            )));
+            alive.store(false, Ordering::Relaxed);
+            return;
+        }
+
+        set_state(SshConnectionState::Connected);
+
+        // 4. Main I/O loop
+        let mut parser = vte::Parser::new();
+        let mut attrs = CellAttrs::default();
+
+        loop {
+            tokio::select! {
+                msg = channel.wait() => {
+                    match msg {
+                        Some(russh::ChannelMsg::Data { data }) => {
+                            if let Ok(mut g) = grid.lock() {
+                                let mut handler = VteHandler {
+                                    grid: &mut g,
+                                    attrs: &mut attrs,
+                                };
+                                for byte in &*data {
+                                    parser.advance(&mut handler, *byte);
+                                }
+                            }
+                        }
+                        Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
+                            if let Ok(mut g) = grid.lock() {
+                                let mut handler = VteHandler {
+                                    grid: &mut g,
+                                    attrs: &mut attrs,
+                                };
+                                for byte in &*data {
+                                    parser.advance(&mut handler, *byte);
+                                }
+                            }
+                        }
+                        Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => {
+                            set_state(SshConnectionState::Disconnected("Session ended".into()));
+                            alive.store(false, Ordering::Relaxed);
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                cmd = cmd_rx.recv() => {
+                    match cmd {
+                        Some(SshCommand::Write(data)) => {
+                            let _ = channel.data(&data[..]).await;
+                        }
+                        Some(SshCommand::Resize { cols, rows }) => {
+                            let _ = channel.window_change(cols, rows, 0, 0).await;
+                            if let Ok(mut g) = grid.lock() {
+                                g.resize(cols as usize, rows as usize);
+                            }
+                        }
+                        Some(SshCommand::Disconnect) | None => {
+                            let _ = channel.eof().await;
+                            let _ = channel.close().await;
+                            set_state(SshConnectionState::Disconnected("User disconnected".into()));
+                            alive.store(false, Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn write(&self, data: &[u8]) -> std::io::Result<()> {
+        let _ = self.cmd_tx.send(SshCommand::Write(data.to_vec()));
+        Ok(())
+    }
+
+    pub fn get_grid(&self) -> Arc<Mutex<TerminalGrid>> {
+        Arc::clone(&self.grid)
+    }
+
+    pub fn resize(&self, cols: u16, rows: u16) -> std::io::Result<()> {
+        let _ = self.cmd_tx.send(SshCommand::Resize {
+            cols: cols as u32,
+            rows: rows as u32,
+        });
+        Ok(())
+    }
+
+    pub fn get_shell_hint(&self) -> Option<String> {
+        self.shell_hint.lock().ok().and_then(|h| h.clone())
+    }
+
+    pub fn connection_state(&self) -> SshConnectionState {
+        self.state
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or(SshConnectionState::Error("Lock poisoned".into()))
+    }
+
+    pub fn disconnect(&self) {
+        let _ = self.cmd_tx.send(SshCommand::Disconnect);
+    }
+}
+
+impl Drop for SshSession {
+    fn drop(&mut self) {
+        self.disconnect();
+    }
+}
+
+/// Test SSH connectivity: connect + authenticate without opening a shell.
+/// Returns Ok(message) on success or Err(message) on failure.
+pub async fn test_connection(
+    host: String,
+    port: u16,
+    username: String,
+    auth: AuthMethod,
+    display_name: String,
+) -> Result<String, String> {
+    let _handle = connect_and_authenticate(&host, port, &username, &auth, &display_name).await?;
+    Ok("Connection successful! Authentication passed.".to_string())
+}

@@ -1,0 +1,60 @@
+[package]
+name = "portal"
+version = "0.9.0"
+edition = "2021"
+description = "A modern terminal emulator with GUI"
+
+[dependencies]
+# GUI framework - egui for immediate mode rendering
+eframe = { version = "0.29", features = ["default_fonts", "wgpu"] }
+egui = "0.29"
+
+# Terminal emulation
+vte = "0.11"
+
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+
+# Configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+dirs = "5.0"
+
+# Clipboard
+arboard = "3.4"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Fonts
+font-kit = "0.14"
+
+# Colors and styling
+syntect = "5.2"
+
+# Unicode width detection (CJK double-width characters)
+unicode-width = "0.2"
+
+# SSH support
+russh = "0.57"
+russh-sftp = "2.1"
+
+[target.'cfg(unix)'.dependencies]
+pty = "0.2"
+libc = "0.2"
+
+[package.metadata.bundle]
+name = "Portal"
+identifier = "com.portal.app"
+version = "0.9.1"
+copyright = "Copyright © 2024 Portal"
+category = "public.app-category.developer-tools"
+short_description = "A modern terminal emulator with GUI"
+osx_minimum_system_version = "12.0"
+icon = ["assets/portal.icns"]
+
+[[bin]]
+name = "portal"
+path = "src/main.rs"
