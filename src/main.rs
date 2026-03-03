@@ -60,6 +60,7 @@ struct PortalApp {
     // Main window hidden (still running for detached windows)
     main_window_hidden: bool,
     // Broadcast state
+    #[allow(dead_code)]
     broadcast_state: BroadcastState,
     // Batch execution state
     batch_execution: BatchExecutionState,

@@ -13,14 +13,17 @@ pub struct BroadcastState {
 }
 
 impl BroadcastState {
+    #[allow(dead_code)]
     pub fn toggle(&mut self) {
         self.enabled = !self.enabled;
     }
 
+    #[allow(dead_code)]
     pub fn enable(&mut self) {
         self.enabled = true;
     }
 
+    #[allow(dead_code)]
     pub fn disable(&mut self) {
         self.enabled = false;
     }
@@ -83,6 +86,7 @@ impl Clone for BatchExecutionState {
 pub struct BatchTarget {
     pub tab_idx: usize,
     pub session_idx: usize,
+    #[allow(dead_code)]
     pub global_id: usize,
     pub name: String,
 }

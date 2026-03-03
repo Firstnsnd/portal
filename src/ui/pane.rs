@@ -151,5 +151,6 @@ pub struct DetachedWindow {
     pub tab_drag: TabDragState,
     pub show_shell_picker: bool,
     pub show_encoding_picker: bool,
+    #[allow(dead_code)]
     pub broadcast_state: BroadcastState,
 }

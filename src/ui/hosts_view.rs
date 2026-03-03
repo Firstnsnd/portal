@@ -822,6 +822,7 @@ impl PortalApp {
     }
 
     /// Render batch execution panel (right-side drawer, shadcn-style)
+    #[allow(dead_code)]
     pub fn show_batch_execution_panel(&mut self, ctx: &egui::Context) {
         if !self.batch_execution.show_panel {
             return;
@@ -1111,13 +1112,6 @@ impl PortalApp {
                                 let expanded_set: std::collections::HashSet<usize> = self.batch_execution.expanded_results.iter().copied().collect();
 
                                 for (result_idx, status, target_name, timestamp, output_text) in results_data {
-                                    let (icon, icon_color) = match status {
-                                        BatchStatus::Pending => ("⏳", self.theme.fg_dim),
-                                        BatchStatus::Running => ("⟳", self.theme.accent),
-                                        BatchStatus::Success => ("✓", self.theme.green),
-                                        BatchStatus::Failed(_) => ("✗", self.theme.red),
-                                    };
-
                                     let is_expanded = expanded_set.contains(&result_idx);
                                     let (icon, icon_color) = match status {
                                         BatchStatus::Pending => ("⏳", self.theme.fg_dim),
@@ -1935,7 +1929,7 @@ impl PortalApp {
                         let mut hosts_to_add: Vec<HostEntry> = vec![];
                         let mut hosts_to_remove: Vec<usize> = vec![];
 
-                        for (host_idx, host) in self.hosts.iter().enumerate() {
+                        for (_host_idx, host) in self.hosts.iter().enumerate() {
                             if host.is_local {
                                 continue;
                             }
