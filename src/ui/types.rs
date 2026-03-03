@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::config::HostEntry;
 use crate::ssh::{SshSession, SshConnectionState};
@@ -295,6 +295,10 @@ pub struct TerminalSession {
     pub local_shell: String,
     /// When this session was created
     pub created_at: Instant,
+    /// Pending PTY resize (cols, rows) — debounced for column changes
+    pub pending_pty_size: Option<(u16, u16)>,
+    /// Deadline for sending debounced PTY resize
+    pub pty_resize_deadline: Instant,
 }
 
 impl TerminalSession {
@@ -314,6 +318,8 @@ impl TerminalSession {
             selection: Selection::default(),
             local_shell: shell.to_string(),
             created_at: Instant::now(),
+            pending_pty_size: None,
+            pty_resize_deadline: Instant::now(),
         }
     }
 
@@ -339,6 +345,8 @@ impl TerminalSession {
             selection: Selection::default(),
             local_shell: String::new(),
             created_at: Instant::now(),
+            pending_pty_size: None,
+            pty_resize_deadline: Instant::now(),
         }
     }
 
@@ -405,18 +413,45 @@ impl TerminalSession {
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) {
-        if cols != self.last_cols || rows != self.last_rows {
-            self.last_cols = cols;
-            self.last_rows = rows;
+        // Check pending PTY resize (called every frame from render loop)
+        if let Some((pc, pr)) = self.pending_pty_size {
+            if Instant::now() >= self.pty_resize_deadline {
+                if let Some(ref mut session) = self.session {
+                    let _ = session.resize(pc, pr);
+                }
+                self.pending_pty_size = None;
+            }
+        }
+
+        if cols == self.last_cols && rows == self.last_rows {
+            return;
+        }
+
+        let cols_changed = cols != self.last_cols;
+        self.last_cols = cols;
+        self.last_rows = rows;
+
+        // Always reflow grid immediately (for visual feedback)
+        if let Ok(mut grid) = self.grid.lock() {
+            grid.resize(cols, rows);
+        }
+
+        if cols_changed {
+            // Debounce PTY resize to prevent shell SIGWINCH response (erase_below)
+            // from destroying reflowed content during drag.
+            // Use longer debounce during active resize bursts (rapid drag / direction changes)
+            // to ensure SIGWINCH only fires after the user has fully stopped dragging.
+            let debounce = if self.pending_pty_size.is_some() {
+                Duration::from_millis(500)
+            } else {
+                Duration::from_millis(150)
+            };
+            self.pending_pty_size = Some((cols as u16, rows as u16));
+            self.pty_resize_deadline = Instant::now() + debounce;
+        } else {
+            // Row-only change: send PTY resize immediately
             if let Some(ref mut session) = self.session {
                 let _ = session.resize(cols as u16, rows as u16);
-            }
-            // Safety net: directly resize the grid in case the backend resize
-            // failed (e.g. PTY ioctl error causing early return before grid resize)
-            if let Ok(mut grid) = self.grid.lock() {
-                if grid.cols != cols || grid.rows != rows {
-                    grid.resize(cols, rows);
-                }
             }
         }
     }
