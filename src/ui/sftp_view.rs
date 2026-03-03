@@ -4,7 +4,7 @@ use crate::PortalApp;
 use crate::sftp::{FileSelection, SftpConnectionState, SftpEntry, SftpEntryKind};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
-use crate::ui::types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog};
+use crate::ui::types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog};
 
 /// A single entry in a drag payload.
 #[derive(Clone)]
@@ -78,70 +78,373 @@ impl PortalApp {
             }
         }
 
-        // ── LEFT PANEL: Local ──
+        // ── LEFT PANEL: Local or Remote ──
+        let mut left_connect_host: Option<usize> = None;
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(left_panel_rect), |ui| {
-            // Path bar with breadcrumbs
-            egui::Frame {
-                fill: self.theme.bg_secondary,
-                inner_margin: egui::Margin::symmetric(8.0, 6.0),
-                stroke: egui::Stroke::NONE,
-                ..Default::default()
-            }
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    // Back button
-                    if ui
-                        .add(egui::Button::new(
-                            egui::RichText::new("\u{2190}").color(self.theme.accent).size(14.0),
-                        ).frame(false))
-                        .on_hover_text("Back")
-                        .clicked()
-                    {
-                        local_navigate_to = Some("..".to_string());
-                    }
-                    ui.add_space(4.0);
-                    ui.label(egui::RichText::new(self.language.t("local")).color(self.theme.fg_dim).size(10.0).strong());
-                    ui.add_space(4.0);
-                    // Breadcrumb path
-                    render_breadcrumbs(ui, &self.local_browser.current_path, &mut local_navigate_to, true, &self.theme);
-                    // Refresh button (right-aligned) with spinner animation
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let is_refreshing = self.sftp_local_refresh_start
-                            .map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(300));
-                        if is_refreshing {
-                            ui.spinner();
-                            ui.ctx().request_repaint();
-                        } else {
-                            self.sftp_local_refresh_start = None;
+            if self.left_panel_is_local {
+                // ── LEFT PANEL: Local ──
+                // Path bar with breadcrumbs
+                egui::Frame {
+                    fill: self.theme.bg_secondary,
+                    inner_margin: egui::Margin::symmetric(8.0, 6.0),
+                    stroke: egui::Stroke::NONE,
+                    ..Default::default()
+                }
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        // Back button
+                        if ui
+                            .add(egui::Button::new(
+                                egui::RichText::new("\u{2190}").color(self.theme.accent).size(13.0),
+                            ).frame(false))
+                            .on_hover_text("Back")
+                            .clicked()
+                        {
+                            local_navigate_to = Some("..".to_string());
+                        }
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new(self.language.t("local")).color(self.theme.fg_dim).size(13.0).strong());
+                        ui.add_space(4.0);
+                        // Breadcrumb path
+                        render_breadcrumbs(ui, &self.local_browser.current_path, &mut local_navigate_to, true, &self.theme);
+                        // Refresh + switch to remote button (right-aligned)
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Switch to remote button
                             if ui
                                 .add(egui::Button::new(
-                                    egui::RichText::new("\u{21BB}").color(self.theme.accent).size(12.0),
+                                    egui::RichText::new("\u{2195}").color(self.theme.accent).size(13.0),
                                 ).frame(false))
+                                .on_hover_text("Switch to Remote")
                                 .clicked()
                             {
-                                self.sftp_local_refresh_start = Some(std::time::Instant::now());
-                                self.local_browser.refresh();
+                                self.left_panel_is_local = false;
                             }
-                        }
+                            ui.add_space(8.0);
+                            let is_refreshing = self.sftp_local_refresh_start
+                                .map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(300));
+                            if is_refreshing {
+                                ui.spinner();
+                                ui.ctx().request_repaint();
+                            } else {
+                                self.sftp_local_refresh_start = None;
+                                if ui
+                                    .add(egui::Button::new(
+                                        egui::RichText::new("\u{21BB}").color(self.theme.accent).size(13.0),
+                                    ).frame(false))
+                                    .clicked()
+                                {
+                                    self.sftp_local_refresh_start = Some(std::time::Instant::now());
+                                    self.local_browser.refresh();
+                                }
+                            }
+                        });
                     });
                 });
-            });
 
-            render_file_panel(
-                ui,
-                &self.local_browser.entries,
-                &self.local_browser.selection,
-                &mut local_navigate_to,
-                &mut local_selection_action,
-                true,
-                &self.local_browser.current_path,
-                &self.theme,
-                &mut local_ctx_menu_req,
-                &mut local_open_file_req,
-                &mut local_delete_request,
-                self.sftp_active_panel_is_local,
-                &self.language,
-            );
+                render_file_panel(
+                    ui,
+                    &self.local_browser.entries,
+                    &self.local_browser.selection,
+                    &mut local_navigate_to,
+                    &mut local_selection_action,
+                    true,
+                    &self.local_browser.current_path,
+                    &self.theme,
+                    &mut local_ctx_menu_req,
+                    &mut local_open_file_req,
+                    &mut local_delete_request,
+                    self.sftp_active_panel_is_local,
+                    &self.language,
+                );
+            } else {
+                // ── LEFT PANEL: Remote (independent connection) ──
+                match self.sftp_browser_left.as_mut() {
+                    None => {
+                        // ── No connection: show host list ──
+                        // Path bar with consistent layout
+                        egui::Frame {
+                            fill: self.theme.bg_secondary,
+                            inner_margin: egui::Margin::symmetric(8.0, 6.0),
+                            stroke: egui::Stroke::NONE,
+                            ..Default::default()
+                        }
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_space(20.0); // Space to align with back button area
+                                ui.label(egui::RichText::new(self.language.t("remote")).color(self.theme.fg_dim).size(13.0).strong());
+                                ui.add_space(4.0);
+                                ui.label(egui::RichText::new(self.language.t("remote_select")).color(self.theme.fg_dim).size(13.0));
+                                // Fill remaining space
+                                ui.add_space(ui.available_width());
+                                // Switch to local button (right-aligned)
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui
+                                        .add(egui::Button::new(
+                                            egui::RichText::new("\u{2190} Local").color(self.theme.accent).size(13.0),
+                                        ).frame(false))
+                                        .clicked()
+                                    {
+                                        self.left_panel_is_local = true;
+                                    }
+                                });
+                            });
+                        });
+
+                        egui::ScrollArea::vertical()
+                            .id_salt("sftp_left_host_list")
+                            .show(ui, |ui| {
+                            ui.add_space(8.0);
+                            let row_h = 44.0;
+                            for (i, host) in self.hosts.iter().enumerate() {
+                                if host.is_local { continue; }
+                                let width = ui.available_width();
+                                let (rect, resp) = ui.allocate_exact_size(
+                                    egui::vec2(width, row_h),
+                                    egui::Sense::click(),
+                                );
+                                if resp.hovered() {
+                                    ui.painter().rect_filled(rect, 0.0, self.theme.hover_bg);
+                                }
+                                // Icon
+                                ui.painter().text(
+                                    egui::pos2(rect.min.x + 16.0, rect.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    "\u{2195}",
+                                    egui::FontId::proportional(14.0),
+                                    self.theme.accent,
+                                );
+                                // Host name
+                                ui.painter().text(
+                                    egui::pos2(rect.min.x + 38.0, rect.center().y - 7.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    &host.name,
+                                    egui::FontId::proportional(13.0),
+                                    self.theme.fg_primary,
+                                );
+                                // Detail line
+                                let detail = if host.username.is_empty() {
+                                    format!("{}:{}", host.host, host.port)
+                                } else {
+                                    format!("{}@{}:{}", host.username, host.host, host.port)
+                                };
+                                ui.painter().text(
+                                    egui::pos2(rect.min.x + 38.0, rect.center().y + 8.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    detail,
+                                    egui::FontId::proportional(10.0),
+                                    self.theme.fg_dim,
+                                );
+                                if resp.clicked() {
+                                    left_connect_host = Some(i);
+                                }
+                            }
+                        });
+                    }
+                    Some(browser) => {
+                        match &browser.state {
+                            SftpConnectionState::Connecting => {
+                                egui::Frame {
+                                    fill: self.theme.bg_secondary,
+                                    inner_margin: egui::Margin::symmetric(8.0, 6.0),
+                                    stroke: egui::Stroke::NONE,
+                                    ..Default::default()
+                                }
+                                .show(ui, |ui| {
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        // Switch to local button
+                                        if ui
+                                            .add(egui::Button::new(
+                                                egui::RichText::new("\u{2190} Local").color(self.theme.accent).size(13.0),
+                                            ).frame(false))
+                                            .clicked()
+                                        {
+                                            self.left_panel_is_local = true;
+                                        }
+                                        ui.add_space(8.0);
+                                        ui.label(egui::RichText::new("Remote (Left)").color(self.theme.fg_dim).size(13.0).strong());
+                                    });
+                                });
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(40.0);
+                                    ui.label(
+                                        egui::RichText::new("Connecting ...")
+                                            .color(self.theme.fg_dim)
+                                            .size(14.0),
+                                    );
+                                    ui.add_space(12.0);
+                                    if ui.add(
+                                        egui::Button::new(egui::RichText::new(self.language.t("cancel")).color(self.theme.red).size(13.0))
+                                            .frame(false)
+                                    ).clicked() {
+                                        if let Some(ref b) = self.sftp_browser_left {
+                                            b.cancel_connect();
+                                        }
+                                        self.sftp_browser_left = None;
+                                    }
+                                });
+                            }
+                            SftpConnectionState::Error(e) => {
+                                let err = e.clone();
+                                egui::Frame {
+                                    fill: self.theme.bg_secondary,
+                                    inner_margin: egui::Margin::symmetric(8.0, 6.0),
+                                    stroke: egui::Stroke::NONE,
+                                    ..Default::default()
+                                }
+                                .show(ui, |ui| {
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        // Switch to local button
+                                        if ui
+                                            .add(egui::Button::new(
+                                                egui::RichText::new("\u{2190} Local").color(self.theme.accent).size(13.0),
+                                            ).frame(false))
+                                            .clicked()
+                                        {
+                                            self.left_panel_is_local = true;
+                                        }
+                                        ui.add_space(8.0);
+                                        ui.label(egui::RichText::new("Remote (Left)").color(self.theme.fg_dim).size(13.0).strong());
+                                    });
+                                });
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(40.0);
+                                    ui.label(egui::RichText::new(self.language.t("connection_failed")).color(self.theme.red).size(14.0).strong());
+                                    ui.add_space(6.0);
+                                    ui.label(egui::RichText::new(&err).color(self.theme.fg_dim).size(12.0));
+                                    ui.add_space(12.0);
+                                    if ui.add(
+                                        egui::Button::new(egui::RichText::new(self.language.t("back")).color(self.theme.accent).size(13.0))
+                                            .frame(false)
+                                    ).clicked() {
+                                        self.sftp_browser_left = None;
+                                    }
+                                });
+                            }
+                            SftpConnectionState::Connected => {
+                                // Path bar with breadcrumbs + disconnect
+                                egui::Frame {
+                                    fill: self.theme.bg_secondary,
+                                    inner_margin: egui::Margin::symmetric(8.0, 6.0),
+                                    stroke: egui::Stroke::NONE,
+                                    ..Default::default()
+                                }
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        // Back button
+                                        if ui
+                                            .add(egui::Button::new(
+                                                egui::RichText::new("\u{2190}").color(self.theme.accent).size(13.0),
+                                            ).frame(false))
+                                            .on_hover_text("Back")
+                                            .clicked()
+                                        {
+                                            remote_navigate_to = Some("..".to_string());
+                                        }
+                                        ui.add_space(4.0);
+                                        ui.label(egui::RichText::new(format!("REMOTE  {}", browser.host_name)).color(self.theme.fg_dim).size(13.0).strong());
+                                        ui.add_space(4.0);
+                                        // Breadcrumb path
+                                        let current_path_clone = browser.current_path.clone();
+                                        render_breadcrumbs(ui, &current_path_clone, &mut remote_navigate_to, false, &self.theme);
+                                        // Refresh + disconnect + switch to local (right-aligned)
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            // Switch to local button
+                                            if ui
+                                                .add(egui::Button::new(
+                                                    egui::RichText::new("Local").color(self.theme.accent).size(13.0),
+                                                ).frame(false))
+                                                .clicked()
+                                            {
+                                                self.left_panel_is_local = true;
+                                            }
+                                            ui.add_space(8.0);
+                                            if ui
+                                                .add(egui::Button::new(
+                                                    egui::RichText::new("\u{2715}").color(self.theme.red).size(13.0),
+                                                ).frame(false))
+                                                .on_hover_text(self.language.t("disconnect"))
+                                                .clicked()
+                                            {
+                                                browser.disconnect();
+                                            }
+                                            let is_refreshing = self.sftp_remote_refresh_start
+                                                .map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(300));
+                                            if is_refreshing {
+                                                ui.spinner();
+                                            } else {
+                                                self.sftp_remote_refresh_start = None;
+                                                if ui
+                                                    .add(egui::Button::new(
+                                                        egui::RichText::new("\u{21BB}").color(self.theme.accent).size(13.0),
+                                                    ).frame(false))
+                                                    .clicked()
+                                                {
+                                                    self.sftp_remote_refresh_start = Some(std::time::Instant::now());
+                                                    browser.refresh();
+                                                }
+                                            }
+                                        });
+                                    });
+                                });
+
+                                render_file_panel(
+                                    ui,
+                                    &browser.entries,
+                                    &browser.selection,
+                                    &mut remote_navigate_to,
+                                    &mut remote_selection_action,
+                                    false,
+                                    &browser.current_path,
+                                    &self.theme,
+                                    &mut remote_ctx_menu_req,
+                                    &mut remote_open_file_req,
+                                    &mut remote_delete_request,
+                                    self.sftp_active_panel_is_local,
+                                    &self.language,
+                                );
+                            }
+                            SftpConnectionState::Disconnected => {
+                                egui::Frame {
+                                    fill: self.theme.bg_secondary,
+                                    inner_margin: egui::Margin::symmetric(8.0, 6.0),
+                                    stroke: egui::Stroke::NONE,
+                                    ..Default::default()
+                                }
+                                .show(ui, |ui| {
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        // Switch to local button
+                                        if ui
+                                            .add(egui::Button::new(
+                                                egui::RichText::new("\u{2190} Local").color(self.theme.accent).size(13.0),
+                                            ).frame(false))
+                                            .clicked()
+                                        {
+                                            self.left_panel_is_local = true;
+                                        }
+                                        ui.add_space(8.0);
+                                        ui.label(egui::RichText::new("Remote (Left)").color(self.theme.fg_dim).size(13.0).strong());
+                                    });
+                                });
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(40.0);
+                                    ui.label(
+                                        egui::RichText::new("Disconnected")
+                                            .color(self.theme.fg_dim)
+                                            .size(14.0),
+                                    );
+                                    ui.add_space(12.0);
+                                    if ui.add(
+                                        egui::Button::new(egui::RichText::new(self.language.t("back")).color(self.theme.accent).size(13.0))
+                                            .frame(false)
+                                    ).clicked() {
+                                        self.sftp_browser_left = None;
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
         });
 
         // ── RIGHT PANEL: depends on connection state ──
@@ -163,7 +466,7 @@ impl PortalApp {
                     }
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(self.language.t("remote_select")).color(self.theme.fg_dim).size(10.0).strong());
+                            ui.label(egui::RichText::new(self.language.t("remote_select")).color(self.theme.fg_dim).size(13.0).strong());
                             // Fill remaining width to match left panel header height
                             ui.allocate_space(egui::vec2(ui.available_width(), 0.0));
                         });
@@ -245,7 +548,7 @@ impl PortalApp {
                             }
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(self.language.t("remote")).color(self.theme.fg_dim).size(10.0).strong());
+                                    ui.label(egui::RichText::new(self.language.t("remote")).color(self.theme.fg_dim).size(13.0).strong());
                                     ui.allocate_space(egui::vec2(ui.available_width(), 0.0));
                                 });
                             });
@@ -258,7 +561,7 @@ impl PortalApp {
                                 );
                                 ui.add_space(12.0);
                                 if ui.add(
-                                    egui::Button::new(egui::RichText::new(self.language.t("cancel")).color(self.theme.red).size(12.0))
+                                    egui::Button::new(egui::RichText::new(self.language.t("cancel")).color(self.theme.red).size(13.0))
                                         .frame(false)
                                 ).clicked() {
                                     if let Some(ref b) = self.sftp_browser {
@@ -278,7 +581,7 @@ impl PortalApp {
                             }
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(self.language.t("remote")).color(self.theme.fg_dim).size(10.0).strong());
+                                    ui.label(egui::RichText::new(self.language.t("remote")).color(self.theme.fg_dim).size(13.0).strong());
                                     ui.allocate_space(egui::vec2(ui.available_width(), 0.0));
                                 });
                             });
@@ -289,7 +592,7 @@ impl PortalApp {
                                 ui.label(egui::RichText::new(&err).color(self.theme.fg_dim).size(12.0));
                                 ui.add_space(12.0);
                                 if ui.add(
-                                    egui::Button::new(egui::RichText::new(self.language.t("back")).color(self.theme.accent).size(12.0))
+                                    egui::Button::new(egui::RichText::new(self.language.t("back")).color(self.theme.accent).size(13.0))
                                         .frame(false)
                                 ).clicked() {
                                     self.sftp_browser = None;
@@ -309,7 +612,7 @@ impl PortalApp {
                                     // Back button
                                     if ui
                                         .add(egui::Button::new(
-                                            egui::RichText::new("\u{2190}").color(self.theme.accent).size(14.0),
+                                            egui::RichText::new("\u{2190}").color(self.theme.accent).size(13.0),
                                         ).frame(false))
                                         .on_hover_text("Back")
                                         .clicked()
@@ -317,7 +620,7 @@ impl PortalApp {
                                         remote_navigate_to = Some("..".to_string());
                                     }
                                     ui.add_space(4.0);
-                                    ui.label(egui::RichText::new(format!("REMOTE  {}", browser.host_name)).color(self.theme.fg_dim).size(10.0).strong());
+                                    ui.label(egui::RichText::new(format!("REMOTE  {}", browser.host_name)).color(self.theme.fg_dim).size(13.0).strong());
                                     ui.add_space(4.0);
                                     // Breadcrumb path
                                     let current_path_clone = browser.current_path.clone();
@@ -326,7 +629,7 @@ impl PortalApp {
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                         if ui
                                             .add(egui::Button::new(
-                                                egui::RichText::new("\u{2715}").color(self.theme.red).size(12.0),
+                                                egui::RichText::new("\u{2715}").color(self.theme.red).size(13.0),
                                             ).frame(false))
                                             .on_hover_text(self.language.t("disconnect"))
                                             .clicked()
@@ -342,7 +645,7 @@ impl PortalApp {
                                             self.sftp_remote_refresh_start = None;
                                             if ui
                                                 .add(egui::Button::new(
-                                                    egui::RichText::new("\u{21BB}").color(self.theme.accent).size(12.0),
+                                                    egui::RichText::new("\u{21BB}").color(self.theme.accent).size(13.0),
                                                 ).frame(false))
                                                 .clicked()
                                             {
@@ -384,7 +687,20 @@ impl PortalApp {
         // Reserve the full area
         ui.allocate_rect(available, egui::Sense::hover());
 
-        // ── Connect to host if selected ──
+        // ── Connect to host if selected (left panel) ──
+        if let Some(idx) = left_connect_host {
+            let host = &self.hosts[idx];
+            self.sftp_browser_left = Some(crate::sftp::SftpBrowser::connect(
+                &self.runtime,
+                host.host.clone(),
+                host.port,
+                host.username.clone(),
+                host.auth.clone(),
+                host.name.clone(),
+            ));
+        }
+
+        // ── Connect to host if selected (right panel) ──
         if let Some(idx) = connect_host {
             let host = &self.hosts[idx];
             self.sftp_browser = Some(crate::sftp::SftpBrowser::connect(
@@ -1216,11 +1532,75 @@ impl PortalApp {
         if close_delete {
             self.sftp_confirm_delete = None;
         }
+
+        // ── Error dialog ──
+        let mut close_error = false;
+        if let Some(ref dialog) = self.sftp_error_dialog {
+            let mut open = true;
+            egui::Window::new(dialog.title.clone())
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .fixed_size(egui::vec2(400.0, 0.0))
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .title_bar(false)
+                .frame(egui::Frame {
+                    fill: self.theme.bg_secondary,
+                    rounding: egui::Rounding::same(10.0),
+                    inner_margin: egui::Margin::same(20.0),
+                    stroke: egui::Stroke::new(1.0, self.theme.border),
+                    shadow: egui::epaint::Shadow {
+                        offset: egui::vec2(0.0, 4.0),
+                        blur: 20.0,
+                        spread: 2.0,
+                        color: egui::Color32::from_black_alpha(80),
+                    },
+                    ..Default::default()
+                })
+                .show(ui.ctx(), |ui| {
+                    ui.vertical_centered(|ui| {
+                        // Error icon + title
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("❌").size(24.0));
+                            ui.add_space(10.0);
+                            ui.label(egui::RichText::new(&dialog.title).size(16.0).strong().color(self.theme.fg_primary));
+                        });
+                        ui.add_space(16.0);
+                        // Error message
+                        ui.label(egui::RichText::new(&dialog.message).size(13.0).color(self.theme.fg_dim));
+                        ui.add_space(20.0);
+                        // Close button
+                        ui.vertical_centered(|ui| {
+                            if ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new("确定").color(egui::Color32::WHITE).size(13.0)
+                                )
+                                .fill(self.theme.accent)
+                                .rounding(6.0)
+                                .min_size(egui::vec2(100.0, 32.0))
+                            ).clicked() {
+                                close_error = true;
+                            }
+                        });
+                    });
+                });
+            if !open {
+                close_error = true;
+            }
+        }
+        if close_error {
+            self.sftp_error_dialog = None;
+        }
+
         if let Some((is_local, names)) = delete_action {
             for name in &names {
                 if is_local {
                     if let Err(e) = self.local_browser.delete(name) {
-                        log::error!("Local delete error: {}", e);
+                        let error_msg = format!("删除失败：{}\n\n文件：{}", e, name);
+                        self.sftp_error_dialog = Some(SftpErrorDialog {
+                            title: "删除文件失败".to_string(),
+                            message: error_msg,
+                        });
                     }
                 } else if let Some(ref browser) = self.sftp_browser {
                     let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
