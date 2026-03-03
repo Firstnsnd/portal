@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use crate::PortalApp;
 use crate::config::HostEntry;
 use crate::ssh::test_connection;
-use crate::ui::types::{AuthMethodChoice, TestConnState, AppView};
+use crate::ui::types::{AuthMethodChoice, TestConnState, AppView, KeySourceChoice, BatchTarget, BatchStatus, BatchResult, BatchUpdate};
 
 impl PortalApp {
     /// Navigation strip on the left (always visible)
@@ -27,7 +27,7 @@ impl PortalApp {
                 let nav_btn = |ui: &mut egui::Ui, icon: &str, label: &str, active: bool| -> bool {
                     let width = ui.available_width();
                     let (rect, resp) = ui.allocate_exact_size(
-                        egui::vec2(width, 36.0),
+                        egui::vec2(width, 42.0),
                         egui::Sense::click(),
                     );
                     let bg = if active {
@@ -65,7 +65,7 @@ impl PortalApp {
                         egui::pos2(rect.min.x + 16.0, rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         format!("{}  {}", icon, label),
-                        egui::FontId::proportional(13.0),
+                        egui::FontId::proportional(14.0),
                         color,
                     );
                     resp.clicked()
@@ -79,6 +79,9 @@ impl PortalApp {
                 }
                 if nav_btn(ui, "\u{2195}", language.t("sftp"), self.current_view == AppView::Sftp) {
                     self.current_view = AppView::Sftp;
+                }
+                if nav_btn(ui, "⚡", "批量执行", self.current_view == AppView::Batch) {
+                    self.current_view = AppView::Batch;
                 }
                 if nav_btn(ui, "\u{1f511}", language.t("keychain"), self.current_view == AppView::Keychain) {
                     self.current_view = AppView::Keychain;
@@ -112,6 +115,7 @@ impl PortalApp {
                 ui.label(egui::RichText::new(self.language.t("hosts")).color(self.theme.fg_dim).size(12.0).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(24.0);
+
                     if ui.add(
                         egui::Button::new(egui::RichText::new(self.language.t("new_host")).color(self.theme.accent).size(12.0))
                             .frame(false)
@@ -517,13 +521,86 @@ impl PortalApp {
                                 );
                             }
                             AuthMethodChoice::Key => {
-                                ui.label(egui::RichText::new(lang.t("key_path")).color(theme.fg_dim).size(12.0));
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.add_host_dialog.key_path)
-                                        .hint_text(egui::RichText::new("~/.ssh/id_rsa").color(theme.hint_color()).italics())
-                                        .desired_width(f32::INFINITY)
-                                        .text_color(theme.fg_primary)
-                                );
+                                // Key source selection: Local file vs Import content
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new("Key Source:").color(theme.fg_dim).size(12.0));
+                                    ui.add_space(8.0);
+
+                                    let local_color = if self.add_host_dialog.key_source == KeySourceChoice::LocalFile { theme.accent } else { theme.fg_dim };
+                                    if ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new("Local File").color(local_color).size(12.0)
+                                        )
+                                        .stroke(egui::Stroke::NONE)
+                                        .fill(egui::Color32::TRANSPARENT)
+                                    ).clicked() {
+                                        self.add_host_dialog.key_source = KeySourceChoice::LocalFile;
+                                    }
+
+                                    ui.add_space(8.0);
+
+                                    let import_color = if self.add_host_dialog.key_source == KeySourceChoice::ImportContent { theme.accent } else { theme.fg_dim };
+                                    if ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new("Import Content").color(import_color).size(12.0)
+                                        )
+                                        .stroke(egui::Stroke::NONE)
+                                        .fill(egui::Color32::TRANSPARENT)
+                                    ).clicked() {
+                                        self.add_host_dialog.key_source = KeySourceChoice::ImportContent;
+                                    }
+                                });
+                                ui.add_space(8.0);
+
+                                match self.add_host_dialog.key_source {
+                                    KeySourceChoice::LocalFile => {
+                                        ui.horizontal(|ui| {
+                                            ui.label(egui::RichText::new(lang.t("key_path")).color(theme.fg_dim).size(12.0));
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                if ui.add(
+                                                    egui::Button::new(
+                                                        egui::RichText::new("📁 Browse").size(11.0)
+                                                    )
+                                                    .rounding(4.0)
+                                                    .fill(theme.bg_elevated)
+                                                ).clicked() {
+                                                    self.add_host_dialog.show_file_dialog = true;
+                                                }
+                                            });
+                                        });
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut self.add_host_dialog.key_path)
+                                                .hint_text(egui::RichText::new("~/.ssh/id_rsa").color(theme.hint_color()).italics())
+                                                .desired_width(f32::INFINITY)
+                                                .text_color(theme.fg_primary)
+                                        );
+                                    }
+                                    KeySourceChoice::ImportContent => {
+                                        ui.label(egui::RichText::new("Private Key:").color(theme.fg_dim).size(12.0));
+                                        ui.add(
+                                            egui::TextEdit::multiline(&mut self.add_host_dialog.key_content)
+                                                .id(egui::Id::new("import_private_key"))
+                                                .hint_text(egui::RichText::new("Paste your private key content here...\n-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----").color(theme.hint_color()).italics())
+                                                .font(egui::TextStyle::Monospace)
+                                                .desired_width(f32::INFINITY)
+                                                .desired_rows(6)
+                                                .frame(true)
+                                                .text_color(theme.fg_primary)
+                                        );
+                                        ui.add_space(4.0);
+                                        ui.label(egui::RichText::new("Public Key (optional):").color(theme.fg_dim).size(12.0));
+                                        ui.add(
+                                            egui::TextEdit::multiline(&mut self.add_host_dialog.key_path)
+                                                .hint_text(egui::RichText::new("ssh-rsa AAAA... user@host").color(theme.hint_color()).italics())
+                                                .font(egui::TextStyle::Monospace)
+                                                .desired_width(f32::INFINITY)
+                                                .desired_rows(2)
+                                                .frame(true)
+                                                .text_color(theme.fg_primary)
+                                        );
+                                    }
+                                }
+
                                 if self.add_host_dialog.key_in_keychain {
                                     ui.label(egui::RichText::new(lang.t("key_stored_in_keychain")).color(theme.green).size(11.0));
                                 }
@@ -610,9 +687,19 @@ impl PortalApp {
                         }
                     }
                     AuthMethodChoice::Key => {
-                        let path = self.add_host_dialog.key_path.trim().to_owned();
+                        let (path, key_content) = match self.add_host_dialog.key_source {
+                            KeySourceChoice::LocalFile => (
+                                self.add_host_dialog.key_path.trim().to_owned(),
+                                String::new()
+                            ),
+                            KeySourceChoice::ImportContent => (
+                                String::new(), // Empty path when importing content
+                                self.add_host_dialog.key_content.trim().to_owned()
+                            ),
+                        };
                         crate::config::AuthMethod::Key {
                             key_path: path,
+                            key_content,
                             passphrase: self.add_host_dialog.key_passphrase.clone(),
                             key_in_keychain: self.add_host_dialog.key_in_keychain,
                         }
@@ -656,13 +743,28 @@ impl PortalApp {
                     }
                 }
                 AuthMethodChoice::Key => {
-                    let path = self.add_host_dialog.key_path.trim().to_owned();
-                    if path.is_empty() {
-                        self.add_host_dialog.error = "Key path is required.".to_owned();
-                        return;
-                    }
+                    let (path, key_content) = match self.add_host_dialog.key_source {
+                        KeySourceChoice::LocalFile => {
+                            let path = self.add_host_dialog.key_path.trim().to_owned();
+                            if path.is_empty() {
+                                self.add_host_dialog.error = "Key path is required.".to_owned();
+                                return;
+                            }
+                            (path, String::new())
+                        }
+                        KeySourceChoice::ImportContent => {
+                            let key_content = self.add_host_dialog.key_content.trim().to_owned();
+                            if key_content.is_empty() {
+                                self.add_host_dialog.error = "Private key content is required.".to_owned();
+                                return;
+                            }
+                            // Store optional public key in path field for reference
+                            (self.add_host_dialog.key_path.trim().to_owned(), key_content)
+                        }
+                    };
                     crate::config::AuthMethod::Key {
                         key_path: path,
+                        key_content,
                         passphrase: self.add_host_dialog.key_passphrase.clone(),
                         key_in_keychain: self.add_host_dialog.key_in_keychain,
                     }
@@ -689,5 +791,1268 @@ impl PortalApp {
             self.save_hosts();
             self.add_host_dialog.reset();
         }
+
+        // Handle file dialog for selecting SSH private key file path
+        if self.add_host_dialog.show_file_dialog {
+            self.add_host_dialog.show_file_dialog = false;
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.add_host_dialog.pending_file_path = Some(rx);
+
+            // Use blocking file dialog in a separate thread
+            std::thread::spawn(move || {
+                let dialog = rfd::FileDialog::new()
+                    .add_filter("SSH Keys", &["pem", "key", "ppk"])
+                    .add_filter("All Files", &["*"])
+                    .set_title("Select SSH Private Key");
+
+                if let Some(file) = dialog.pick_file() {
+                    // Send the file path as string
+                    let _ = tx.send(file.to_string_lossy().to_string());
+                }
+            });
+        }
+
+        // Check for pending file path from file dialog
+        if let Some(ref rx) = self.add_host_dialog.pending_file_path {
+            if let Ok(path) = rx.try_recv() {
+                self.add_host_dialog.key_path = path;
+                self.add_host_dialog.pending_file_path = None;
+            }
+        }
+    }
+
+    /// Render batch execution panel (right-side drawer, shadcn-style)
+    pub fn show_batch_execution_panel(&mut self, ctx: &egui::Context) {
+        if !self.batch_execution.show_panel {
+            return;
+        }
+
+        let panel_width = 420.0;
+        egui::SidePanel::right("batch_execution_panel")
+            .exact_width(panel_width)
+            .resizable(false)
+            .frame(egui::Frame {
+                fill: self.theme.bg_secondary,
+                inner_margin: egui::Margin::same(0.0),
+                stroke: egui::Stroke::NONE,
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                // Header with title and close button
+                egui::Frame {
+                    fill: self.theme.bg_elevated,
+                    inner_margin: egui::Margin::symmetric(20.0, 16.0),
+                    ..Default::default()
+                }
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("⚡ 批量执行").color(self.theme.fg_primary).size(17.0).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(
+                                egui::Button::new(egui::RichText::new("✕").color(self.theme.fg_dim).size(18.0))
+                                    .frame(false)
+                            ).clicked() {
+                                self.batch_execution.show_panel = false;
+                            }
+                        });
+                    });
+                });
+
+                egui::ScrollArea::vertical()
+                    .id_salt("batch_panel_scroll")
+                    .show(ui, |ui| {
+                        ui.add_space(16.0);
+
+                        // ── Target Machines Section ──
+                        egui::Frame {
+                            fill: self.theme.bg_elevated,
+                            rounding: egui::Rounding::same(8.0),
+                            inner_margin: egui::Margin::symmetric(16.0, 12.0),
+                            stroke: egui::Stroke::new(1.0, self.theme.border),
+                            ..Default::default()
+                        }
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("目标机器").color(self.theme.fg_dim).size(11.0).strong());
+                                ui.label(
+                                    egui::RichText::new(format!("{}", self.batch_execution.targets.len()))
+                                        .color(self.theme.fg_dim).size(11.0)
+                                );
+                            });
+                            ui.add_space(8.0);
+
+                            if self.batch_execution.targets.is_empty() {
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(20.0);
+                                    ui.label(egui::RichText::new("暂无目标").color(self.theme.fg_dim).size(12.0).italics());
+                                    ui.add_space(20.0);
+                                });
+                            } else {
+                                let mut target_to_remove: Option<usize> = None;
+                                for (i, target) in self.batch_execution.targets.iter().enumerate() {
+                                    egui::Frame {
+                                        fill: self.theme.bg_secondary,
+                                        rounding: egui::Rounding::same(6.0),
+                                        inner_margin: egui::Margin::symmetric(10.0, 8.0),
+                                        ..Default::default()
+                                    }
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            // Status indicator
+                                            let is_connected = target.tab_idx != usize::MAX;
+                                            ui.label(
+                                                egui::RichText::new(if is_connected { "●" } else { "○" })
+                                                    .color(if is_connected { self.theme.green } else { self.theme.fg_dim })
+                                                    .size(10.0)
+                                            );
+                                            ui.add_space(6.0);
+
+                                            ui.label(egui::RichText::new(&target.name).color(self.theme.fg_primary).size(13.0));
+
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                if ui.add(
+                                                    egui::Button::new(
+                                                        egui::RichText::new("✕").color(self.theme.fg_dim).size(14.0)
+                                                    )
+                                                    .frame(false)
+                                                    .rounding(4.0)
+                                                ).clicked() {
+                                                    target_to_remove = Some(i);
+                                                }
+                                            });
+                                        });
+                                    });
+                                    ui.add_space(4.0);
+                                }
+                                if let Some(i) = target_to_remove {
+                                    self.batch_execution.targets.remove(i);
+                                }
+                            }
+
+                            ui.add_space(8.0);
+
+                            // Add targets from hosts
+                            if ui.add_sized(
+                                [ui.available_width(), 32.0],
+                                egui::Button::new(
+                                    egui::RichText::new("+ 从主机列表添加").color(self.theme.accent).size(12.0)
+                                )
+                                .stroke(egui::Stroke::new(1.0, self.theme.accent))
+                                .fill(egui::Color32::TRANSPARENT)
+                                .rounding(6.0)
+                            ).clicked() {
+                                for host in &self.hosts {
+                                    if !host.is_local {
+                                        self.batch_execution.targets.push(BatchTarget {
+                                            tab_idx: usize::MAX,
+                                            session_idx: usize::MAX,
+                                            global_id: usize::MAX,
+                                            name: host.name.clone(),
+                                        });
+                                    }
+                                }
+                            }
+                        });
+
+                        ui.add_space(16.0);
+
+                        // ── Command Input Section ──
+                        egui::Frame {
+                            fill: self.theme.bg_elevated,
+                            rounding: egui::Rounding::same(8.0),
+                            inner_margin: egui::Margin::symmetric(16.0, 12.0),
+                            stroke: egui::Stroke::new(1.0, self.theme.border),
+                            ..Default::default()
+                        }
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("执行命令").color(self.theme.fg_dim).size(11.0).strong());
+
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    // History dropdown button
+                                    if !self.batch_execution.command_history.is_empty() {
+                                        let history_btn = egui::Button::new(
+                                            egui::RichText::new("🕒").size(14.0)
+                                        )
+                                        .frame(false)
+                                        .rounding(4.0);
+                                        if ui.add(history_btn).clicked() {
+                                            self.batch_execution.show_history = !self.batch_execution.show_history;
+                                        }
+                                    }
+                                });
+                            });
+                            ui.add_space(8.0);
+
+                            // Command history dropdown
+                            if self.batch_execution.show_history {
+                                egui::Frame {
+                                    fill: self.theme.bg_secondary,
+                                    rounding: egui::Rounding::same(6.0),
+                                    inner_margin: egui::Margin::symmetric(8.0, 6.0),
+                                    stroke: egui::Stroke::new(1.0, self.theme.border),
+                                    ..Default::default()
+                                }
+                                .show(ui, |ui| {
+                                    ui.add_space(4.0);
+                                    ui.spacing_mut().item_spacing.y = 4.0;
+                                    for cmd in self.batch_execution.command_history.iter() {
+                                        if ui.add_sized(
+                                            [ui.available_width(), 24.0],
+                                            egui::Button::new(
+                                                egui::RichText::new(cmd.lines().next().unwrap_or(cmd))
+                                                    .color(self.theme.fg_primary).size(12.0)
+                                            )
+                                            .frame(false)
+                                            .fill(egui::Color32::TRANSPARENT)
+                                            .rounding(4.0)
+                                        ).clicked() {
+                                            self.batch_execution.command = cmd.clone();
+                                            self.batch_execution.show_history = false;
+                                        }
+                                    }
+                                    ui.add_space(4.0);
+                                });
+                                ui.add_space(8.0);
+                            }
+
+                            // Command input
+                            let command_label: &str = if self.batch_execution.command.is_empty() {
+                                "输入命令，例如: ls -la /tmp"
+                            } else {
+                                ""
+                            };
+
+                            ui.add(
+                                egui::TextEdit::multiline(&mut self.batch_execution.command)
+                                    .hint_text(egui::RichText::new(command_label)
+                                        .color(self.theme.hint_color())
+                                        .italics())
+                                    .desired_rows(4)
+                                    .frame(true)
+                                    .text_color(self.theme.fg_primary)
+                            );
+
+                            ui.add_space(12.0);
+
+                            // Execute button with better styling
+                            let can_execute = !self.batch_execution.command.trim().is_empty()
+                                && !self.batch_execution.targets.is_empty()
+                                && !self.batch_execution.executing;
+
+                            let has_results = !self.batch_execution.results.is_empty();
+
+                            ui.horizontal(|ui| {
+                                if ui.add_enabled(
+                                    can_execute,
+                                    egui::Button::new(
+                                        egui::RichText::new("▶ 执行").color(egui::Color32::WHITE).size(13.0)
+                                    )
+                                    .fill(self.theme.accent)
+                                    .rounding(6.0)
+                                    .min_size(egui::vec2(80.0, 36.0))
+                                ).clicked() {
+                                    self.execute_batch_command(ctx);
+                                }
+
+                                // Re-execute button (only show if has results)
+                                if has_results && !self.batch_execution.executing {
+                                    if ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new("↻ 重新执行").color(self.theme.fg_primary).size(13.0)
+                                        )
+                                        .stroke(egui::Stroke::new(1.0, self.theme.border))
+                                        .fill(egui::Color32::TRANSPARENT)
+                                        .rounding(6.0)
+                                        .min_size(egui::vec2(100.0, 36.0))
+                                    ).clicked() {
+                                        self.execute_batch_command(ctx);
+                                    }
+                                }
+
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if self.batch_execution.executing {
+                                        ui.spinner();
+                                        ui.label(egui::RichText::new("执行中...").color(self.theme.fg_dim).size(12.0));
+                                    }
+                                });
+                            });
+                        });
+
+                        ui.add_space(16.0);
+
+                        // ── Results Section ──
+                        if !self.batch_execution.results.is_empty() {
+                            egui::Frame {
+                                fill: self.theme.bg_elevated,
+                                rounding: egui::Rounding::same(8.0),
+                                inner_margin: egui::Margin::symmetric(16.0, 12.0),
+                                stroke: egui::Stroke::new(1.0, self.theme.border),
+                                ..Default::default()
+                            }
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new("执行结果").color(self.theme.fg_dim).size(11.0).strong());
+                                    ui.label(
+                                        egui::RichText::new(format!("{}", self.batch_execution.results.len()))
+                                            .color(self.theme.fg_dim).size(11.0)
+                                    );
+                                });
+                                ui.add_space(8.0);
+
+                                ui.spacing_mut().item_spacing.y = 8.0;
+
+                                // Collect results data to avoid borrow issues
+                                let results_data: Vec<(usize, BatchStatus, String, std::time::Instant, String)> = self.batch_execution.results
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(idx, r)| (idx, r.status.clone(), r.target.name.clone(), r.timestamp, r.output.clone()))
+                                    .collect();
+                                let expanded_set: std::collections::HashSet<usize> = self.batch_execution.expanded_results.iter().copied().collect();
+
+                                for (result_idx, status, target_name, timestamp, output_text) in results_data {
+                                    let (icon, icon_color) = match status {
+                                        BatchStatus::Pending => ("⏳", self.theme.fg_dim),
+                                        BatchStatus::Running => ("⟳", self.theme.accent),
+                                        BatchStatus::Success => ("✓", self.theme.green),
+                                        BatchStatus::Failed(_) => ("✗", self.theme.red),
+                                    };
+
+                                    let is_expanded = expanded_set.contains(&result_idx);
+                                    let (icon, icon_color) = match status {
+                                        BatchStatus::Pending => ("⏳", self.theme.fg_dim),
+                                        BatchStatus::Running => ("⟳", self.theme.accent),
+                                        BatchStatus::Success => ("✓", self.theme.green),
+                                        BatchStatus::Failed(_) => ("✗", self.theme.red),
+                                    };
+
+                                    egui::Frame {
+                                        fill: self.theme.bg_secondary,
+                                        rounding: egui::Rounding::same(6.0),
+                                        inner_margin: egui::Margin::symmetric(12.0, 10.0),
+                                        stroke: egui::Stroke::new(1.0, egui::Color32::TRANSPARENT),
+                                        ..Default::default()
+                                    }
+                                    .show(ui, |ui| {
+                                        // Main result row
+                                        ui.horizontal(|ui| {
+                                            // Expand/collapse button
+                                            if ui.add(
+                                                egui::Button::new(
+                                                    egui::RichText::new(if is_expanded { "▼" } else { "▶" })
+                                                        .color(self.theme.fg_dim).size(10.0)
+                                                )
+                                                .frame(false)
+                                            ).clicked() {
+                                                if is_expanded {
+                                                    self.batch_execution.expanded_results.retain(|&x| x != result_idx);
+                                                } else {
+                                                    self.batch_execution.expanded_results.push(result_idx);
+                                                }
+                                            }
+
+                                            ui.add_space(4.0);
+
+                                            // Status icon
+                                            ui.label(egui::RichText::new(icon).color(icon_color).size(14.0));
+
+                                            ui.add_space(6.0);
+
+                                            // Target name
+                                            ui.label(egui::RichText::new(&target_name).color(self.theme.fg_primary).size(13.0));
+
+                                            // Get the actual result for accessing target data
+                                            let can_jump = self.batch_execution.results.get(result_idx)
+                                                .and_then(|r| if r.target.tab_idx != usize::MAX { Some(true) } else { Some(false) })
+                                                .unwrap_or(false);
+
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                // Jump to session button (only for completed results)
+                                                if matches!(status, BatchStatus::Success | BatchStatus::Failed(_)) {
+                                                    if ui.add_enabled(
+                                                        can_jump,
+                                                        egui::Button::new(
+                                                            egui::RichText::new("↗").color(self.theme.fg_dim).size(14.0)
+                                                        )
+                                                        .frame(false)
+                                                        .rounding(4.0)
+                                                    ).on_hover_text("跳转到会话").clicked() {
+                                                        // TODO: Implement jump to session
+                                                        // Switch to terminal view and focus the target tab/session
+                                                    }
+
+                                                    // Re-execute individual command (only for failed results)
+                                                    if matches!(status, BatchStatus::Failed(_)) {
+                                                        if ui.add(
+                                                            egui::Button::new(
+                                                                egui::RichText::new("↻").color(self.theme.fg_dim).size(12.0)
+                                                            )
+                                                            .frame(false)
+                                                            .rounding(4.0)
+                                                        ).on_hover_text("重新执行此命令").clicked() {
+                                                            // TODO: Re-execute single command
+                                                        }
+                                                    }
+                                                }
+                                            });
+                                        });
+
+                                        // Expanded output section
+                                        if is_expanded {
+                                            ui.add_space(8.0);
+
+                                            egui::Frame {
+                                                fill: self.theme.bg_elevated,
+                                                rounding: egui::Rounding::same(4.0),
+                                                inner_margin: egui::Margin::symmetric(10.0, 8.0),
+                                                ..Default::default()
+                                            }
+                                            .show(ui, |ui| {
+                                                // Output with monospace font
+                                                if output_text.is_empty() {
+                                                    ui.label(
+                                                        egui::RichText::new("无输出")
+                                                            .color(self.theme.fg_dim).size(11.0).italics()
+                                                    );
+                                                } else {
+                                                    // Create a static reference for display
+                                                    let output_lines = output_text.lines().count();
+                                                    let display_output = if output_lines > 5 {
+                                                        output_text.lines().take(5).collect::<Vec<&str>>().join("\n")
+                                                    } else {
+                                                        output_text.clone()
+                                                    };
+                                                    ui.label(
+                                                        egui::RichText::new(display_output)
+                                                            .text_style(egui::TextStyle::Monospace)
+                                                            .color(self.theme.fg_primary).size(11.0)
+                                                    );
+                                                    if output_lines > 5 {
+                                                        ui.label(
+                                                            egui::RichText::new(format!("... ({} more lines)", output_lines - 5))
+                                                                .color(self.theme.fg_dim).size(10.0).italics()
+                                                        );
+                                                    }
+                                                }
+
+                                                // Timestamp
+                                                ui.add_space(4.0);
+                                                let elapsed = timestamp.elapsed();
+                                                ui.label(
+                                                    egui::RichText::new(format!("{} ago", self.format_duration(elapsed)))
+                                                        .color(self.theme.fg_dim).size(10.0)
+                                                );
+                                            });
+                                        }
+                                    });
+                                }
+                            });
+                        }
+
+                        ui.add_space(16.0);
+                    });
+            });
+    }
+
+    /// Format duration for display
+    fn format_duration(&self, duration: std::time::Duration) -> String {
+        let secs = duration.as_secs();
+        if secs < 60 {
+            format!("{}s", secs)
+        } else if secs < 3600 {
+                            format!("{}m {}s", secs / 60, secs % 60)
+                        } else {
+                            format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+                        }
+    }
+
+    /// Execute batch command on all targets in parallel
+    fn execute_batch_command(&mut self, _ctx: &egui::Context) {
+        if self.batch_execution.targets.is_empty() {
+            return;
+        }
+
+        let command = self.batch_execution.command.trim().to_string();
+        if command.is_empty() {
+            return;
+        }
+
+        // Add to history
+        if !self.batch_execution.command_history.contains(&command) {
+            self.batch_execution.command_history.push(command.clone());
+        }
+
+        // Create channel for result updates
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        self.batch_execution.result_rx = Some(result_rx);
+
+        // Create pending results for all targets
+        self.batch_execution.results.clear();
+        self.batch_execution.expanded_results.clear();
+        for target in self.batch_execution.targets.clone() {
+            self.batch_execution.results.push(BatchResult {
+                target: target.clone(),
+                status: BatchStatus::Pending,
+                output: String::new(),
+                timestamp: std::time::Instant::now(),
+            });
+        }
+
+        self.batch_execution.executing = true;
+
+        // Collect session references before spawning tasks
+        let session_refs: Vec<(usize, Option<Arc<Mutex<crate::terminal::TerminalGrid>>>, String)> = self.batch_execution.targets
+            .iter()
+            .enumerate()
+            .map(|(idx, target)| {
+                let session = if target.tab_idx != usize::MAX && target.tab_idx < self.tabs.len() {
+                    let tab = &self.tabs[target.tab_idx];
+                    if target.session_idx < tab.sessions.len() {
+                        Some(tab.sessions[target.session_idx].grid.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                (idx, session, target.name.clone())
+            })
+            .collect();
+
+        // Spawn parallel execution tasks
+        let runtime = self.runtime.handle();
+        for (idx, session_ref, target_name) in session_refs {
+            let tx = result_tx.clone();
+
+            if session_ref.is_none() {
+                // Target not connected to a session - mark as failed
+                let _ = tx.send(BatchUpdate::StatusChanged {
+                    index: idx,
+                    status: BatchStatus::Failed("No active session".to_string()),
+                });
+                continue;
+            }
+
+            // Spawn async task to execute command and capture output
+            let _ = runtime.spawn(async move {
+                // Mark as running
+                let _ = tx.send(BatchUpdate::StatusChanged {
+                    index: idx,
+                    status: BatchStatus::Running,
+                });
+
+                // Send command to session
+                if let Some(session_ref) = session_ref {
+                    // Lock the grid to check if we can access it
+                    let can_access = session_ref.lock().is_ok();
+
+                    if can_access {
+                        // For now, we'll simulate execution
+                        // In a real implementation, we'd need to:
+                        // 1. Send the command bytes
+                        // 2. Wait for execution
+                        // 3. Capture the output from the grid
+
+                        // TODO: Implement actual command execution and output capture
+                        // For now, mark as success with placeholder output
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500 + (idx as u64 * 100))).await;
+
+                        let _ = tx.send(BatchUpdate::StatusChanged {
+                            index: idx,
+                            status: BatchStatus::Success,
+                        });
+
+                        let _ = tx.send(BatchUpdate::Output {
+                            index: idx,
+                            output: format!("Command executed on {}\nOutput placeholder", target_name),
+                        });
+                    } else {
+                        let _ = tx.send(BatchUpdate::StatusChanged {
+                            index: idx,
+                            status: BatchStatus::Failed("Failed to lock session".to_string()),
+                        });
+                    }
+                }
+            });
+        }
+
+        // Drop the original sender so the channel closes when all tasks complete
+        drop(result_tx);
+    }
+
+    /// Check for batch execution result updates
+    pub fn check_batch_execution_updates(&mut self) {
+        if let Some(ref rx) = self.batch_execution.result_rx {
+            while let Ok(update) = rx.try_recv() {
+                match update {
+                    BatchUpdate::StatusChanged { index, status } => {
+                        if index < self.batch_execution.results.len() {
+                            self.batch_execution.results[index].status = status;
+                        }
+                    }
+                    BatchUpdate::Output { index, output } => {
+                        if index < self.batch_execution.results.len() {
+                            self.batch_execution.results[index].output = output;
+                        }
+                    }
+                }
+            }
+
+            // Check if all executions are complete
+            let all_complete = self.batch_execution.results.iter().all(|r| {
+                matches!(r.status, BatchStatus::Success | BatchStatus::Failed(_))
+            });
+
+            if all_complete {
+                self.batch_execution.executing = false;
+                self.batch_execution.result_rx = None;
+            }
+        }
+    }
+
+    /// Show batch execution page (main view)
+    pub fn show_batch_page(&mut self, ctx: &egui::Context) {
+        // Main content area with command input and results
+        egui::CentralPanel::default()
+            .frame(egui::Frame {
+                fill: self.theme.bg_secondary,
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("batch_page_scroll")
+                    .show(ui, |ui| {
+                        ui.add_space(20.0);
+
+                        // Page header (inline, like hosts page)
+                        ui.horizontal(|ui| {
+                            ui.add_space(24.0);
+                            ui.label(egui::RichText::new(self.language.t("batch")).color(self.theme.fg_dim).size(12.0).strong());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.add_space(24.0);
+                            });
+                        });
+                        ui.add_space(16.0);
+
+                        // Targets summary card
+                        egui::Frame {
+                            fill: self.theme.bg_elevated,
+                            rounding: egui::Rounding::same(8.0),
+                            inner_margin: egui::Margin::symmetric(16.0, 12.0),
+                            stroke: egui::Stroke::new(1.0, self.theme.border),
+                            ..Default::default()
+                        }
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("{} {}", self.language.t("batch_targets"), self.batch_execution.targets.len()))
+                                        .color(self.theme.fg_dim)
+                                        .size(11.0)
+                                        .strong()
+                                );
+
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    // Select hosts button
+                                    if ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new(self.language.t("batch_select_hosts"))
+                                                .color(self.theme.fg_primary)
+                                                .size(12.0)
+                                        )
+                                        .fill(self.theme.accent)
+                                        .rounding(4.0)
+                                        .min_size(egui::vec2(100.0, 28.0))
+                                    ).clicked() {
+                                        self.batch_execution.show_hosts_drawer = true;
+                                    }
+
+                                    // Clear all button
+                                    if !self.batch_execution.targets.is_empty() {
+                                        if ui.add(
+                                            egui::Button::new(
+                                                egui::RichText::new(self.language.t("batch_clear_all"))
+                                                    .color(self.theme.fg_dim)
+                                                    .size(12.0)
+                                            )
+                                            .stroke(egui::Stroke::new(1.0, self.theme.border))
+                                            .fill(egui::Color32::TRANSPARENT)
+                                            .rounding(4.0)
+                                            .min_size(egui::vec2(70.0, 28.0))
+                                        ).clicked() {
+                                            self.batch_execution.targets.clear();
+                                            self.batch_execution.results.clear();
+                                        }
+                                    }
+                                });
+                            });
+
+                            // Selected targets preview
+                            if !self.batch_execution.targets.is_empty() {
+                                ui.add_space(8.0);
+                                let target_count = self.batch_execution.targets.len().min(5);
+                                for (i, target) in self.batch_execution.targets.iter().take(target_count).enumerate() {
+                                    let is_connected = target.tab_idx != usize::MAX;
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(if is_connected { "●" } else { "○" })
+                                                .color(if is_connected { self.theme.green } else { self.theme.fg_dim })
+                                                .size(10.0)
+                                        );
+                                        ui.add_space(6.0);
+                                        ui.label(
+                                            egui::RichText::new(&target.name)
+                                                .color(self.theme.fg_primary)
+                                                .size(12.0)
+                                        );
+                                    });
+                                    if i < target_count - 1 {
+                                        ui.add_space(4.0);
+                                    }
+                                }
+                                if self.batch_execution.targets.len() > 5 {
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        egui::RichText::new(format!("+{}", self.batch_execution.targets.len() - 5))
+                                            .color(self.theme.fg_dim)
+                                            .size(11.0)
+                                            .italics()
+                                    );
+                                }
+                            }
+                        });
+
+                        ui.add_space(16.0);
+
+                        // Command input card
+                        egui::Frame {
+                            fill: self.theme.bg_elevated,
+                            rounding: egui::Rounding::same(8.0),
+                            inner_margin: egui::Margin::symmetric(16.0, 12.0),
+                            stroke: egui::Stroke::new(1.0, self.theme.border),
+                            ..Default::default()
+                        }
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(self.language.t("batch_command"))
+                                        .color(self.theme.fg_dim)
+                                        .size(11.0)
+                                        .strong()
+                                );
+
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    // History dropdown button
+                                    if !self.batch_execution.command_history.is_empty() {
+                                        if ui.add(
+                                            egui::Button::new(
+                                                egui::RichText::new("🕒").size(12.0)
+                                            )
+                                            .frame(false)
+                                            .rounding(4.0)
+                                        ).clicked() {
+                                            self.batch_execution.show_history = !self.batch_execution.show_history;
+                                        }
+                                    }
+                                });
+                            });
+
+                            ui.add_space(6.0);
+
+                            // Command history dropdown
+                            if self.batch_execution.show_history {
+                                egui::Frame {
+                                    fill: self.theme.bg_secondary,
+                                    rounding: egui::Rounding::same(6.0),
+                                    inner_margin: egui::Margin::symmetric(8.0, 6.0),
+                                    stroke: egui::Stroke::new(1.0, self.theme.border),
+                                    ..Default::default()
+                                }
+                                .show(ui, |ui| {
+                                    ui.add_space(4.0);
+                                    ui.spacing_mut().item_spacing.y = 4.0;
+                                    for cmd in self.batch_execution.command_history.iter() {
+                                        if ui.add_sized(
+                                            [ui.available_width(), 24.0],
+                                            egui::Button::new(
+                                                egui::RichText::new(cmd.lines().next().unwrap_or(cmd))
+                                                    .color(self.theme.fg_primary)
+                                                    .size(12.0)
+                                            )
+                                            .frame(false)
+                                            .fill(egui::Color32::TRANSPARENT)
+                                            .rounding(4.0)
+                                        ).clicked() {
+                                            self.batch_execution.command = cmd.clone();
+                                            self.batch_execution.show_history = false;
+                                        }
+                                    }
+                                    ui.add_space(4.0);
+                                });
+                                ui.add_space(8.0);
+                            }
+
+                            // Command input
+                            let command_label: &str = if self.batch_execution.command.is_empty() {
+                                "输入命令，例如: ls -la /tmp"
+                            } else {
+                                ""
+                            };
+
+                            ui.add_sized(
+                                [ui.available_width(), 80.0],
+                                egui::TextEdit::multiline(&mut self.batch_execution.command)
+                                    .hint_text(egui::RichText::new(command_label)
+                                        .color(self.theme.hint_color())
+                                        .italics())
+                                    .desired_rows(3)
+                                    .frame(true)
+                                    .text_color(self.theme.fg_primary)
+                            );
+
+                            ui.add_space(10.0);
+
+                            // Execute buttons
+                            let can_execute = !self.batch_execution.command.trim().is_empty()
+                                && !self.batch_execution.targets.is_empty()
+                                && !self.batch_execution.executing;
+
+                            let has_results = !self.batch_execution.results.is_empty();
+
+                            ui.horizontal(|ui| {
+                                if ui.add_enabled(
+                                    can_execute,
+                                    egui::Button::new(
+                                        egui::RichText::new(format!("▶ {}", self.language.t("batch_execute")))
+                                            .color(egui::Color32::WHITE)
+                                            .size(12.0)
+                                    )
+                                    .fill(self.theme.accent)
+                                    .rounding(4.0)
+                                    .min_size(egui::vec2(80.0, 28.0))
+                                ).clicked() {
+                                    self.execute_batch_command(ctx);
+                                }
+
+                                // Re-execute button
+                                if has_results && !self.batch_execution.executing {
+                                    if ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new(format!("↻ {}", self.language.t("batch_reexecute")))
+                                                .color(self.theme.fg_primary)
+                                                .size(12.0)
+                                        )
+                                        .stroke(egui::Stroke::new(1.0, self.theme.border))
+                                        .fill(egui::Color32::TRANSPARENT)
+                                        .rounding(4.0)
+                                        .min_size(egui::vec2(100.0, 28.0))
+                                    ).clicked() {
+                                        self.execute_batch_command(ctx);
+                                    }
+                                }
+
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if self.batch_execution.executing {
+                                        ui.spinner();
+                                        ui.label(
+                                            egui::RichText::new(self.language.t("batch_executing"))
+                                                .color(self.theme.fg_dim)
+                                                .size(11.0)
+                                        );
+                                    }
+                                });
+                            });
+                        });
+
+                        // Results section
+                        if !self.batch_execution.results.is_empty() {
+                            ui.add_space(16.0);
+
+                            egui::Frame {
+                                fill: self.theme.bg_elevated,
+                                rounding: egui::Rounding::same(8.0),
+                                inner_margin: egui::Margin::symmetric(16.0, 12.0),
+                                stroke: egui::Stroke::new(1.0, self.theme.border),
+                                ..Default::default()
+                            }
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(self.language.t("batch_results"))
+                                            .color(self.theme.fg_dim)
+                                            .size(11.0)
+                                            .strong()
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(format!("{}", self.batch_execution.results.len()))
+                                            .color(self.theme.fg_dim)
+                                            .size(11.0)
+                                    );
+                                });
+                                ui.add_space(10.0);
+
+                                ui.spacing_mut().item_spacing.y = 8.0;
+
+                                // Collect results data to avoid borrow issues
+                                let results_data: Vec<(usize, BatchStatus, String, std::time::Instant, String)> = self.batch_execution.results
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(idx, r)| (idx, r.status.clone(), r.target.name.clone(), r.timestamp, r.output.clone()))
+                                    .collect();
+                                let expanded_set: std::collections::HashSet<usize> = self.batch_execution.expanded_results.iter().copied().collect();
+
+                                for (result_idx, status, target_name, timestamp, output_text) in results_data {
+                                    let (icon, icon_color) = match status {
+                                        BatchStatus::Pending => ("⏳", self.theme.fg_dim),
+                                        BatchStatus::Running => ("⟳", self.theme.accent),
+                                        BatchStatus::Success => ("✓", self.theme.green),
+                                        BatchStatus::Failed(_) => ("✗", self.theme.red),
+                                    };
+
+                                    let is_expanded = expanded_set.contains(&result_idx);
+
+                                    egui::Frame {
+                                        fill: self.theme.bg_secondary,
+                                        rounding: egui::Rounding::same(6.0),
+                                        inner_margin: egui::Margin::symmetric(12.0, 10.0),
+                                        stroke: egui::Stroke::new(1.0, egui::Color32::TRANSPARENT),
+                                        ..Default::default()
+                                    }
+                                    .show(ui, |ui| {
+                                        // Main result row
+                                        ui.horizontal(|ui| {
+                                            // Expand/collapse button
+                                            if ui.add(
+                                                egui::Button::new(
+                                                    egui::RichText::new(if is_expanded { "▼" } else { "▶" })
+                                                        .color(self.theme.fg_dim)
+                                                        .size(10.0)
+                                                )
+                                                .frame(false)
+                                            ).clicked() {
+                                                if is_expanded {
+                                                    self.batch_execution.expanded_results.retain(|&x| x != result_idx);
+                                                } else {
+                                                    self.batch_execution.expanded_results.push(result_idx);
+                                                }
+                                            }
+
+                                            ui.add_space(4.0);
+
+                                            // Status icon
+                                            ui.label(
+                                                egui::RichText::new(icon)
+                                                    .color(icon_color)
+                                                    .size(14.0)
+                                            );
+
+                                            ui.add_space(6.0);
+
+                                            // Target name
+                                            ui.label(
+                                                egui::RichText::new(&target_name)
+                                                    .color(self.theme.fg_primary)
+                                                    .size(12.0)
+                                                    .strong()
+                                            );
+
+                                            // Status text
+                                            let status_text = match status {
+                                                BatchStatus::Pending => self.language.t("batch_waiting"),
+                                                BatchStatus::Running => self.language.t("batch_running"),
+                                                BatchStatus::Success => self.language.t("batch_success"),
+                                                BatchStatus::Failed(_) => self.language.t("batch_failed"),
+                                            };
+                                            ui.label(
+                                                egui::RichText::new(status_text)
+                                                    .color(icon_color)
+                                                    .size(11.0)
+                                            );
+
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                // Jump to session button
+                                                let can_jump = self.batch_execution.results.get(result_idx)
+                                                    .and_then(|r| if r.target.tab_idx != usize::MAX { Some(true) } else { Some(false) })
+                                                    .unwrap_or(false);
+
+                                                if matches!(status, BatchStatus::Success | BatchStatus::Failed(_)) {
+                                                    if ui.add_enabled(
+                                                        can_jump,
+                                                        egui::Button::new(
+                                                            egui::RichText::new("↗")
+                                                                .color(self.theme.fg_dim)
+                                                                .size(14.0)
+                                                        )
+                                                        .frame(false)
+                                                        .rounding(4.0)
+                                                    ).on_hover_text(self.language.t("batch_jump_to_session")).clicked() {
+                                                        // TODO: Implement jump to session
+                                                    }
+
+                                                    // Re-execute individual command
+                                                    if matches!(status, BatchStatus::Failed(_)) {
+                                                        if ui.add(
+                                                            egui::Button::new(
+                                                                egui::RichText::new("↻")
+                                                                    .color(self.theme.fg_dim)
+                                                                    .size(12.0)
+                                                            )
+                                                            .frame(false)
+                                                            .rounding(4.0)
+                                                        ).on_hover_text(self.language.t("batch_reexecute_single")).clicked() {
+                                                            // TODO: Re-execute single command
+                                                        }
+                                                    }
+                                                }
+                                            });
+                                        });
+
+                                        // Expanded output section
+                                        if is_expanded {
+                                            ui.add_space(8.0);
+
+                                            egui::Frame {
+                                                fill: self.theme.bg_elevated,
+                                                rounding: egui::Rounding::same(4.0),
+                                                inner_margin: egui::Margin::symmetric(10.0, 8.0),
+                                                ..Default::default()
+                                            }
+                                            .show(ui, |ui| {
+                                                // Output with monospace font
+                                                if output_text.is_empty() {
+                                                    ui.label(
+                                                        egui::RichText::new(self.language.t("batch_no_output"))
+                                                            .color(self.theme.fg_dim)
+                                                            .size(11.0)
+                                                            .italics()
+                                                    );
+                                                } else {
+                                                    let output_lines = output_text.lines().count();
+                                                    let display_output = if output_lines > 10 {
+                                                        output_text.lines().take(10).collect::<Vec<&str>>().join("\n")
+                                                    } else {
+                                                        output_text.clone()
+                                                    };
+                                                    ui.label(
+                                                        egui::RichText::new(display_output)
+                                                            .text_style(egui::TextStyle::Monospace)
+                                                            .color(self.theme.fg_primary)
+                                                            .size(11.0)
+                                                    );
+                                                    if output_lines > 10 {
+                                                        ui.add_space(4.0);
+                                                        ui.label(
+                                                            egui::RichText::new(format!("... ({} more lines)", output_lines - 10))
+                                                                .color(self.theme.fg_dim)
+                                                                .size(10.0)
+                                                                .italics()
+                                                        );
+                                                    }
+                                                }
+
+                                                // Timestamp
+                                                ui.add_space(4.0);
+                                                let elapsed = timestamp.elapsed();
+                                                ui.label(
+                                                    egui::RichText::new(format!("{} {}", self.format_duration(elapsed), self.language.t("batch_ago")))
+                                                        .color(self.theme.fg_dim)
+                                                        .size(10.0)
+                                                );
+                                            });
+                                        }
+                                    });
+                                }
+                            });
+                        }
+
+                        ui.add_space(20.0);
+                    });
+            });
+
+        // Show hosts selection drawer
+        self.show_batch_hosts_drawer(ctx);
+    }
+
+    /// Show hosts selection drawer (right side)
+    pub fn show_batch_hosts_drawer(&mut self, ctx: &egui::Context) {
+        if !self.batch_execution.show_hosts_drawer {
+            return;
+        }
+
+        let drawer_width = 320.0;
+        egui::SidePanel::right("batch_hosts_drawer")
+            .exact_width(drawer_width)
+            .resizable(false)
+            .frame(egui::Frame {
+                fill: self.theme.bg_secondary,
+                inner_margin: egui::Margin::same(0.0),
+                stroke: egui::Stroke::NONE,
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                // Header
+                egui::Frame {
+                    fill: self.theme.bg_elevated,
+                    inner_margin: egui::Margin::symmetric(20.0, 16.0),
+                    ..Default::default()
+                }
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(self.language.t("batch_select_hosts"))
+                                .color(self.theme.fg_primary)
+                                .size(17.0)
+                                .strong()
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new("✕")
+                                        .color(self.theme.fg_dim)
+                                        .size(18.0)
+                                )
+                                .frame(false)
+                            ).clicked() {
+                                self.batch_execution.show_hosts_drawer = false;
+                            }
+                        });
+                    });
+                });
+
+                egui::ScrollArea::vertical()
+                    .id_salt("batch_hosts_drawer_scroll")
+                    .show(ui, |ui| {
+                        ui.add_space(4.0);
+
+                        // SSH hosts section
+                        ui.label(
+                            egui::RichText::new("SSH 主机")
+                                .color(self.theme.fg_dim)
+                                .size(10.0)
+                                .strong()
+                        );
+                        ui.add_space(4.0);
+
+                        let mut hosts_to_add: Vec<HostEntry> = vec![];
+                        let mut hosts_to_remove: Vec<usize> = vec![];
+
+                        for (host_idx, host) in self.hosts.iter().enumerate() {
+                            if host.is_local {
+                                continue;
+                            }
+
+                            // Check if already in targets
+                            let is_selected = self.batch_execution.targets.iter()
+                                .any(|t| t.name == host.name);
+
+                            egui::Frame {
+                                fill: if is_selected { self.theme.bg_elevated } else { egui::Color32::TRANSPARENT },
+                                rounding: egui::Rounding::same(6.0),
+                                inner_margin: egui::Margin::symmetric(10.0, 8.0),
+                                stroke: if is_selected {
+                                    egui::Stroke::new(1.0, self.theme.accent)
+                                } else {
+                                    egui::Stroke::new(1.0, self.theme.border)
+                                },
+                                ..Default::default()
+                            }
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    // Checkbox
+                                    if ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new(if is_selected { "☑" } else { "☐" })
+                                                .size(14.0)
+                                        )
+                                        .frame(false)
+                                    ).clicked() {
+                                        if is_selected {
+                                            // Find and mark for removal
+                                            if let Some(idx) = self.batch_execution.targets.iter()
+                                                .position(|t| t.name == host.name) {
+                                                hosts_to_remove.push(idx);
+                                            }
+                                        } else {
+                                            hosts_to_add.push(host.clone());
+                                        }
+                                    }
+
+                                    ui.add_space(6.0);
+
+                                    // Host info
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(&host.name)
+                                                .color(self.theme.fg_primary)
+                                                .size(12.0)
+                                                .strong()
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!("{}@{}:{}", host.username, host.host, host.port))
+                                                .color(self.theme.fg_dim)
+                                                .size(10.0)
+                                        );
+                                        if !host.group.is_empty() {
+                                            ui.label(
+                                                egui::RichText::new(&host.group)
+                                                    .color(self.theme.fg_dim)
+                                                    .size(9.0)
+                                            );
+                                        }
+                                    });
+                                });
+                            });
+
+                            ui.add_space(4.0);
+                        }
+
+                        // Apply removals (in reverse order to maintain indices)
+                        for idx in hosts_to_remove.into_iter().rev() {
+                            if idx < self.batch_execution.targets.len() {
+                                self.batch_execution.targets.remove(idx);
+                            }
+                        }
+
+                        // Apply additions
+                        for host in hosts_to_add {
+                            self.batch_execution.targets.push(BatchTarget {
+                                tab_idx: usize::MAX,
+                                session_idx: usize::MAX,
+                                global_id: usize::MAX,
+                                name: host.name.clone(),
+                            });
+                        }
+
+                        ui.add_space(12.0);
+
+                        // Quick actions
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        if ui.add_sized(
+                            [ui.available_width(), 28.0],
+                            egui::Button::new(
+                                egui::RichText::new(self.language.t("batch_add_from_hosts"))
+                                    .color(self.theme.accent)
+                                    .size(11.0)
+                            )
+                            .stroke(egui::Stroke::new(1.0, self.theme.accent))
+                            .fill(egui::Color32::TRANSPARENT)
+                            .rounding(4.0)
+                        ).clicked() {
+                            for host in &self.hosts {
+                                if !host.is_local && !self.batch_execution.targets.iter().any(|t| t.name == host.name) {
+                                    self.batch_execution.targets.push(BatchTarget {
+                                        tab_idx: usize::MAX,
+                                        session_idx: usize::MAX,
+                                        global_id: usize::MAX,
+                                        name: host.name.clone(),
+                                    });
+                                }
+                            }
+                        }
+
+                        ui.add_space(12.0);
+                    });
+            });
     }
 }

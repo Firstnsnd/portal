@@ -5,6 +5,105 @@ use crate::config::HostEntry;
 use crate::ssh::{SshSession, SshConnectionState};
 use crate::terminal::{TerminalGrid, RealPtySession};
 
+/// Broadcast state - for Tab-internal continuous interactive batch operations
+/// When enabled, input is automatically synced to all panes in current tab
+#[derive(Default, Clone)]
+pub struct BroadcastState {
+    pub enabled: bool,
+}
+
+impl BroadcastState {
+    pub fn toggle(&mut self) {
+        self.enabled = !self.enabled;
+    }
+
+    pub fn enable(&mut self) {
+        self.enabled = true;
+    }
+
+    pub fn disable(&mut self) {
+        self.enabled = false;
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.enabled
+    }
+}
+
+/// Batch execution state for cross-tab one-time command distribution
+#[derive(Default)]
+pub struct BatchExecutionState {
+    /// Show batch execution panel (legacy, kept for compatibility)
+    pub show_panel: bool,
+    /// Show hosts drawer (for selecting execution targets)
+    pub show_hosts_drawer: bool,
+    /// Target sessions (global session IDs)
+    pub targets: Vec<BatchTarget>,
+    /// Command to execute
+    pub command: String,
+    /// Command history
+    pub command_history: Vec<String>,
+    /// Execution results
+    pub results: Vec<BatchResult>,
+    /// Currently executing
+    pub executing: bool,
+    /// Show command history dropdown
+    pub show_history: bool,
+    /// Expanded result indices (for showing detailed output)
+    pub expanded_results: Vec<usize>,
+    /// Result receiver for async execution updates (not serialized)
+    pub result_rx: Option<std::sync::mpsc::Receiver<BatchUpdate>>,
+}
+
+/// Update message from async batch execution
+pub enum BatchUpdate {
+    StatusChanged { index: usize, status: BatchStatus },
+    Output { index: usize, output: String },
+}
+
+impl Clone for BatchExecutionState {
+    fn clone(&self) -> Self {
+        Self {
+            show_panel: self.show_panel,
+            show_hosts_drawer: self.show_hosts_drawer,
+            targets: self.targets.clone(),
+            command: self.command.clone(),
+            command_history: self.command_history.clone(),
+            results: self.results.clone(),
+            executing: self.executing,
+            show_history: self.show_history,
+            expanded_results: self.expanded_results.clone(),
+            result_rx: None, // Cannot clone receiver
+        }
+    }
+}
+
+/// A target session for batch execution
+#[derive(Clone)]
+pub struct BatchTarget {
+    pub tab_idx: usize,
+    pub session_idx: usize,
+    pub global_id: usize,
+    pub name: String,
+}
+
+/// Execution result for a single target
+#[derive(Clone)]
+pub struct BatchResult {
+    pub target: BatchTarget,
+    pub status: BatchStatus,
+    pub output: String,
+    pub timestamp: Instant,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum BatchStatus {
+    Pending,
+    Running,
+    Success,
+    Failed(String),
+}
+
 /// Unified session backend: local PTY or SSH
 pub enum SessionBackend {
     Local(RealPtySession),
@@ -54,10 +153,22 @@ pub struct AddHostDialog {
     pub auth_method: AuthMethodChoice,
     pub password: String,
     pub key_path: String,
+    pub key_content: String,
+    pub key_source: KeySourceChoice,
     pub key_passphrase: String,
     pub key_in_keychain: bool,
     pub test_conn_state: TestConnState,
     pub test_conn_result: Option<Arc<Mutex<Option<Result<String, String>>>>>,
+    pub show_file_dialog: bool,
+    pub pending_file_path: Option<std::sync::mpsc::Receiver<String>>,
+}
+
+/// Key source choice for SSH key authentication
+#[derive(Default, PartialEq, Clone, Copy)]
+pub enum KeySourceChoice {
+    #[default]
+    LocalFile,
+    ImportContent,
 }
 
 impl Default for AddHostDialog {
@@ -74,10 +185,14 @@ impl Default for AddHostDialog {
             auth_method: AuthMethodChoice::Password,
             password: String::new(),
             key_path: String::new(),
+            key_content: String::new(),
+            key_source: KeySourceChoice::LocalFile,
             key_passphrase: String::new(),
             key_in_keychain: false,
             test_conn_state: TestConnState::Idle,
             test_conn_result: None,
+            show_file_dialog: false,
+            pending_file_path: None,
         }
     }
 }
@@ -106,11 +221,18 @@ impl AddHostDialog {
                 self.auth_method = AuthMethodChoice::Password;
                 self.password = password.clone();
             }
-            crate::config::AuthMethod::Key { key_path, passphrase, key_in_keychain } => {
+            crate::config::AuthMethod::Key { key_path, key_content, passphrase, key_in_keychain } => {
                 self.auth_method = AuthMethodChoice::Key;
                 self.key_path = key_path.clone();
+                self.key_content = key_content.clone();
                 self.key_passphrase = passphrase.clone();
                 self.key_in_keychain = *key_in_keychain;
+                // Determine key source based on whether key_content is present
+                self.key_source = if !key_content.is_empty() {
+                    KeySourceChoice::ImportContent
+                } else {
+                    KeySourceChoice::LocalFile
+                };
             }
             crate::config::AuthMethod::None => {
                 self.auth_method = AuthMethodChoice::Password;
@@ -334,6 +456,12 @@ pub struct SftpConfirmDelete {
     pub names: Vec<String>,
 }
 
+/// SFTP error dialog state
+pub struct SftpErrorDialog {
+    pub title: String,
+    pub message: String,
+}
+
 /// SFTP editor dialog state
 pub struct SftpEditorDialog {
     pub is_local: bool,
@@ -374,6 +502,7 @@ pub enum AppView {
     Sftp,
     Keychain,
     Settings,
+    Batch,
 }
 
 /// Pending keychain credential deletion (awaiting user confirmation).

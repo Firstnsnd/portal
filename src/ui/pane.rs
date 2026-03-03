@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use crate::ui::types::{TerminalSession, AppView};
+use crate::ui::types::{TerminalSession, AppView, BroadcastState};
 
 /// Split direction for pane layout
 #[derive(Clone, Copy, PartialEq)]
@@ -125,6 +125,16 @@ pub struct Tab {
     pub sessions: Vec<TerminalSession>,
     pub layout: PaneNode,
     pub focused_session: usize,
+    pub broadcast_enabled: bool,
+}
+
+/// Drag state for tab ghost visualization
+#[derive(Default, Clone)]
+pub struct TabDragState {
+    pub source_index: Option<usize>,
+    pub target_index: Option<usize>,
+    pub ghost_title: String,
+    pub ghost_size: egui::Vec2,
 }
 
 /// A tab that has been detached into its own OS window (full UI)
@@ -138,9 +148,8 @@ pub struct DetachedWindow {
     pub ime_composing: bool,
     pub ime_preedit: String,
     pub next_id: usize,
-    pub tab_drag_source: Option<usize>,
-    pub tab_drag_target: Option<usize>,
+    pub tab_drag: TabDragState,
     pub show_shell_picker: bool,
     pub show_encoding_picker: bool,
-    pub broadcast_mode: bool,
+    pub broadcast_state: BroadcastState,
 }

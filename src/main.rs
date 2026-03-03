@@ -16,6 +16,7 @@ use sftp::{LocalBrowser, SftpBrowser, SftpConnectionState};
 use ssh::SshConnectionState;
 
 use ui::*;
+use ui::types::BatchExecutionState;
 
 struct PortalApp {
     tabs: Vec<Tab>,
@@ -31,20 +32,22 @@ struct PortalApp {
     ime_preedit: String,
     runtime: tokio::runtime::Runtime,
     // SFTP browser
-    sftp_browser: Option<SftpBrowser>,
+    sftp_browser_left: Option<SftpBrowser>,  // Left panel SFTP connection
+    sftp_browser: Option<SftpBrowser>,       // Right panel SFTP connection
     local_browser: LocalBrowser,
+    left_panel_is_local: bool,               // true = local, false = remote
     sftp_context_menu: Option<SftpContextMenu>,
     sftp_rename_dialog: Option<SftpRenameDialog>,
     sftp_new_folder_dialog: Option<SftpNewFolderDialog>,
     sftp_new_file_dialog: Option<SftpNewFileDialog>,
     sftp_confirm_delete: Option<SftpConfirmDelete>,
     sftp_editor_dialog: Option<SftpEditorDialog>,
+    sftp_error_dialog: Option<SftpErrorDialog>,
     sftp_local_refresh_start: Option<std::time::Instant>,
     sftp_remote_refresh_start: Option<std::time::Instant>,
     sftp_active_panel_is_local: bool,
     // Tab drag state
-    tab_drag_source: Option<usize>,
-    tab_drag_target: Option<usize>,
+    tab_drag: TabDragState,
     // Status bar pickers
     available_shells: Vec<String>,
     selected_shell: String,
@@ -56,8 +59,10 @@ struct PortalApp {
     next_viewport_id: u32,
     // Main window hidden (still running for detached windows)
     main_window_hidden: bool,
-    // Broadcast mode (global, applies to all panes across all tabs)
-    broadcast_mode: bool,
+    // Broadcast state
+    broadcast_state: BroadcastState,
+    // Batch execution state
+    batch_execution: BatchExecutionState,
     // Keychain delete confirmation
     keychain_confirm_delete: Option<KeychainDeleteRequest>,
     // Settings
@@ -148,6 +153,7 @@ impl PortalApp {
             sessions: vec![TerminalSession::new_local(0, &selected_shell)],
             layout: PaneNode::Terminal(0),
             focused_session: 0,
+            broadcast_enabled: false,
         };
 
         let hosts_file = config::hosts_file_path();
@@ -166,19 +172,21 @@ impl PortalApp {
             ime_composing: false,
             ime_preedit: String::new(),
             runtime,
+            sftp_browser_left: None,
             sftp_browser: None,
             local_browser: LocalBrowser::new(),
+            left_panel_is_local: true,
             sftp_context_menu: None,
             sftp_rename_dialog: None,
             sftp_new_folder_dialog: None,
             sftp_new_file_dialog: None,
             sftp_confirm_delete: None,
             sftp_editor_dialog: None,
+            sftp_error_dialog: None,
             sftp_local_refresh_start: None,
             sftp_remote_refresh_start: None,
-            sftp_active_panel_is_local: true,
-            tab_drag_source: None,
-            tab_drag_target: None,
+            sftp_active_panel_is_local: true,  // Track which panel has focus
+            tab_drag: TabDragState::default(),
             available_shells,
             selected_shell,
             selected_encoding: "UTF-8".to_string(),
@@ -187,7 +195,8 @@ impl PortalApp {
             detached_windows: Vec::new(),
             next_viewport_id: 0,
             main_window_hidden: false,
-            broadcast_mode: false,
+            broadcast_state: BroadcastState::default(),
+            batch_execution: BatchExecutionState::default(),
             keychain_confirm_delete: None,
             theme,
             theme_preset,
@@ -207,6 +216,7 @@ impl PortalApp {
             sessions: vec![TerminalSession::new_local(id, &self.selected_shell)],
             layout: PaneNode::Terminal(0),
             focused_session: 0,
+            broadcast_enabled: false,
         };
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
@@ -220,6 +230,7 @@ impl PortalApp {
             sessions: vec![session],
             layout: PaneNode::Terminal(0),
             focused_session: 0,
+            broadcast_enabled: false,
         };
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
@@ -308,11 +319,10 @@ impl PortalApp {
             ime_composing: false,
             ime_preedit: String::new(),
             next_id,
-            tab_drag_source: None,
-            tab_drag_target: None,
+            tab_drag: TabDragState::default(),
             show_shell_picker: false,
             show_encoding_picker: false,
-            broadcast_mode: false,
+            broadcast_state: BroadcastState::default(),
         });
     }
 
@@ -504,10 +514,11 @@ impl eframe::App for PortalApp {
                                 let mut tab_to_close: Option<usize> = None;
                                 let mut tab_to_detach: Option<usize> = None;
                                 let mut tab_rects: Vec<egui::Rect> = Vec::with_capacity(dw.tabs.len());
+                                let tab_bar_rect = ui.max_rect(); // Track tab bar area for drag-out detection
 
                                 for (ti, tab) in dw.tabs.iter().enumerate() {
                                     let is_active = ti == dw.active_tab;
-                                    let is_drag_target = dw.tab_drag_source.is_some() && dw.tab_drag_target == Some(ti);
+                                    let is_drag_target = dw.tab_drag.source_index.is_some() && dw.tab_drag.target_index == Some(ti);
                                     let tab_fill = if is_active { self.theme.bg_elevated } else { egui::Color32::TRANSPARENT };
 
                                     let mut close_btn_rect: Option<egui::Rect> = None;
@@ -532,7 +543,7 @@ impl eframe::App for PortalApp {
                                                 })
                                                 .unwrap_or(self.theme.fg_dim);
                                             ui.label(egui::RichText::new("●").color(dot_color).size(8.0));
-                                            if dw.broadcast_mode {
+                                            if tab.broadcast_enabled {
                                                 ui.label(egui::RichText::new("◉").color(self.theme.accent).size(11.0));
                                             }
                                             let title_color = if is_active { self.theme.fg_primary } else { self.theme.fg_dim };
@@ -565,15 +576,13 @@ impl eframe::App for PortalApp {
                                         }
                                     }
                                     if sense_resp.drag_started() {
-                                        dw.tab_drag_source = Some(ti);
+                                        dw.tab_drag.source_index = Some(ti);
+                                        dw.tab_drag.ghost_title = tab.title.clone();
+                                        dw.tab_drag.ghost_size = tab_rect.size();
                                     }
-                                    // Context menu for detached window tabs
+                                    // Context menu for detached window tabs (only close tab, drag to detach)
                                     let tab_count = dw.tabs.len();
                                     sense_resp.context_menu(|ui| {
-                                        if ui.add_enabled(tab_count > 1, egui::Button::new(self.language.t("detach_window"))).clicked() {
-                                            tab_to_detach = Some(ti);
-                                            ui.close_menu();
-                                        }
                                         if ui.add_enabled(tab_count > 1, egui::Button::new(self.language.t("close_tab"))).clicked() {
                                             tab_to_close = Some(ti);
                                             ui.close_menu();
@@ -581,19 +590,51 @@ impl eframe::App for PortalApp {
                                     });
                                 }
 
-                                // Drag reorder
-                                if dw.tab_drag_source.is_some() {
+                                // Draw drag ghost and handle reorder
+                                if let Some(src) = dw.tab_drag.source_index {
                                     if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                                        dw.tab_drag_target = None;
+                                        dw.tab_drag.target_index = None;
                                         for (ti, rect) in tab_rects.iter().enumerate() {
-                                            if rect.contains(pos) && Some(ti) != dw.tab_drag_source {
-                                                dw.tab_drag_target = Some(ti);
+                                            if rect.contains(pos) && Some(ti) != dw.tab_drag.source_index {
+                                                dw.tab_drag.target_index = Some(ti);
                                                 break;
                                             }
                                         }
+
+                                        // Draw ghost tab at cursor position
+                                        let ghost_rect = egui::Rect::from_center_size(
+                                            pos,
+                                            dw.tab_drag.ghost_size
+                                        );
+                                        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("tab_ghost")));
+                                        painter.rect_filled(
+                                            ghost_rect,
+                                            egui::Rounding::same(8.0),
+                                            egui::Color32::from_rgba_unmultiplied(40, 40, 50, 200)
+                                        );
+                                        painter.rect_stroke(
+                                            ghost_rect,
+                                            egui::Rounding::same(8.0),
+                                            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(150, 150, 170, 150))
+                                        );
+
+                                        // Draw ghost text
+                                        let text_pos = egui::pos2(
+                                            ghost_rect.min.x + 12.0,
+                                            ghost_rect.center().y - 7.0
+                                        );
+                                        painter.text(
+                                            text_pos,
+                                            egui::Align2::LEFT_CENTER,
+                                            &dw.tab_drag.ghost_title,
+                                            egui::FontId::new(13.0, egui::FontFamily::Monospace),
+                                            egui::Color32::from_rgba_unmultiplied(220, 228, 255, 180)
+                                        );
                                     }
+
                                     if ctx.input(|i| i.pointer.any_released()) {
-                                        if let (Some(src), Some(dst)) = (dw.tab_drag_source, dw.tab_drag_target) {
+                                        if let Some(dst) = dw.tab_drag.target_index {
+                                            // Dropping on another tab → merge
                                             if src != dst && src < dw.tabs.len() && dst < dw.tabs.len() {
                                                 let mut src_tab = dw.tabs.remove(src);
                                                 let dst = if src < dst { dst - 1 } else { dst };
@@ -618,9 +659,16 @@ impl eframe::App for PortalApp {
                                                     dw.active_tab = dw.tabs.len().saturating_sub(1);
                                                 }
                                             }
+                                        } else {
+                                            // Dropped outside tab area → detach to new window
+                                            if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                                                if !tab_bar_rect.contains(pos) && src < dw.tabs.len() {
+                                                    tab_to_detach = Some(src);
+                                                }
+                                            }
                                         }
-                                        dw.tab_drag_source = None;
-                                        dw.tab_drag_target = None;
+                                        dw.tab_drag.source_index = None;
+                                        dw.tab_drag.target_index = None;
                                     }
                                 }
 
@@ -653,13 +701,14 @@ impl eframe::App for PortalApp {
                                         sessions: vec![TerminalSession::new_local(id, &self.selected_shell)],
                                         layout: PaneNode::Terminal(0),
                                         focused_session: 0,
+                                        broadcast_enabled: false,
                                     };
                                     dw.tabs.push(new_tab);
                                     dw.active_tab = dw.tabs.len() - 1;
                                 }
 
                                 // ── More menu (⋯) at far right of detached tab bar ──
-                                let dw_broadcast_on = dw.broadcast_mode;
+                                let current_tab_broadcast_on = dw.tabs[dw.active_tab].broadcast_enabled;
                                 let dw_toggle_id = egui::Id::new("dw_broadcast_toggle").with(i);
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     let more_menu_id = egui::Id::new("dw_tab_bar_more_menu").with(i);
@@ -688,7 +737,7 @@ impl eframe::App for PortalApp {
                                                 }
                                                 .show(ui, |ui| {
                                                     ui.set_min_width(200.0);
-                                                    let broadcast_label = if dw_broadcast_on {
+                                                    let broadcast_label = if current_tab_broadcast_on {
                                                         format!("◉ {}  ⌘⇧I", self.language.t("broadcast_off"))
                                                     } else {
                                                         format!("○ {}  ⌘⇧I", self.language.t("broadcast_on"))
@@ -696,7 +745,7 @@ impl eframe::App for PortalApp {
                                                     let btn = ui.add(
                                                         egui::Button::new(
                                                             egui::RichText::new(&broadcast_label)
-                                                                .color(if dw_broadcast_on { self.theme.accent } else { self.theme.fg_primary })
+                                                                .color(if current_tab_broadcast_on { self.theme.accent } else { self.theme.fg_primary })
                                                                 .size(13.0)
                                                         )
                                                         .frame(false)
@@ -725,7 +774,7 @@ impl eframe::App for PortalApp {
                                     v
                                 });
                                 if should_toggle {
-                                    dw.broadcast_mode = !dw.broadcast_mode;
+                                    dw.tabs[dw.active_tab].broadcast_enabled = !dw.tabs[dw.active_tab].broadcast_enabled;
                                 }
 
                             });
@@ -797,7 +846,7 @@ impl eframe::App for PortalApp {
                                 };
                                 status_btn(ui, &conn_type, conn_color);
                                 // Broadcast indicator
-                                if dw.broadcast_mode {
+                                if dw.tabs[dw.active_tab].broadcast_enabled {
                                     ui.add_space(12.0);
                                     ui.label(egui::RichText::new("|").color(sep_color).size(12.0));
                                     ui.add_space(12.0);
@@ -918,37 +967,39 @@ impl eframe::App for PortalApp {
                                 let active = dw.active_tab;
                                 let focused = dw.tabs[active].focused_session;
                                 let can_close = dw.tabs.len() > 1 || dw.tabs[active].sessions.len() > 1;
-                                let broadcast = dw.broadcast_mode;
                                 let pane_result = {
                                     let tab = &mut dw.tabs[active];
+                                    // Create a temporary broadcast state from the tab's broadcast_enabled flag
+                                    let temp_broadcast = BroadcastState {
+                                        enabled: tab.broadcast_enabled,
+                                    };
                                     render_pane_tree(
                                         ui, ctx,
                                         &mut tab.layout,
                                         available,
                                         &mut tab.sessions,
                                         focused,
+                                        &temp_broadcast,
                                         &mut dw.ime_composing,
                                         &mut dw.ime_preedit,
                                         can_close,
                                         &self.theme,
                                         self.font_size,
                                         &self.language,
-                                        broadcast,
                                     )
                                 };
                                 if let Some((idx, action, input_bytes)) = pane_result {
                                     dw.tabs[active].focused_session = idx;
-                                    // Broadcast input to all sessions across all tabs in this window
-                                    if dw.broadcast_mode && !input_bytes.is_empty() {
-                                        for (tab_idx, tab) in dw.tabs.iter_mut().enumerate() {
-                                            for (sess_idx, session) in tab.sessions.iter_mut().enumerate() {
-                                                if tab_idx == active && sess_idx == idx {
-                                                    continue;
-                                                }
-                                                if let Some(ref mut backend) = session.session {
-                                                    if backend.is_connected() {
-                                                        let _ = backend.write(&input_bytes);
-                                                    }
+                                    // Broadcast input to all sessions in current tab
+                                    if dw.tabs[active].broadcast_enabled && !input_bytes.is_empty() {
+                                        for (sess_idx, session) in dw.tabs[active].sessions.iter_mut().enumerate() {
+                                            // Skip focused session (already handled)
+                                            if sess_idx == idx {
+                                                continue;
+                                            }
+                                            if let Some(ref mut backend) = session.session {
+                                                if backend.is_connected() {
+                                                    let _ = backend.write(&input_bytes);
                                                 }
                                             }
                                         }
@@ -1019,7 +1070,7 @@ impl eframe::App for PortalApp {
                                             }
                                         }
                                         PaneAction::ToggleBroadcast => {
-                                            dw.broadcast_mode = !dw.broadcast_mode;
+                                            dw.tabs[active].broadcast_enabled = !dw.tabs[active].broadcast_enabled;
                                         }
                                     }
                                 }
@@ -1035,6 +1086,10 @@ impl eframe::App for PortalApp {
                             }
                             AppView::Settings => {
                                 self.show_settings_view(ctx, ui);
+                            }
+                            AppView::Batch => {
+                                self.check_batch_execution_updates();
+                                self.show_batch_page(ctx);
                             }
                         }
                     });
@@ -1067,11 +1122,10 @@ impl eframe::App for PortalApp {
                         ime_composing: false,
                         ime_preedit: String::new(),
                         next_id,
-                        tab_drag_source: None,
-                        tab_drag_target: None,
+                        tab_drag: TabDragState::default(),
                         show_shell_picker: false,
                         show_encoding_picker: false,
-                        broadcast_mode: false,
+                        broadcast_state: BroadcastState::default(),
                     });
                 }
             }
@@ -1122,13 +1176,18 @@ impl eframe::App for PortalApp {
                     let mut tab_to_reconnect: Option<usize> = None;
                     let mut tab_to_detach: Option<usize> = None;
                     let mut tab_rects: Vec<egui::Rect> = Vec::with_capacity(self.tabs.len());
+                    let tab_bar_rect = ui.max_rect(); // Track tab bar area for drag-out detection
 
                     for (i, tab) in self.tabs.iter().enumerate() {
                         let is_active = i == self.active_tab;
-                        let is_drag_target = self.tab_drag_source.is_some() && self.tab_drag_target == Some(i);
+                        let is_drag_target = self.tab_drag.source_index.is_some() && self.tab_drag.target_index == Some(i);
+                        let is_broadcasting = tab.broadcast_enabled;
 
                         let tab_fill = if is_active {
                             self.theme.bg_elevated
+                        } else if is_broadcasting {
+                            // Broadcast mode: highlight with a distinct color
+                            egui::Color32::from_rgba_unmultiplied(60, 40, 100, 255)
                         } else {
                             egui::Color32::TRANSPARENT
                         };
@@ -1159,7 +1218,7 @@ impl eframe::App for PortalApp {
                                 ui.label(egui::RichText::new("●").color(dot_color).size(8.0));
 
                                 // Broadcast indicator
-                                if self.broadcast_mode {
+                                if is_broadcasting {
                                     ui.label(egui::RichText::new("◉").color(self.theme.accent).size(11.0));
                                 }
 
@@ -1211,16 +1270,14 @@ impl eframe::App for PortalApp {
                             }
                         }
                         if sense_resp.drag_started() {
-                            self.tab_drag_source = Some(i);
+                            self.tab_drag.source_index = Some(i);
+                            self.tab_drag.ghost_title = tab.title.clone();
+                            self.tab_drag.ghost_size = tab_rect.size();
                         }
-                        // Tab context menu
+                        // Tab context menu (close tab only)
                         let tab_count = self.tabs.len();
                         let tab_idx = i;
                         sense_resp.context_menu(|ui| {
-                            if ui.add_enabled(tab_count > 1, egui::Button::new(self.language.t("detach_window"))).clicked() {
-                                tab_to_detach = Some(tab_idx);
-                                ui.close_menu();
-                            }
                             if ui.add_enabled(tab_count > 1, egui::Button::new(self.language.t("close_tab"))).clicked() {
                                 tab_to_close = Some(tab_idx);
                                 ui.close_menu();
@@ -1228,21 +1285,52 @@ impl eframe::App for PortalApp {
                         });
                     }
 
-                    // Track drag target based on pointer position
-                    if self.tab_drag_source.is_some() {
+                    // Draw drag ghost and handle reorder
+                    if let Some(src) = self.tab_drag.source_index {
                         if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                            self.tab_drag_target = None;
+                            self.tab_drag.target_index = None;
                             for (i, rect) in tab_rects.iter().enumerate() {
-                                if rect.contains(pos) && Some(i) != self.tab_drag_source {
-                                    self.tab_drag_target = Some(i);
+                                if rect.contains(pos) && Some(i) != self.tab_drag.source_index {
+                                    self.tab_drag.target_index = Some(i);
                                     break;
                                 }
                             }
+
+                            // Draw ghost tab at cursor position
+                            let ghost_rect = egui::Rect::from_center_size(
+                                pos,
+                                self.tab_drag.ghost_size
+                            );
+                            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("tab_ghost")));
+                            painter.rect_filled(
+                                ghost_rect,
+                                egui::Rounding::same(8.0),
+                                egui::Color32::from_rgba_unmultiplied(40, 40, 50, 200)
+                            );
+                            painter.rect_stroke(
+                                ghost_rect,
+                                egui::Rounding::same(8.0),
+                                egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(150, 150, 170, 150))
+                            );
+
+                            // Draw ghost text
+                            let text_pos = egui::pos2(
+                                ghost_rect.min.x + 12.0,
+                                ghost_rect.center().y - 7.0
+                            );
+                            painter.text(
+                                text_pos,
+                                egui::Align2::LEFT_CENTER,
+                                &self.tab_drag.ghost_title,
+                                egui::FontId::new(13.0, egui::FontFamily::Monospace),
+                                egui::Color32::from_rgba_unmultiplied(220, 228, 255, 180)
+                            );
                         }
 
-                        // Handle drop → merge source tab into target tab
+                        // Handle drop → merge source tab into target tab, or detach to new window
                         if ctx.input(|i| i.pointer.any_released()) {
-                            if let (Some(src), Some(dst)) = (self.tab_drag_source, self.tab_drag_target) {
+                            if let Some(dst) = self.tab_drag.target_index {
+                                // Dropping on another tab → merge
                                 if src != dst && src < self.tabs.len() && dst < self.tabs.len() {
                                     let mut src_tab = self.tabs.remove(src);
                                     // Adjust dst index after removal
@@ -1258,7 +1346,6 @@ impl eframe::App for PortalApp {
                                         first: Box::new(old_layout),
                                         second: Box::new(src_tab.layout),
                                     };
-                                    // broadcast_mode is now app-level, no per-tab merge needed
                                     // Update active_tab
                                     if self.active_tab == src {
                                         self.active_tab = dst;
@@ -1269,9 +1356,16 @@ impl eframe::App for PortalApp {
                                         self.active_tab = self.tabs.len().saturating_sub(1);
                                     }
                                 }
+                            } else {
+                                // Dropped outside tab area → detach to new window
+                                if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                                    if !tab_bar_rect.contains(pos) && src < self.tabs.len() {
+                                        tab_to_detach = Some(src);
+                                    }
+                                }
                             }
-                            self.tab_drag_source = None;
-                            self.tab_drag_target = None;
+                            self.tab_drag.source_index = None;
+                            self.tab_drag.target_index = None;
                         }
                     }
 
@@ -1310,7 +1404,6 @@ impl eframe::App for PortalApp {
                     }
 
                     // ── More menu (⋯) at far right of tab bar ──
-                    let broadcast_on = self.broadcast_mode;
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let more_menu_id = egui::Id::new("tab_bar_more_menu");
                         let show_menu = ctx.data_mut(|d| *d.get_temp_mut_or_default::<bool>(more_menu_id));
@@ -1332,27 +1425,37 @@ impl eframe::App for PortalApp {
                                     egui::Frame {
                                         fill: self.theme.bg_elevated,
                                         rounding: egui::Rounding::same(6.0),
-                                        inner_margin: egui::Margin::same(4.0),
+                                        inner_margin: egui::Margin::same(8.0),
                                         stroke: egui::Stroke::new(1.0, self.theme.border),
                                         ..Default::default()
                                     }
                                     .show(ui, |ui| {
                                         ui.set_min_width(200.0);
-                                        let broadcast_label = if broadcast_on {
+
+                                        // Broadcast toggle
+                                        ui.separator();
+                                        ui.add_space(4.0);
+                                        let current_tab_broadcast = if let Some(tab) = self.tabs.get(self.active_tab) {
+                                            tab.broadcast_enabled
+                                        } else {
+                                            false
+                                        };
+                                        let broadcast_label = if current_tab_broadcast {
                                             format!("◉ {}  ⌘⇧I", self.language.t("broadcast_off"))
                                         } else {
                                             format!("○ {}  ⌘⇧I", self.language.t("broadcast_on"))
                                         };
-                                        let btn = ui.add(
+                                        if ui.add(
                                             egui::Button::new(
                                                 egui::RichText::new(&broadcast_label)
-                                                    .color(if broadcast_on { self.theme.accent } else { self.theme.fg_primary })
+                                                    .color(if current_tab_broadcast { self.theme.accent } else { self.theme.fg_primary })
                                                     .size(13.0)
                                             )
                                             .frame(false)
-                                        );
-                                        if btn.clicked() {
-                                            self.broadcast_mode = !self.broadcast_mode;
+                                        ).clicked() {
+                                            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                                                tab.broadcast_enabled = !tab.broadcast_enabled;
+                                            }
                                             ctx.data_mut(|d| d.insert_temp(more_menu_id, false));
                                         }
                                     });
@@ -1530,7 +1633,10 @@ impl eframe::App for PortalApp {
                         status_btn(ui, &conn_type, conn_color);
 
                         // Broadcast indicator
-                        if self.broadcast_mode {
+                        let is_broadcasting = self.tabs.get(self.active_tab)
+                            .map(|t| t.broadcast_enabled)
+                            .unwrap_or(false);
+                        if is_broadcasting {
                             ui.add_space(12.0);
                             ui.label(egui::RichText::new("|").color(sep_color).size(12.0));
                             ui.add_space(12.0);
@@ -1711,37 +1817,39 @@ impl eframe::App for PortalApp {
                         let active = self.active_tab;
                         let focused = self.tabs[active].focused_session;
                         let can_close = self.tabs.len() > 1 || self.tabs[active].sessions.len() > 1;
-                        let broadcast = self.broadcast_mode;
                         let pane_result = {
                             let tab = &mut self.tabs[active];
+                            // Create a temporary broadcast state from the tab's broadcast_enabled flag
+                            let temp_broadcast = BroadcastState {
+                                enabled: tab.broadcast_enabled,
+                            };
                             render_pane_tree(
                                 ui, ctx,
                                 &mut tab.layout,
                                 available,
                                 &mut tab.sessions,
                                 focused,
+                                &temp_broadcast,
                                 &mut self.ime_composing,
                                 &mut self.ime_preedit,
                                 can_close,
                                 &self.theme,
                                 self.font_size,
                                 &self.language,
-                                broadcast,
                             )
                         };
                         if let Some((idx, action, input_bytes)) = pane_result {
                             self.tabs[active].focused_session = idx;
-                            // Broadcast input to all sessions across all tabs
-                            if self.broadcast_mode && !input_bytes.is_empty() {
-                                for (tab_idx, tab) in self.tabs.iter_mut().enumerate() {
-                                    for (sess_idx, session) in tab.sessions.iter_mut().enumerate() {
-                                        if tab_idx == active && sess_idx == idx {
-                                            continue;
-                                        }
-                                        if let Some(ref mut backend) = session.session {
-                                            if backend.is_connected() {
-                                                let _ = backend.write(&input_bytes);
-                                            }
+                            // Broadcast input to all sessions in current tab if broadcast enabled
+                            if self.tabs[active].broadcast_enabled && !input_bytes.is_empty() {
+                                for (sess_idx, session) in self.tabs[active].sessions.iter_mut().enumerate() {
+                                    // Skip focused session (already handled)
+                                    if sess_idx == idx {
+                                        continue;
+                                    }
+                                    if let Some(ref mut backend) = session.session {
+                                        if backend.is_connected() {
+                                            let _ = backend.write(&input_bytes);
                                         }
                                     }
                                 }
@@ -1752,7 +1860,7 @@ impl eframe::App for PortalApp {
                                 PaneAction::SplitVertical   => self.split_focused_pane(SplitDirection::Vertical),
                                 PaneAction::ClosePane       => self.close_pane(idx),
                                 PaneAction::ToggleBroadcast => {
-                                    self.broadcast_mode = !self.broadcast_mode;
+                                    self.tabs[active].broadcast_enabled = !self.tabs[active].broadcast_enabled;
                                 }
                             }
                         }
@@ -1768,6 +1876,11 @@ impl eframe::App for PortalApp {
 
                     AppView::Settings => {
                         self.show_settings_view(ctx, ui);
+                    }
+
+                    AppView::Batch => {
+                        self.check_batch_execution_updates();
+                        self.show_batch_page(ctx);
                     }
                 }
             });

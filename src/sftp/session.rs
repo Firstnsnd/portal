@@ -419,6 +419,11 @@ impl SftpBrowser {
         let _ = self.cmd_tx.send(SftpCommand::ListDir(path.to_string()));
     }
 
+    /// Refresh the current directory.
+    pub fn refresh(&self) {
+        self.navigate(&self.current_path);
+    }
+
     /// Navigate to the parent directory.
     pub fn navigate_up(&self) {
         let parent = if self.current_path == "/" {

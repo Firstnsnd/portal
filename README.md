@@ -107,38 +107,38 @@ cargo build --release
 
 ### macOS .dmg Installer
 
-打包脚本会自动完成构建、签名、打 DMG 三个步骤。根据是否有 Apple Developer 账号，分三种方式：
+The build script automatically completes three steps: build, sign, and package DMG. There are three methods depending on whether you have an Apple Developer account:
 
-#### 1. 本机使用（无需 Apple Developer 账号）
+#### 1. Personal Use (No Apple Developer Account Required)
 
 ```bash
-# 安装 cargo-bundle（仅首次）
+# Install cargo-bundle (first time only)
 cargo install cargo-bundle
 
-# 打包（ad-hoc 签名）
+# Build package (ad-hoc signing)
 ./scripts/build-dmg.sh
 ```
 
-产出 `target/release/Portal-0.9.1-{arch}.dmg`。
+Produces `target/release/Portal-0.9.1-{arch}.dmg`.
 
-> ad-hoc 签名的应用在其他电脑上会被 Gatekeeper 拦截，用户需要 **右键 > 打开** 绕过。
+> Ad-hoc signed applications will be blocked by Gatekeeper on other computers. Users need to **right-click > Open** to bypass.
 
-#### 2. 分发给他人（需要 Apple Developer 账号）
+#### 2. Distribution to Others (Apple Developer Account Required)
 
-先在 Keychain Access 中确认你有 `Developer ID Application: ...` 证书，然后：
+First, confirm you have a `Developer ID Application: ...` certificate in Keychain Access, then:
 
 ```bash
 SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
 ./scripts/build-dmg.sh
 ```
 
-签名后其他电脑可以直接打开，不会提示"已损坏"。但仍会显示"无法检查是否包含恶意软件"的警告。
+After signing, the app can be opened directly on other computers without the "damaged" error. However, it will still show a warning about being unable to check for malicious software.
 
-#### 3. 正式分发（签名 + 公证，无任何警告）
+#### 3. Official Distribution (Signing + Notarization, No Warnings)
 
-需要额外准备：
-1. 登录 [appleid.apple.com](https://appleid.apple.com/account/manage) 生成 **App 专用密码**
-2. 在 [developer.apple.com](https://developer.apple.com) 查看你的 **Team ID**（10 位字符）
+Additional requirements:
+1. Log in to [appleid.apple.com](https://appleid.apple.com/account/manage) to generate an **App-specific password**
+2. Check your **Team ID** (10 characters) at [developer.apple.com](https://developer.apple.com)
 
 ```bash
 SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
@@ -148,11 +148,18 @@ APPLE_PASSWORD="xxxx-xxxx-xxxx-xxxx" \
 ./scripts/build-dmg.sh
 ```
 
-脚本会自动完成签名 → 提交公证 → 等待审核 → Staple 票据，完成后用户双击即可安装，无任何安全警告。
+The script will automatically complete signing → submit for notarization → wait for approval → staple ticket. Users can then install by double-clicking without any security warnings.
 
 ## Configuration
 
 Host connections are stored in `~/Library/Application Support/portal/hosts.json`. Passwords, key passphrases, and private key contents are stored securely in the macOS Keychain. Each host's credentials appear under `Portal: <host name>` in Keychain Access. The JSON file never contains plaintext secrets.
+
+## Security Features
+
+- **SSH Host Key Verification** - Automatic detection of man-in-the-middle attacks (host key changes)
+- **known_hosts Support** - Auto-learns new hosts, detects key changes
+- **System Keychain** - Credentials stored securely in macOS Keychain
+- **Key Authentication** - Support for RSA/ED25519 and other key types
 
 ## License
 

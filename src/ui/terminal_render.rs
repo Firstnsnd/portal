@@ -2,7 +2,7 @@ use eframe::egui;
 
 use crate::ssh::SshConnectionState;
 use crate::terminal;
-use crate::ui::types::{SessionBackend, TerminalSession};
+use crate::ui::types::{SessionBackend, TerminalSession, BroadcastState};
 use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, split_rect};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
@@ -15,7 +15,9 @@ pub fn render_terminal_session(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     session: &mut TerminalSession,
-    is_focused: bool,
+    session_id: usize,
+    focused_session_id: usize,
+    broadcast_state: &BroadcastState,
     ime_composing: &mut bool,
     ime_preedit: &mut String,
     pane_rect: egui::Rect,
@@ -25,7 +27,6 @@ pub fn render_terminal_session(
     theme: &ThemeColors,
     font_size: f32,
     language: &Language,
-    broadcast_mode: bool,
 ) -> (Option<PaneAction>, Vec<u8>) {
     let font_id = egui::FontId::monospace(font_size);
     let pad_x = 8.0_f32;
@@ -62,6 +63,7 @@ pub fn render_terminal_session(
     } else if response.clicked() || response.drag_started() {
         action = Some(PaneAction::Focus);
     }
+    let is_focused = session_id == focused_session_id;
     if is_focused {
         response.request_focus();
     }
@@ -473,7 +475,7 @@ pub fn render_terminal_session(
     }
 
     // ── Broadcast mode border (accent border on non-focused panes) ──
-    if broadcast_mode && !is_focused {
+    if broadcast_state.is_active() && !is_focused {
         let painter = ui.painter_at(pane_rect);
         painter.rect_stroke(pane_rect, 0.0, egui::Stroke::new(2.0, theme.accent));
     }
@@ -499,7 +501,7 @@ pub fn render_terminal_session(
 }
 
 /// Render a single terminal pane into the given rect (thin wrapper around render_terminal_session).
-/// Returns the action (focus / split / detach) triggered by user interaction, and input bytes for broadcast.
+/// Render a single terminal pane leaf.
 #[allow(clippy::too_many_arguments)]
 pub fn render_terminal_pane(
     ui: &mut egui::Ui,
@@ -507,6 +509,7 @@ pub fn render_terminal_pane(
     session_idx: usize,
     sessions: &mut Vec<TerminalSession>,
     focused_session: usize,
+    broadcast_state: &BroadcastState,
     ime_composing: &mut bool,
     ime_preedit: &mut String,
     pane_rect: egui::Rect,
@@ -515,23 +518,22 @@ pub fn render_terminal_pane(
     theme: &ThemeColors,
     font_size: f32,
     language: &Language,
-    broadcast_mode: bool,
 ) -> (Option<PaneAction>, Vec<u8>) {
     if session_idx >= sessions.len() {
         return (None, Vec::new());
     }
-    let is_focused = session_idx == focused_session;
     let pane_id = egui::Id::new("pane").with(session_idx);
     render_terminal_session(
         ui, ctx,
         &mut sessions[session_idx],
-        is_focused,
+        session_idx,
+        focused_session,
+        broadcast_state,
         ime_composing, ime_preedit,
         pane_rect, pane_id,
         show_close_btn,
         can_close_pane,
         theme, font_size, language,
-        broadcast_mode,
     )
 }
 
@@ -545,23 +547,22 @@ pub fn render_pane_tree(
     rect: egui::Rect,
     sessions: &mut Vec<TerminalSession>,
     focused_session: usize,
+    broadcast_state: &BroadcastState,
     ime_composing: &mut bool,
     ime_preedit: &mut String,
     can_close_pane: bool,
     theme: &ThemeColors,
     font_size: f32,
     language: &Language,
-    broadcast_mode: bool,
 ) -> Option<(usize, PaneAction, Vec<u8>)> {
     match node {
         PaneNode::Terminal(idx) => {
             let (action, input_bytes) = render_terminal_pane(
-                ui, ctx, *idx, sessions, focused_session,
+                ui, ctx, *idx, sessions, focused_session, broadcast_state,
                 ime_composing, ime_preedit, rect,
                 sessions.len() > 1,
                 can_close_pane,
                 theme, font_size, language,
-                broadcast_mode,
             );
             match action {
                 Some(a) => Some((*idx, a, input_bytes)),
@@ -620,8 +621,8 @@ pub fn render_pane_tree(
                 }
             }
 
-            let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, ime_composing, ime_preedit, can_close_pane, theme, font_size, language, broadcast_mode);
-            let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, ime_composing, ime_preedit, can_close_pane, theme, font_size, language, broadcast_mode);
+            let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language);
+            let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language);
             // Prefer the pane with a non-Focus action (split) over a plain focus
             match (f1, f2) {
                 (Some((_, PaneAction::Focus, _)), Some(other)) => Some(other),

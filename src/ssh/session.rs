@@ -114,38 +114,57 @@ pub async fn connect_and_authenticate(
                 .map(|r| r.success())
                 .map_err(|e| format!("Auth error: {}", e))?
         }
-        AuthMethod::Key { key_path, passphrase, key_in_keychain } => {
+        AuthMethod::Key { key_path, key_content, passphrase, key_in_keychain } => {
             let pw = if passphrase.is_empty() {
                 None
             } else {
                 Some(passphrase.as_str())
             };
 
-            let expanded_path = if key_path.starts_with('~') {
-                if let Some(home) = dirs::home_dir() {
-                    home.join(&key_path[2..])
-                } else {
-                    std::path::PathBuf::from(key_path)
-                }
-            } else {
-                std::path::PathBuf::from(key_path)
-            };
-
             let key_pair = if *key_in_keychain {
-                // Try keychain first, fall back to key file on disk
-                if let Some(key_content) = config::load_credential(host, port, username, "privatekey", display_name) {
+                // Try keychain first
+                if let Some(stored_key) = config::load_credential(host, port, username, "privatekey", display_name) {
+                    russh::keys::decode_secret_key(&stored_key, pw)
+                        .map_err(|e| format!("Key decode failed: {}", e))?
+                } else if !key_content.is_empty() {
+                    // Use imported key content
                     russh::keys::decode_secret_key(&key_content, pw)
                         .map_err(|e| format!("Key decode failed: {}", e))?
                 } else if !key_path.is_empty() {
+                    // Fall back to local file
+                    let expanded_path = if key_path.starts_with('~') {
+                        if let Some(home) = dirs::home_dir() {
+                            home.join(&key_path[2..])
+                        } else {
+                            std::path::PathBuf::from(key_path)
+                        }
+                    } else {
+                        std::path::PathBuf::from(key_path)
+                    };
                     log::warn!("Private key not found in keychain, falling back to file: {}", key_path);
                     russh::keys::load_secret_key(&expanded_path, pw)
                         .map_err(|e| format!("Key load failed (fallback): {}", e))?
                 } else {
-                    return Err("Private key not found in keychain and no key path configured".to_string());
+                    return Err("Private key not found in keychain, no imported content, and no key path configured".to_string());
                 }
             } else {
-                russh::keys::load_secret_key(&expanded_path, pw)
-                    .map_err(|e| format!("Key load failed: {}", e))?
+                // Not using keychain - try imported content first, then local file
+                if !key_content.is_empty() {
+                    russh::keys::decode_secret_key(&key_content, pw)
+                        .map_err(|e| format!("Key decode failed: {}", e))?
+                } else {
+                    let expanded_path = if key_path.starts_with('~') {
+                        if let Some(home) = dirs::home_dir() {
+                            home.join(&key_path[2..])
+                        } else {
+                            std::path::PathBuf::from(key_path)
+                        }
+                    } else {
+                        std::path::PathBuf::from(key_path)
+                    };
+                    russh::keys::load_secret_key(&expanded_path, pw)
+                        .map_err(|e| format!("Key load failed: {}", e))?
+                }
             };
 
             let rsa_hash = handle

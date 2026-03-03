@@ -15,7 +15,10 @@ pub enum AuthMethod {
     Password { password: String },
     #[serde(rename = "key")]
     Key {
+        #[serde(default)]
         key_path: String,
+        #[serde(default)]
+        key_content: String,
         #[serde(default)]
         passphrase: String,
         #[serde(default)]
@@ -381,25 +384,39 @@ pub fn save_hosts(path: &Path, hosts: &[HostEntry]) {
                         // If keychain store failed, keep plaintext as fallback
                     }
                 }
-                AuthMethod::Key { key_path, passphrase, key_in_keychain } => {
-                    // Import private key content into keychain
-                    if !key_path.is_empty() && !*key_in_keychain {
-                        let expanded = if key_path.starts_with('~') {
-                            if let Some(home) = dirs::home_dir() {
-                                home.join(&key_path[2..]).to_string_lossy().to_string()
+                AuthMethod::Key { key_path, key_content, passphrase, key_in_keychain } => {
+                    // Import private key content into keychain (from file or pasted content)
+                    if !*key_in_keychain {
+                        let key_data = if !key_content.is_empty() {
+                            // Use pasted key content
+                            key_content.clone()
+                        } else if !key_path.is_empty() {
+                            // Read from local file
+                            let expanded = if key_path.starts_with('~') {
+                                if let Some(home) = dirs::home_dir() {
+                                    home.join(&key_path[2..]).to_string_lossy().to_string()
+                                } else {
+                                    key_path.clone()
+                                }
                             } else {
                                 key_path.clone()
+                            };
+                            match std::fs::read_to_string(&expanded) {
+                                Ok(content) => content,
+                                Err(e) => {
+                                    log::warn!("Failed to read key file {}: {}", expanded, e);
+                                    String::new()
+                                }
                             }
                         } else {
-                            key_path.clone()
+                            String::new()
                         };
-                        if let Ok(content) = std::fs::read_to_string(&expanded) {
-                            if store_credential(&h.host, h.port, &h.username, "privatekey", &content, &h.name) {
+
+                        if !key_data.is_empty() {
+                            if store_credential(&h.host, h.port, &h.username, "privatekey", &key_data, &h.name) {
                                 *key_in_keychain = true;
                                 log::info!("Imported private key into keychain for {}@{}:{}", h.username, h.host, h.port);
                             }
-                        } else {
-                            log::warn!("Failed to read key file: {}", expanded);
                         }
                     }
                     if !passphrase.is_empty() {
