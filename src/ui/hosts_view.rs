@@ -161,11 +161,8 @@ impl PortalApp {
 
                         // Filter bar (in content area, right-aligned with margin)
                         ui.horizontal(|ui| {
-                            // Left side spacer
-                            ui.add_space(24.0);
-
-                            // Right-aligned filters
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Add left space to push content to the right
+                            ui.add_space(ui.available_width() - 210.0); // Adjusted for narrower filters
 
                             // Group filter dropdown
                             let group_label = if self.host_filter.group.is_empty() {
@@ -256,7 +253,6 @@ impl PortalApp {
                                     self.host_filter.clear();
                                 }
                             }
-                            });
                         });
 
                         ui.add_space(12.0);
