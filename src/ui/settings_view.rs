@@ -1,7 +1,8 @@
 use eframe::egui;
 
 use crate::PortalApp;
-use crate::ui::theme::{ThemePreset, darker, brighter};
+use crate::ui::theme::ThemePreset;
+use crate::ui::theme::{darker, brighter};
 use crate::ui::i18n::Language;
 
 impl PortalApp {
@@ -120,7 +121,6 @@ impl PortalApp {
             } else {
                 Some(self.custom_font_path.clone())
             },
-            theme_preset: self.theme_preset.id().to_string(),
             language: self.language.id().to_string(),
         };
         crate::config::save_settings(&settings);
@@ -185,8 +185,6 @@ impl PortalApp {
                 ui.label(egui::RichText::new(lang.t("theme")).color(theme.fg_primary).size(14.0).strong());
                 ui.add_space(4.0);
 
-                ui.label(egui::RichText::new(lang.t("theme_preset")).color(theme.fg_dim).size(12.0));
-                ui.add_space(4.0);
                 for preset in ThemePreset::all() {
                     if ui.selectable_value(&mut self.theme_preset, *preset, preset.label()).clicked() {
                         self.theme = self.theme_preset.colors();

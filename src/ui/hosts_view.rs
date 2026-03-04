@@ -1,4 +1,5 @@
 use eframe::egui;
+use egui::Widget;
 use std::sync::{Arc, Mutex};
 
 use crate::PortalApp;
@@ -98,33 +99,163 @@ impl PortalApp {
     }
 
     /// Full hosts page content (used by both main and detached windows)
-    pub fn show_hosts_page(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
+    pub fn show_hosts_page(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.add_space(0.0);
         let mut new_local_session = false;
         let mut connect_ssh_host: Option<usize> = None;
         let mut edit_host_index: Option<usize> = None;
 
-        egui::ScrollArea::vertical()
-            .id_salt("hosts_page_scroll")
-            .show(ui, |ui| {
-            ui.add_space(20.0);
-
-            // Page header
-            ui.horizontal(|ui| {
-                ui.add_space(24.0);
-                ui.label(egui::RichText::new(self.language.t("hosts")).color(self.theme.fg_dim).size(12.0).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(24.0);
-
-                    if ui.add(
-                        egui::Button::new(egui::RichText::new(self.language.t("new_host")).color(self.theme.accent).size(12.0))
-                            .frame(false)
-                    ).clicked() {
-                        self.add_host_dialog.open_new();
+        // Collect all unique groups and tags
+        let mut all_groups: Vec<String> = Vec::new();
+        let mut all_tags: Vec<String> = Vec::new();
+        for host in &self.hosts {
+            if !host.is_local {
+                if !host.group.is_empty() && !all_groups.contains(&host.group) {
+                    all_groups.push(host.group.clone());
+                }
+                for tag in &host.tags {
+                    if !all_tags.contains(tag) {
+                        all_tags.push(tag.clone());
                     }
+                }
+            }
+        }
+        all_groups.sort();
+        all_tags.sort();
+
+        // Top navigation bar (matching terminal tab bar style)
+        egui::TopBottomPanel::top("hosts_nav_bar")
+            .frame(egui::Frame {
+                fill: self.theme.bg_secondary,
+                inner_margin: egui::Margin::symmetric(16.0, 8.0),
+                stroke: egui::Stroke::NONE,
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    // Left side: Hosts title
+                    ui.label(egui::RichText::new(self.language.t("hosts")).color(self.theme.fg_dim).size(13.0).strong());
+
+                    // Right side: New Host button
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(
+                            egui::Button::new(egui::RichText::new(self.language.t("new_host")).color(self.theme.accent).size(12.0))
+                                .frame(false)
+                        ).clicked() {
+                            self.add_host_dialog.open_new();
+                        }
+                    });
                 });
             });
-            ui.add_space(16.0);
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame {
+                fill: self.theme.bg_primary,
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("hosts_page_scroll")
+                    .show(ui, |ui| {
+                        ui.add_space(12.0);
+
+                        // Filter bar (in content area, right-aligned with margin)
+                        ui.horizontal(|ui| {
+                            // Add left space to push content to the right
+                            ui.add_space(ui.available_width() - 210.0); // Adjusted for narrower filters
+
+                            // Group filter dropdown
+                            let group_label = if self.host_filter.group.is_empty() {
+                                "Group".to_string()
+                            } else {
+                                self.host_filter.group.clone()
+                            };
+                            egui::ComboBox::from_id_salt("group_filter")
+                                .selected_text(egui::RichText::new(group_label).color(self.theme.accent).size(12.0))
+                                .width(90.0)
+                                .show_ui(ui, |ui| {
+                                    ui.style_mut().visuals.widgets.inactive.bg_fill = self.theme.bg_elevated;
+                                    ui.style_mut().visuals.widgets.hovered.bg_fill = self.theme.bg_primary;
+                                    ui.style_mut().visuals.selection.bg_fill = self.theme.accent_alpha(30);
+                                    // Hide checkbox for selected items
+                                    ui.style_mut().visuals.selection.stroke = egui::Stroke::NONE;
+
+                                    // All option
+                                    if egui::Button::new(
+                                        egui::RichText::new("All")
+                                            .color(if self.host_filter.group.is_empty() { self.theme.accent } else { self.theme.fg_primary })
+                                            .size(12.0)
+                                    ).frame(false).ui(ui).clicked() {
+                                        self.host_filter.group.clear();
+                                        ui.close_menu();
+                                    }
+
+                                    for group in &all_groups {
+                                        if egui::Button::new(
+                                            egui::RichText::new(group)
+                                                .color(if self.host_filter.group == *group { self.theme.accent } else { self.theme.fg_primary })
+                                                .size(12.0)
+                                        ).frame(false).ui(ui).clicked() {
+                                            self.host_filter.group = group.clone();
+                                            ui.close_menu();
+                                        }
+                                    }
+                                });
+
+                            ui.add_space(6.0);
+
+                            // Tag filter dropdown
+                            let tag_label = if self.host_filter.tag.is_empty() {
+                                "Tag".to_string()
+                            } else {
+                                self.host_filter.tag.clone()
+                            };
+                            egui::ComboBox::from_id_salt("tag_filter")
+                                .selected_text(egui::RichText::new(tag_label).color(self.theme.accent).size(12.0))
+                                .width(90.0)
+                                .show_ui(ui, |ui| {
+                                    ui.style_mut().visuals.widgets.inactive.bg_fill = self.theme.bg_elevated;
+                                    ui.style_mut().visuals.widgets.hovered.bg_fill = self.theme.bg_primary;
+                                    ui.style_mut().visuals.selection.bg_fill = self.theme.accent_alpha(30);
+                                    // Hide checkbox for selected items
+                                    ui.style_mut().visuals.selection.stroke = egui::Stroke::NONE;
+
+                                    // All option
+                                    if egui::Button::new(
+                                        egui::RichText::new("All")
+                                            .color(if self.host_filter.tag.is_empty() { self.theme.accent } else { self.theme.fg_primary })
+                                            .size(12.0)
+                                    ).frame(false).ui(ui).clicked() {
+                                        self.host_filter.tag.clear();
+                                        ui.close_menu();
+                                    }
+
+                                    for tag in &all_tags {
+                                        if egui::Button::new(
+                                            egui::RichText::new(tag)
+                                                .color(if self.host_filter.tag == *tag { self.theme.accent } else { self.theme.fg_primary })
+                                                .size(12.0)
+                                        ).frame(false).ui(ui).clicked() {
+                                            self.host_filter.tag = tag.clone();
+                                            ui.close_menu();
+                                        }
+                                    }
+                                });
+
+                            ui.add_space(8.0);
+
+                            // Clear button
+                            if self.host_filter.is_active() {
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new("Clear").color(self.theme.accent).size(12.0))
+                                        .frame(false)
+                                ).clicked() {
+                                    self.host_filter.clear();
+                                }
+                            }
+                        });
+
+                        ui.add_space(12.0);
 
             // LOCAL section
             ui.horizontal(|ui| {
@@ -135,6 +266,7 @@ impl PortalApp {
 
             for (_i, host) in self.hosts.iter().enumerate() {
                 if !host.is_local { continue; }
+                // Apply filter (local hosts only filtered by search if we had search)
                 let width = ui.available_width();
                 let (rect, resp) = ui.allocate_exact_size(
                     egui::vec2(width, 36.0),
@@ -175,17 +307,24 @@ impl PortalApp {
             });
             ui.add_space(4.0);
 
-            // Collect groups
+            // Collect groups (from filtered hosts)
             let mut groups: Vec<String> = Vec::new();
             for host in &self.hosts {
                 if !host.is_local && !host.group.is_empty() && !groups.contains(&host.group) {
-                    groups.push(host.group.clone());
+                    // Apply filter to group collection
+                    if self.host_filter.matches(host) {
+                        groups.push(host.group.clone());
+                    }
                 }
             }
 
             // Ungrouped SSH hosts
             for (i, host) in self.hosts.iter().enumerate() {
                 if host.is_local || !host.group.is_empty() { continue; }
+                // Apply filter
+                if !self.host_filter.matches(host) {
+                    continue;
+                }
                 let row_h = 44.0;
                 let width = ui.available_width();
                 let (rect, resp) = ui.allocate_exact_size(
@@ -268,6 +407,10 @@ impl PortalApp {
                 ui.add_space(2.0);
                 for (i, host) in self.hosts.iter().enumerate() {
                     if host.is_local || host.group != *group { continue; }
+                    // Apply filter
+                    if !self.host_filter.matches(host) {
+                        continue;
+                    }
                     let row_h = 44.0;
                     let width = ui.available_width();
                     let (rect, resp) = ui.allocate_exact_size(
@@ -339,6 +482,7 @@ impl PortalApp {
 
             ui.add_space(20.0);
         }); // end ScrollArea
+    }); // end CentralPanel
 
         // Deferred actions (after borrows of self.hosts are done)
         if new_local_session {
@@ -479,6 +623,18 @@ impl PortalApp {
                         });
 
                         ui.add_space(8.0);
+
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Tags").color(theme.fg_dim).size(12.0));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.add_host_dialog.tags)
+                                    .hint_text(egui::RichText::new("web, database, production").color(theme.hint_color()).italics())
+                                    .desired_width(f32::INFINITY)
+                                    .text_color(theme.fg_primary)
+                            );
+                        });
+
+                        ui.add_space(8.0);
                         ui.separator();
                         ui.add_space(8.0);
 
@@ -554,20 +710,7 @@ impl PortalApp {
 
                                 match self.add_host_dialog.key_source {
                                     KeySourceChoice::LocalFile => {
-                                        ui.horizontal(|ui| {
-                                            ui.label(egui::RichText::new(lang.t("key_path")).color(theme.fg_dim).size(12.0));
-                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                if ui.add(
-                                                    egui::Button::new(
-                                                        egui::RichText::new("📁 Browse").size(11.0)
-                                                    )
-                                                    .rounding(4.0)
-                                                    .fill(theme.bg_elevated)
-                                                ).clicked() {
-                                                    self.add_host_dialog.show_file_dialog = true;
-                                                }
-                                            });
-                                        });
+                                        ui.label(egui::RichText::new(lang.t("key_path")).color(theme.fg_dim).size(12.0));
                                         ui.add(
                                             egui::TextEdit::singleline(&mut self.add_host_dialog.key_path)
                                                 .hint_text(egui::RichText::new("~/.ssh/id_rsa").color(theme.hint_color()).italics())
@@ -644,10 +787,10 @@ impl PortalApp {
 
                         ui.horizontal(|ui| {
                             if ui.add(
-                                egui::Button::new(egui::RichText::new(lang.t("save")).color(theme.bg_primary).size(13.0))
+                                egui::Button::new(egui::RichText::new(lang.t("save")).color(theme.bg_primary).size(12.0))
                                     .fill(theme.accent)
-                                    .rounding(6.0)
-                                    .min_size(egui::vec2(80.0, 36.0))
+                                    .rounding(4.0)
+                                    .min_size(egui::vec2(70.0, 28.0))
                             ).clicked() {
                                 save_clicked = true;
                             }
@@ -657,10 +800,10 @@ impl PortalApp {
                             let is_testing = matches!(self.add_host_dialog.test_conn_state, TestConnState::Testing);
                             if ui.add_enabled(
                                 !is_testing,
-                                egui::Button::new(egui::RichText::new(lang.t("test")).color(theme.fg_primary).size(13.0))
+                                egui::Button::new(egui::RichText::new(lang.t("test")).color(theme.fg_primary).size(12.0))
                                     .fill(theme.bg_elevated)
-                                    .rounding(6.0)
-                                    .min_size(egui::vec2(80.0, 36.0))
+                                    .rounding(4.0)
+                                    .min_size(egui::vec2(70.0, 28.0))
                             ).clicked() {
                                 test_clicked = true;
                             }
@@ -780,6 +923,17 @@ impl PortalApp {
                 auth,
             );
 
+            // Parse tags from comma-separated string
+            let tags: Vec<String> = self.add_host_dialog.tags
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            // Create entry with tags
+            let mut entry = entry;
+            entry.tags = tags;
+
             if let Some(idx) = self.add_host_dialog.edit_index {
                 if idx < self.hosts.len() {
                     self.hosts[idx] = entry;
@@ -790,34 +944,6 @@ impl PortalApp {
 
             self.save_hosts();
             self.add_host_dialog.reset();
-        }
-
-        // Handle file dialog for selecting SSH private key file path
-        if self.add_host_dialog.show_file_dialog {
-            self.add_host_dialog.show_file_dialog = false;
-            let (tx, rx) = std::sync::mpsc::channel();
-            self.add_host_dialog.pending_file_path = Some(rx);
-
-            // Use blocking file dialog in a separate thread
-            std::thread::spawn(move || {
-                let dialog = rfd::FileDialog::new()
-                    .add_filter("SSH Keys", &["pem", "key", "ppk"])
-                    .add_filter("All Files", &["*"])
-                    .set_title("Select SSH Private Key");
-
-                if let Some(file) = dialog.pick_file() {
-                    // Send the file path as string
-                    let _ = tx.send(file.to_string_lossy().to_string());
-                }
-            });
-        }
-
-        // Check for pending file path from file dialog
-        if let Some(ref rx) = self.add_host_dialog.pending_file_path {
-            if let Ok(path) = rx.try_recv() {
-                self.add_host_dialog.key_path = path;
-                self.add_host_dialog.pending_file_path = None;
-            }
         }
     }
 

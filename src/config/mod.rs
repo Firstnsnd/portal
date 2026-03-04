@@ -38,6 +38,8 @@ pub struct HostEntry {
     #[serde(default)]
     pub group: String,
     #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
     pub is_local: bool,
     #[serde(default)]
     pub auth: AuthMethod,
@@ -55,6 +57,7 @@ impl HostEntry {
             port: 0,
             username: String::new(),
             group: String::new(),
+            tags: Vec::new(),
             is_local: true,
             auth: AuthMethod::None,
         }
@@ -67,6 +70,7 @@ impl HostEntry {
             port,
             username,
             group,
+            tags: Vec::new(),
             is_local: false,
             auth,
         }
@@ -251,14 +255,11 @@ pub struct PortalSettings {
     pub font_size: f32,
     #[serde(default)]
     pub custom_font_path: Option<String>,
-    #[serde(default = "default_theme_preset")]
-    pub theme_preset: String,
     #[serde(default = "default_language")]
     pub language: String,
 }
 
 fn default_font_size() -> f32 { 14.0 }
-fn default_theme_preset() -> String { "tokyo_night".to_string() }
 fn default_language() -> String { "en".to_string() }
 
 impl Default for PortalSettings {
@@ -266,7 +267,6 @@ impl Default for PortalSettings {
         Self {
             font_size: 14.0,
             custom_font_path: None,
-            theme_preset: "tokyo_night".to_string(),
             language: "en".to_string(),
         }
     }
