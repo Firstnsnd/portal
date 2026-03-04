@@ -325,7 +325,7 @@ impl PortalApp {
                 if !self.host_filter.matches(host) {
                     continue;
                 }
-                let row_h = 44.0;
+                let row_h = 52.0;  // Increased for shadcn-style spacing
                 let width = ui.available_width();
                 let (rect, resp) = ui.allocate_exact_size(
                     egui::vec2(width, row_h),
@@ -341,7 +341,7 @@ impl PortalApp {
                 }
                 // Icon
                 ui.painter().text(
-                    egui::pos2(rect.min.x + 24.0, rect.center().y),
+                    egui::pos2(rect.min.x + 24.0, rect.min.y + 18.0),
                     egui::Align2::LEFT_CENTER,
                     "@",
                     egui::FontId::proportional(12.0),
@@ -349,7 +349,7 @@ impl PortalApp {
                 );
                 // Host name
                 ui.painter().text(
-                    egui::pos2(rect.min.x + 46.0, rect.center().y - 7.0),
+                    egui::pos2(rect.min.x + 46.0, rect.min.y + 18.0),
                     egui::Align2::LEFT_CENTER,
                     &host.name,
                     egui::FontId::proportional(13.0),
@@ -362,22 +362,21 @@ impl PortalApp {
                     format!("{}@{}:{}", host.username, host.host, host.port)
                 };
                 ui.painter().text(
-                    egui::pos2(rect.min.x + 46.0, rect.center().y + 8.0),
+                    egui::pos2(rect.min.x + 46.0, rect.min.y + 34.0),
                     egui::Align2::LEFT_CENTER,
                     detail,
                     egui::FontId::proportional(10.0),
                     self.theme.fg_dim,
                 );
 
-                // Tags (subtle, italic, displayed below host info)
+                // Tags (subtle, italic, displayed below detail with shadcn-style spacing)
                 if !host.tags.is_empty() {
                     let tag_text = host.tags.join(", ");
-                    // Use a small area to position the tag label
                     let tag_rect = egui::Rect::from_min_max(
-                        egui::pos2(rect.min.x + 46.0, rect.max.y - 11.0),
-                        egui::pos2(rect.max.x, rect.max.y - 2.0),
+                        egui::pos2(rect.min.x + 46.0, rect.min.y + 42.0),
+                        egui::pos2(rect.max.x, rect.max.y - 4.0),
                     );
-                    let _ = ui.allocate_ui_at_rect(tag_rect, |ui| {
+                    let _ = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(tag_rect), |ui| {
                         ui.label(egui::RichText::new(format!("• {}", tag_text))
                             .italics()
                             .size(9.0)
@@ -389,7 +388,7 @@ impl PortalApp {
                 // Use screen right edge for consistent positioning regardless of filter
                 let screen_right = ui.ctx().input(|i| i.screen_rect().max.x);
                 let btn_rect = egui::Rect::from_center_size(
-                    egui::pos2(screen_right - 70.0, rect.center().y),
+                    egui::pos2(screen_right - 70.0, rect.min.y + 26.0),
                     egui::vec2(56.0, 22.0),
                 );
                 if hovered {
@@ -430,7 +429,7 @@ impl PortalApp {
                     if !self.host_filter.matches(host) {
                         continue;
                     }
-                    let row_h = 44.0;
+                    let row_h = 52.0;  // Increased for shadcn-style spacing
                     let width = ui.available_width();
                     let (rect, resp) = ui.allocate_exact_size(
                         egui::vec2(width, row_h),
@@ -445,14 +444,14 @@ impl PortalApp {
                         ui.painter().rect_filled(rect, 0.0, self.theme.hover_bg);
                     }
                     ui.painter().text(
-                        egui::pos2(rect.min.x + 24.0, rect.center().y),
+                        egui::pos2(rect.min.x + 24.0, rect.min.y + 18.0),
                         egui::Align2::LEFT_CENTER,
                         "@",
                         egui::FontId::proportional(12.0),
                         self.theme.accent,
                     );
                     ui.painter().text(
-                        egui::pos2(rect.min.x + 46.0, rect.center().y - 7.0),
+                        egui::pos2(rect.min.x + 46.0, rect.min.y + 18.0),
                         egui::Align2::LEFT_CENTER,
                         &host.name,
                         egui::FontId::proportional(13.0),
@@ -464,22 +463,21 @@ impl PortalApp {
                         format!("{}@{}:{}", host.username, host.host, host.port)
                     };
                     ui.painter().text(
-                        egui::pos2(rect.min.x + 46.0, rect.center().y + 8.0),
+                        egui::pos2(rect.min.x + 46.0, rect.min.y + 34.0),
                         egui::Align2::LEFT_CENTER,
                         detail,
                         egui::FontId::proportional(10.0),
                         self.theme.fg_dim,
                     );
 
-                    // Tags (subtle, italic, displayed below host info)
+                    // Tags (subtle, italic, displayed below detail with shadcn-style spacing)
                     if !host.tags.is_empty() {
                         let tag_text = host.tags.join(", ");
-                        // Use a small area to position the tag label
                         let tag_rect = egui::Rect::from_min_max(
-                            egui::pos2(rect.min.x + 46.0, rect.max.y - 11.0),
-                            egui::pos2(rect.max.x, rect.max.y - 2.0),
+                            egui::pos2(rect.min.x + 46.0, rect.min.y + 42.0),
+                            egui::pos2(rect.max.x, rect.max.y - 4.0),
                         );
-                        let _ = ui.allocate_ui_at_rect(tag_rect, |ui| {
+                        let _ = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(tag_rect), |ui| {
                             ui.label(egui::RichText::new(format!("• {}", tag_text))
                                 .italics()
                                 .size(9.0)
@@ -491,7 +489,7 @@ impl PortalApp {
                     // Use screen right edge for consistent positioning regardless of filter
                     let screen_right = ui.ctx().input(|i| i.screen_rect().max.x);
                     let btn_rect = egui::Rect::from_center_size(
-                        egui::pos2(screen_right - 70.0, rect.center().y),
+                        egui::pos2(screen_right - 70.0, rect.min.y + 26.0),
                         egui::vec2(56.0, 22.0),
                     );
                     if hovered {
