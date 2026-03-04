@@ -369,8 +369,9 @@ impl PortalApp {
                     self.theme.fg_dim,
                 );
                 // Edit button (only visible on hover)
+                // Position from right edge to avoid being cut off by filter bar or window edges
                 let btn_rect = egui::Rect::from_center_size(
-                    egui::pos2(rect.max.x - 50.0, rect.center().y),
+                    egui::pos2(rect.max.x - 70.0, rect.center().y),
                     egui::vec2(56.0, 22.0),
                 );
                 if hovered {
@@ -400,19 +401,10 @@ impl PortalApp {
             // Grouped SSH hosts
             for group in &groups {
                 ui.add_space(12.0);
-                // Allocate space for group label
-                let label_rect = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), 16.0),
-                    egui::Sense::hover()
-                ).0;
-                // Draw group label directly to avoid layout interference
-                ui.painter().text(
-                    egui::pos2(label_rect.min.x + 24.0, label_rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    group,
-                    egui::FontId::proportional(10.0),
-                    self.theme.fg_dim,
-                );
+                ui.horizontal(|ui| {
+                    ui.add_space(24.0);
+                    ui.label(egui::RichText::new(group).color(self.theme.fg_dim).size(10.0));
+                });
                 ui.add_space(2.0);
                 for (i, host) in self.hosts.iter().enumerate() {
                     if host.is_local || host.group != *group { continue; }
@@ -461,7 +453,7 @@ impl PortalApp {
                         self.theme.fg_dim,
                     );
                     let btn_rect = egui::Rect::from_center_size(
-                        egui::pos2(rect.max.x - 50.0, rect.center().y),
+                        egui::pos2(rect.max.x - 70.0, rect.center().y),
                         egui::vec2(56.0, 22.0),
                     );
                     if hovered {
