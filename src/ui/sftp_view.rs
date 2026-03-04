@@ -1211,7 +1211,7 @@ impl PortalApp {
             }
             if should_cancel {
                 // Cancel transfer outside the immutable borrow
-                drop(browser);
+                let _ = browser;
                 if let Some(ref mut b) = self.sftp_browser.as_mut() {
                     b.cancel_transfer();
                 }

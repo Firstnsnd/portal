@@ -143,6 +143,7 @@ impl ThemePreset {
         }
     }
 
+    #[allow(dead_code)]
     pub fn id(&self) -> &'static str {
         match self {
             ThemePreset::TokyoNight => "tokyo_night",
@@ -163,6 +164,7 @@ impl ThemePreset {
         ]
     }
 
+    #[allow(dead_code)]
     pub fn from_id(id: &str) -> Self {
         match id {
             "dracula" => ThemePreset::Dracula,

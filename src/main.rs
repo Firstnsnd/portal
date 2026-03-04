@@ -1825,7 +1825,7 @@ impl eframe::App for PortalApp {
                     }
                 }
             }
-            if let Some((path, size)) = browser.pending_file_too_large.take() {
+            if let Some((_path, size)) = browser.pending_file_too_large.take() {
                 if let Some(ref mut dialog) = self.sftp_editor_dialog {
                     if dialog.loading && dialog.panel == ui::types::SftpPanel::RightRemote {
                         dialog.loading = false;
@@ -1863,7 +1863,7 @@ impl eframe::App for PortalApp {
                     }
                 }
             }
-            if let Some((path, size)) = browser.pending_file_too_large.take() {
+            if let Some((_path, size)) = browser.pending_file_too_large.take() {
                 if let Some(ref mut dialog) = self.sftp_editor_dialog {
                     if dialog.loading && dialog.panel == ui::types::SftpPanel::LeftRemote {
                         dialog.loading = false;

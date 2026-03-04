@@ -143,6 +143,7 @@ pub struct DetachedWindow {
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
     pub current_view: AppView,
+    #[allow(dead_code)]
     pub title: String,
     pub close_requested: bool,
     pub ime_composing: bool,
