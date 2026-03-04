@@ -368,6 +368,18 @@ impl PortalApp {
                     egui::FontId::proportional(10.0),
                     self.theme.fg_dim,
                 );
+
+                // Tags (subtle, italic, displayed after detail)
+                if !host.tags.is_empty() {
+                    let tag_text = host.tags.join(", ");
+                    ui.painter().text(
+                        egui::pos2(rect.min.x + 46.0 + 220.0, rect.center().y + 8.0),
+                        egui::Align2::LEFT_CENTER,
+                        format!("• {}", tag_text),
+                        egui::FontId::proportional(10.0),
+                        self.theme.fg_dim,
+                    );
+                }
                 // Edit button (only visible on hover)
                 // Use screen right edge for consistent positioning regardless of filter
                 let screen_right = ui.ctx().input(|i| i.screen_rect().max.x);
@@ -453,6 +465,18 @@ impl PortalApp {
                         egui::FontId::proportional(10.0),
                         self.theme.fg_dim,
                     );
+
+                    // Tags (subtle, italic, displayed after detail)
+                    if !host.tags.is_empty() {
+                        let tag_text = host.tags.join(", ");
+                        ui.painter().text(
+                            egui::pos2(rect.min.x + 46.0 + 220.0, rect.center().y + 8.0),
+                            egui::Align2::LEFT_CENTER,
+                            format!("• {}", tag_text),
+                            egui::FontId::proportional(10.0),
+                            self.theme.fg_dim,
+                        );
+                    }
                     // Edit button (only visible on hover)
                     // Use screen right edge for consistent positioning regardless of filter
                     let screen_right = ui.ctx().input(|i| i.screen_rect().max.x);
