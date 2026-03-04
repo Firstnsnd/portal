@@ -102,6 +102,7 @@ pub struct LocalBrowser {
     pub entries: Vec<SftpEntry>,
     pub selection: FileSelection,
     pub path_input: String,
+    pub show_hidden_files: bool,
 }
 
 impl LocalBrowser {
@@ -115,6 +116,7 @@ impl LocalBrowser {
             entries: Vec::new(),
             selection: FileSelection::default(),
             path_input: home,
+            show_hidden_files: false,
         };
         browser.refresh();
         browser
@@ -235,6 +237,23 @@ impl LocalBrowser {
         self.refresh();
         Ok(())
     }
+
+    /// Toggle visibility of hidden files (files starting with .).
+    pub fn toggle_hidden_files(&mut self) {
+        self.show_hidden_files = !self.show_hidden_files;
+    }
+
+    /// Get filtered entries (hides dotfiles if show_hidden_files is false).
+    pub fn filtered_entries(&self) -> Vec<SftpEntry> {
+        if self.show_hidden_files {
+            self.entries.clone()
+        } else {
+            self.entries.iter()
+                .filter(|e| !e.name.starts_with('.'))
+                .cloned()
+                .collect()
+        }
+    }
 }
 
 /// File entry returned from a directory listing
@@ -331,6 +350,7 @@ pub struct SftpBrowser {
     pub host_name: String,
     pub selection: FileSelection,
     pub path_input: String,
+    pub show_hidden_files: bool,
     cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub pending_file_content: Option<(String, Vec<u8>)>,
     pub pending_file_too_large: Option<(String, u64)>,
@@ -363,6 +383,7 @@ impl SftpBrowser {
             host_name,
             selection: FileSelection::default(),
             path_input: String::new(),
+            show_hidden_files: false,
             cancel_flag,
             pending_file_content: None,
             pending_file_too_large: None,
@@ -513,6 +534,23 @@ impl SftpBrowser {
     pub fn cancel_transfer(&mut self) {
         self.cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
         self.transfer = None;
+    }
+
+    /// Toggle visibility of hidden files (files starting with .).
+    pub fn toggle_hidden_files(&mut self) {
+        self.show_hidden_files = !self.show_hidden_files;
+    }
+
+    /// Get filtered entries (hides dotfiles if show_hidden_files is false).
+    pub fn filtered_entries(&self) -> Vec<SftpEntry> {
+        if self.show_hidden_files {
+            self.entries.clone()
+        } else {
+            self.entries.iter()
+                .filter(|e| !e.name.starts_with('.'))
+                .cloned()
+                .collect()
+        }
     }
 }
 

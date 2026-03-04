@@ -12,11 +12,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use config::HostEntry;
-use sftp::{LocalBrowser, SftpBrowser, SftpConnectionState};
+use sftp::{LocalBrowser, SftpBrowser};
 use ssh::SshConnectionState;
 
 use ui::*;
-use ui::types::BatchExecutionState;
+use ui::types::{BatchExecutionState, HostFilter};
 
 struct PortalApp {
     tabs: Vec<Tab>,
@@ -26,6 +26,7 @@ struct PortalApp {
     hosts_file: PathBuf,
     next_id: usize,
     add_host_dialog: AddHostDialog,
+    host_filter: HostFilter,
     host_to_delete: Option<usize>,
     confirm_delete_host: Option<usize>,
     ime_composing: bool,
@@ -34,8 +35,10 @@ struct PortalApp {
     // SFTP browser
     sftp_browser_left: Option<SftpBrowser>,  // Left panel SFTP connection
     sftp_browser: Option<SftpBrowser>,       // Right panel SFTP connection
-    local_browser: LocalBrowser,
-    left_panel_is_local: bool,               // true = local, false = remote
+    local_browser_left: LocalBrowser,        // Left panel local browser
+    local_browser_right: LocalBrowser,       // Right panel local browser
+    left_panel_is_local: bool,               // true = local, false = remote (left panel)
+    right_panel_is_local: bool,              // true = local, false = remote (right panel)
     sftp_context_menu: Option<SftpContextMenu>,
     sftp_rename_dialog: Option<SftpRenameDialog>,
     sftp_new_folder_dialog: Option<SftpNewFolderDialog>,
@@ -43,8 +46,10 @@ struct PortalApp {
     sftp_confirm_delete: Option<SftpConfirmDelete>,
     sftp_editor_dialog: Option<SftpEditorDialog>,
     sftp_error_dialog: Option<SftpErrorDialog>,
-    sftp_local_refresh_start: Option<std::time::Instant>,
+    sftp_local_left_refresh_start: Option<std::time::Instant>,
+    sftp_local_right_refresh_start: Option<std::time::Instant>,
     sftp_remote_refresh_start: Option<std::time::Instant>,
+    sftp_left_remote_refresh_start: Option<std::time::Instant>,
     sftp_active_panel_is_local: bool,
     // Tab drag state
     tab_drag: TabDragState,
@@ -68,7 +73,7 @@ struct PortalApp {
     keychain_confirm_delete: Option<KeychainDeleteRequest>,
     // Settings
     theme: ThemeColors,
-    theme_preset: ThemePreset,
+    theme_preset: ThemePreset, // For UI selection only, not persisted
     language: Language,
     font_size: f32,
     custom_font_path: String,
@@ -80,10 +85,11 @@ impl PortalApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Load settings
         let settings = config::load_settings();
-        let theme_preset = ThemePreset::from_id(&settings.theme_preset);
         let language = Language::from_id(&settings.language);
         let font_size = settings.font_size;
         let custom_font_path = settings.custom_font_path.clone().unwrap_or_default();
+        // Use default theme preset (Tokyo Night)
+        let theme_preset = ThemePreset::TokyoNight;
         let theme = theme_preset.colors();
 
         let mut fonts = egui::FontDefinitions::default();
@@ -168,6 +174,7 @@ impl PortalApp {
             hosts_file,
             next_id: 1,
             add_host_dialog: AddHostDialog::default(),
+            host_filter: HostFilter::default(),
             host_to_delete: None,
             confirm_delete_host: None,
             ime_composing: false,
@@ -175,8 +182,10 @@ impl PortalApp {
             runtime,
             sftp_browser_left: None,
             sftp_browser: None,
-            local_browser: LocalBrowser::new(),
+            local_browser_left: LocalBrowser::new(),
+            local_browser_right: LocalBrowser::new(),
             left_panel_is_local: true,
+            right_panel_is_local: false,
             sftp_context_menu: None,
             sftp_rename_dialog: None,
             sftp_new_folder_dialog: None,
@@ -184,8 +193,10 @@ impl PortalApp {
             sftp_confirm_delete: None,
             sftp_editor_dialog: None,
             sftp_error_dialog: None,
-            sftp_local_refresh_start: None,
+            sftp_local_left_refresh_start: None,
+            sftp_local_right_refresh_start: None,
             sftp_remote_refresh_start: None,
+            sftp_left_remote_refresh_start: None,
             sftp_active_panel_is_local: true,  // Track which panel has focus
             tab_drag: TabDragState::default(),
             available_shells,
@@ -336,6 +347,23 @@ impl eframe::App for PortalApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint_after(Duration::from_millis(16));
 
+        // Update window title based on current view and active tab
+        let title = match self.current_view {
+            AppView::Terminal => {
+                if let Some(tab) = self.tabs.get(self.active_tab) {
+                    tab.title.clone()
+                } else {
+                    "Terminal".to_string()
+                }
+            }
+            AppView::Hosts => self.language.t("hosts").to_string(),
+            AppView::Sftp => self.language.t("sftp").to_string(),
+            AppView::Keychain => self.language.t("keychain").to_string(),
+            AppView::Settings => self.language.t("settings").to_string(),
+            AppView::Batch => "Batch".to_string(),
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+
         // Apply visuals/fonts if dirty
         if self.visuals_dirty {
             self.apply_visuals(ctx);
@@ -363,12 +391,29 @@ impl eframe::App for PortalApp {
         let mut pending_detach: Vec<(usize, usize)> = Vec::new(); // (window_index, tab_index)
         for i in 0..self.detached_windows.len() {
             let viewport_id = self.detached_windows[i].viewport_id;
-            let title = self.detached_windows[i].title.clone();
             let builder = egui::ViewportBuilder::default()
-                .with_title(&title)
+                .with_title("Portal") // Initial title
                 .with_inner_size([1200.0, 800.0])
                 .with_min_inner_size([600.0, 400.0]);
             ctx.show_viewport_immediate(viewport_id, builder, |ctx, _class| {
+                // Update window title based on current view and active tab
+                let dw = &self.detached_windows[i];
+                let title = match dw.current_view {
+                    AppView::Terminal => {
+                        if let Some(tab) = dw.tabs.get(dw.active_tab) {
+                            tab.title.clone()
+                        } else {
+                            "Terminal".to_string()
+                        }
+                    }
+                    AppView::Hosts => self.language.t("hosts").to_string(),
+                    AppView::Sftp => self.language.t("sftp").to_string(),
+                    AppView::Keychain => self.language.t("keychain").to_string(),
+                    AppView::Settings => self.language.t("settings").to_string(),
+                    AppView::Batch => "Batch".to_string(),
+                };
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+
                 ctx.request_repaint_after(Duration::from_millis(16));
 
                 if ctx.input(|i| i.viewport().close_requested()) {
@@ -1759,12 +1804,12 @@ impl eframe::App for PortalApp {
             browser.poll();
             // Auto-refresh local browser after download completes
             if had_transfer && browser.transfer.is_none() && was_download {
-                self.local_browser.refresh();
+                self.local_browser_right.refresh();
             }
             // Handle async file read results for the editor
             if let Some((path, data)) = browser.pending_file_content.take() {
                 if let Some(ref mut dialog) = self.sftp_editor_dialog {
-                    if dialog.loading && !dialog.is_local {
+                    if dialog.loading && dialog.panel == ui::types::SftpPanel::RightRemote {
                         match String::from_utf8(data) {
                             Ok(text) => {
                                 dialog.content = text.clone();
@@ -1782,19 +1827,49 @@ impl eframe::App for PortalApp {
             }
             if let Some((path, size)) = browser.pending_file_too_large.take() {
                 if let Some(ref mut dialog) = self.sftp_editor_dialog {
-                    if dialog.loading && !dialog.is_local {
-                        dialog.error = format!(
-                            "File too large: {} bytes (max 10 MB)",
-                            size
-                        );
+                    if dialog.loading && dialog.panel == ui::types::SftpPanel::RightRemote {
                         dialog.loading = false;
+                        dialog.error = format!("File too large ({} bytes)", size);
                     }
-                } else {
-                    log::warn!("File too large (no editor dialog): {} ({} bytes)", path, size);
                 }
             }
-            if matches!(browser.state, SftpConnectionState::Disconnected) {
-                self.sftp_browser = None;
+        }
+
+        // ── Poll left SFTP browser ──────────────────────────────────────────
+        if let Some(ref mut browser) = self.sftp_browser_left {
+            let had_transfer = browser.transfer.is_some();
+            let was_download = browser.transfer.as_ref().map_or(false, |t| !t.is_upload);
+            browser.poll();
+            // Auto-refresh local browser after download completes
+            if had_transfer && browser.transfer.is_none() && was_download {
+                self.local_browser_left.refresh();
+            }
+            // Handle async file read results for the editor
+            if let Some((path, data)) = browser.pending_file_content.take() {
+                if let Some(ref mut dialog) = self.sftp_editor_dialog {
+                    if dialog.loading && dialog.panel == ui::types::SftpPanel::LeftRemote {
+                        match String::from_utf8(data) {
+                            Ok(text) => {
+                                dialog.content = text.clone();
+                                dialog.original_content = text;
+                                dialog.loading = false;
+                                dialog.file_path = path;
+                            }
+                            Err(_) => {
+                                dialog.error = "Not valid UTF-8".to_string();
+                                dialog.loading = false;
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some((path, size)) = browser.pending_file_too_large.take() {
+                if let Some(ref mut dialog) = self.sftp_editor_dialog {
+                    if dialog.loading && dialog.panel == ui::types::SftpPanel::LeftRemote {
+                        dialog.loading = false;
+                        dialog.error = format!("File too large ({} bytes)", size);
+                    }
+                }
             }
         }
 

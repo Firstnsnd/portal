@@ -153,6 +153,7 @@ pub struct AddHostDialog {
     pub port: String,
     pub username: String,
     pub group: String,
+    pub tags: String,
     pub error: String,
     pub auth_method: AuthMethodChoice,
     pub password: String,
@@ -163,8 +164,6 @@ pub struct AddHostDialog {
     pub key_in_keychain: bool,
     pub test_conn_state: TestConnState,
     pub test_conn_result: Option<Arc<Mutex<Option<Result<String, String>>>>>,
-    pub show_file_dialog: bool,
-    pub pending_file_path: Option<std::sync::mpsc::Receiver<String>>,
 }
 
 /// Key source choice for SSH key authentication
@@ -185,6 +184,7 @@ impl Default for AddHostDialog {
             port: "22".to_owned(),
             username: String::new(),
             group: String::new(),
+            tags: String::new(),
             error: String::new(),
             auth_method: AuthMethodChoice::Password,
             password: String::new(),
@@ -195,8 +195,6 @@ impl Default for AddHostDialog {
             key_in_keychain: false,
             test_conn_state: TestConnState::Idle,
             test_conn_result: None,
-            show_file_dialog: false,
-            pending_file_path: None,
         }
     }
 }
@@ -219,6 +217,7 @@ impl AddHostDialog {
         self.port = host.port.to_string();
         self.username = host.username.clone();
         self.group = host.group.clone();
+        self.tags = host.tags.join(", ");
         self.error = String::new();
         match &host.auth {
             crate::config::AuthMethod::Password { password } => {
@@ -457,10 +456,25 @@ impl TerminalSession {
     }
 }
 
+/// Which SFTP panel an operation targets
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SftpPanel {
+    LeftLocal,
+    RightLocal,
+    LeftRemote,
+    RightRemote,
+}
+
+impl SftpPanel {
+    pub fn is_local(self) -> bool {
+        matches!(self, SftpPanel::LeftLocal | SftpPanel::RightLocal)
+    }
+}
+
 /// SFTP right-click context menu state (supports multi-selection)
 pub struct SftpContextMenu {
     pub pos: egui::Pos2,
-    pub is_local: bool,
+    pub panel: SftpPanel,
     pub entry_indices: Vec<usize>,
     pub entry_names: Vec<String>,
     pub all_dirs: bool,
@@ -469,7 +483,7 @@ pub struct SftpContextMenu {
 
 /// SFTP rename dialog state
 pub struct SftpRenameDialog {
-    pub is_local: bool,
+    pub panel: SftpPanel,
     pub old_name: String,
     pub new_name: String,
     pub error: String,
@@ -477,21 +491,21 @@ pub struct SftpRenameDialog {
 
 /// SFTP new folder dialog state
 pub struct SftpNewFolderDialog {
-    pub is_local: bool,
+    pub panel: SftpPanel,
     pub name: String,
     pub error: String,
 }
 
 /// SFTP new file dialog state
 pub struct SftpNewFileDialog {
-    pub is_local: bool,
+    pub panel: SftpPanel,
     pub name: String,
     pub error: String,
 }
 
 /// SFTP delete confirmation dialog state (supports multi-file delete)
 pub struct SftpConfirmDelete {
-    pub is_local: bool,
+    pub panel: SftpPanel,
     pub names: Vec<String>,
 }
 
@@ -503,7 +517,7 @@ pub struct SftpErrorDialog {
 
 /// SFTP editor dialog state
 pub struct SftpEditorDialog {
-    pub is_local: bool,
+    pub panel: SftpPanel,
     pub file_path: String,
     pub file_name: String,
     pub directory: String,
@@ -567,4 +581,48 @@ pub fn load_available_shells() -> Vec<String> {
         shells.push("/bin/bash".to_string());
     }
     shells
+}
+
+/// Host filter state for the hosts list view
+#[derive(Default, Clone)]
+pub struct HostFilter {
+    /// Filter by tag (empty = show all)
+    pub tag: String,
+    /// Filter by group (empty = show all)
+    pub group: String,
+}
+
+impl HostFilter {
+    pub fn is_active(&self) -> bool {
+        !self.tag.is_empty() || !self.group.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.tag.clear();
+        self.group.clear();
+    }
+
+    /// Check if a host matches the filter criteria
+    pub fn matches(&self, host: &HostEntry) -> bool {
+        // Skip local hosts for tag/group filters
+        if host.is_local {
+            return true;
+        }
+
+        // Apply tag filter
+        if !self.tag.is_empty() {
+            if !host.tags.iter().any(|t| t.eq_ignore_ascii_case(&self.tag)) {
+                return false;
+            }
+        }
+
+        // Apply group filter
+        if !self.group.is_empty() {
+            if host.group != self.group {
+                return false;
+            }
+        }
+
+        true
+    }
 }

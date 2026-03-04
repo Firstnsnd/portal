@@ -57,7 +57,6 @@ impl Language {
                 "font_size" => "Font Size",
                 "custom_font" => "Custom Font Path",
                 "theme" => "Theme",
-                "theme_preset" => "Theme Preset",
                 "language_label" => "Language",
                 "label_required" => "Label and Host are required.",
                 "host_required" => "Host is required for testing.",
@@ -104,6 +103,13 @@ impl Language {
                 "batch_running" => "Running",
                 "batch_success" => "Success",
                 "batch_failed" => "Failed",
+                "switch_to_remote" => "Switch to Remote",
+                "stop_transfer" => "Stop transfer",
+                "loading" => "Loading...",
+                "show_hidden_files" => "Show Hidden",
+                "hide_hidden_files" => "Hide Hidden",
+                "lines" => "lines",
+                "chars" => "chars",
                 _ => "???",
             },
             Language::Chinese => match key {
@@ -135,6 +141,7 @@ impl Language {
                 "ssh_hosts" => "SSH 主机",
                 "remote" => "远程",
                 "remote_select" => "远程 - 选择主机",
+                "remote_host" => "远程 {}",
                 "back" => "返回",
                 "disconnect" => "断开连接",
                 "connecting" => "连接中 ...",
@@ -201,6 +208,14 @@ impl Language {
                 "batch_running" => "执行中",
                 "batch_success" => "成功",
                 "batch_failed" => "失败",
+                "switch_to_remote" => "切换到远程",
+                "stop_transfer" => "停止传输",
+                "loading" => "加载中...",
+                "show_hidden_files" => "显示隐藏",
+                "hide_hidden_files" => "隐藏隐藏",
+                "lines" => "行",
+                "chars" => "字符",
+                "lines_and_chars" => "{} 行  {} 字符",
                 _ => "???",
             },
             Language::Japanese => match key {
@@ -232,6 +247,7 @@ impl Language {
                 "ssh_hosts" => "SSH ホスト",
                 "remote" => "リモート",
                 "remote_select" => "リモート - ホスト選択",
+                "remote_host" => "リモート {}",
                 "back" => "戻る",
                 "disconnect" => "切断",
                 "connecting" => "接続中 ...",
@@ -298,6 +314,11 @@ impl Language {
                 "batch_running" => "実行中",
                 "batch_success" => "成功",
                 "batch_failed" => "失敗",
+                "switch_to_remote" => "リモートに切り替え",
+                "stop_transfer" => "転送を停止",
+                "loading" => "読み込み中...",
+                "show_hidden_files" => "非表示を表示",
+                "hide_hidden_files" => "非表示を隠す",
                 _ => "???",
             },
             Language::Korean => match key {
@@ -395,6 +416,11 @@ impl Language {
                 "batch_running" => "실행 중",
                 "batch_success" => "성공",
                 "batch_failed" => "실패",
+                "switch_to_remote" => "원격으로 전환",
+                "stop_transfer" => "전송 중지",
+                "loading" => "로딩 중...",
+                "show_hidden_files" => "숨김 파일 표시",
+                "hide_hidden_files" => "숨김 파일 숨기기",
                 _ => "???",
             },
         }
@@ -453,6 +479,27 @@ impl Language {
                 "uploading" => format!("업로드 중 {}", arg),
                 "downloading" => format!("다운로드 중 {}", arg),
                 _ => format!("{}: {}", key, arg),
+            },
+        }
+    }
+
+    pub fn tf2(&self, key: &str, arg1: &str, arg2: &str) -> String {
+        match self {
+            Language::English => match key {
+                "lines_and_chars" => format!("{} lines  {} chars", arg1, arg2),
+                _ => format!("{}: {}, {}", key, arg1, arg2),
+            },
+            Language::Chinese => match key {
+                "lines_and_chars" => format!("{} 行  {} 字符", arg1, arg2),
+                _ => format!("{}: {}, {}", key, arg1, arg2),
+            },
+            Language::Japanese => match key {
+                "lines_and_chars" => format!("{} 行  {} 文字", arg1, arg2),
+                _ => format!("{}: {}, {}", key, arg1, arg2),
+            },
+            Language::Korean => match key {
+                "lines_and_chars" => format!("{} 줄  {} 문자", arg1, arg2),
+                _ => format!("{}: {}, {}", key, arg1, arg2),
             },
         }
     }
