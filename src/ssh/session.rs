@@ -327,6 +327,11 @@ impl SshSession {
             return;
         }
 
+        // Set UTF-8 locale to ensure proper character encoding for Chinese and other multi-byte characters
+        // This ensures filenames and output are correctly displayed
+        let locale_cmd = "export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8\n";
+        let _ = channel.data(locale_cmd.as_bytes()).await;
+
         set_state(SshConnectionState::Connected);
 
         // 4. Main I/O loop

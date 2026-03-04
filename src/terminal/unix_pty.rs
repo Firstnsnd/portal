@@ -49,6 +49,8 @@ impl Pty for UnixPty {
                 let _result = std::process::Command::new(&shell)
                     .args(args)
                     .env("TERM", "xterm-256color")
+                    .env("LANG", "en_US.UTF-8")
+                    .env("LC_ALL", "en_US.UTF-8")
                     .status();
 
                 // If exec fails, exit
