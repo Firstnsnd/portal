@@ -369,16 +369,21 @@ impl PortalApp {
                     self.theme.fg_dim,
                 );
 
-                // Tags (subtle, italic, displayed after detail)
+                // Tags (subtle, italic, displayed below host info)
                 if !host.tags.is_empty() {
                     let tag_text = host.tags.join(", ");
-                    ui.painter().text(
-                        egui::pos2(rect.min.x + 46.0 + 220.0, rect.center().y + 8.0),
-                        egui::Align2::LEFT_CENTER,
-                        format!("• {}", tag_text),
-                        egui::FontId::proportional(10.0),
-                        self.theme.fg_dim,
+                    // Use a small area to position the tag label
+                    let tag_rect = egui::Rect::from_min_max(
+                        egui::pos2(rect.min.x + 46.0, rect.max.y - 11.0),
+                        egui::pos2(rect.max.x, rect.max.y - 2.0),
                     );
+                    let _ = ui.allocate_ui_at_rect(tag_rect, |ui| {
+                        ui.label(egui::RichText::new(format!("• {}", tag_text))
+                            .italics()
+                            .size(9.0)
+                            .color(self.theme.fg_dim)
+                        );
+                    });
                 }
                 // Edit button (only visible on hover)
                 // Use screen right edge for consistent positioning regardless of filter
@@ -466,16 +471,21 @@ impl PortalApp {
                         self.theme.fg_dim,
                     );
 
-                    // Tags (subtle, italic, displayed after detail)
+                    // Tags (subtle, italic, displayed below host info)
                     if !host.tags.is_empty() {
                         let tag_text = host.tags.join(", ");
-                        ui.painter().text(
-                            egui::pos2(rect.min.x + 46.0 + 220.0, rect.center().y + 8.0),
-                            egui::Align2::LEFT_CENTER,
-                            format!("• {}", tag_text),
-                            egui::FontId::proportional(10.0),
-                            self.theme.fg_dim,
+                        // Use a small area to position the tag label
+                        let tag_rect = egui::Rect::from_min_max(
+                            egui::pos2(rect.min.x + 46.0, rect.max.y - 11.0),
+                            egui::pos2(rect.max.x, rect.max.y - 2.0),
                         );
+                        let _ = ui.allocate_ui_at_rect(tag_rect, |ui| {
+                            ui.label(egui::RichText::new(format!("• {}", tag_text))
+                                .italics()
+                                .size(9.0)
+                                .color(self.theme.fg_dim)
+                            );
+                        });
                     }
                     // Edit button (only visible on hover)
                     // Use screen right edge for consistent positioning regardless of filter
