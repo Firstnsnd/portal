@@ -196,6 +196,7 @@ impl PortalApp {
                     &mut local_left_delete_request,
                     self.sftp_active_panel_is_local,
                     &self.language,
+                    "local_left_scroll",
                 );
             } else {
                 // ── LEFT PANEL: Remote (independent connection) ──
@@ -477,6 +478,7 @@ impl PortalApp {
                                     &mut left_remote_delete_request,
                                     self.sftp_active_panel_is_local,
                                     &self.language,
+                                    "left_remote_scroll",
                                 );
                             }
                             SftpConnectionState::Disconnected => {
@@ -607,6 +609,7 @@ impl PortalApp {
                     &mut local_right_delete_request,
                     !self.sftp_active_panel_is_local,
                     &self.language,
+                    "local_right_scroll",
                 );
             } else {
                 // ── RIGHT PANEL: Remote (host list or remote browser) ──
@@ -890,6 +893,7 @@ impl PortalApp {
                                 &mut remote_delete_request,
                                 !self.sftp_active_panel_is_local,
                                 &self.language,
+                                "right_remote_scroll",
                             );
                         }
                         SftpConnectionState::Disconnected => {
@@ -965,7 +969,8 @@ impl PortalApp {
             }
         }
         if let Some(action) = local_left_selection_action {
-            apply_selection_action(&mut self.local_browser_left.selection, action, self.local_browser_left.entries.len());
+            let count = self.local_browser_left.filtered_entries().len();
+            apply_selection_action(&mut self.local_browser_left.selection, action, count);
         }
 
         // ── Apply deferred left panel remote actions (only when connected) ──
@@ -986,7 +991,8 @@ impl PortalApp {
             }
         }
         if let Some(action) = local_right_selection_action {
-            apply_selection_action(&mut self.local_browser_right.selection, action, self.local_browser_right.entries.len());
+            let count = self.local_browser_right.filtered_entries().len();
+            apply_selection_action(&mut self.local_browser_right.selection, action, count);
         }
         let left_is_connected = matches!(
             self.sftp_browser_left.as_ref().map(|b| &b.state),
@@ -1225,8 +1231,9 @@ impl PortalApp {
 
         // ── Handle delete key requests ──
         if local_left_delete_request {
+            let filtered = self.local_browser_left.filtered_entries();
             let names: Vec<String> = self.local_browser_left.selection.selected.iter()
-                .filter_map(|&i| self.local_browser_left.entries.get(i).map(|e| e.name.clone()))
+                .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                 .collect();
             if !names.is_empty() {
                 self.sftp_confirm_delete = Some(SftpConfirmDelete {
@@ -2625,6 +2632,7 @@ pub fn render_file_panel(
     delete_request: &mut bool,
     is_active_panel: bool,
     language: &Language,
+    panel_id: &str,
 ) {
     let row_height = 26.0;
     let status_bar_height = 24.0;
@@ -2698,7 +2706,7 @@ pub fn render_file_panel(
     // File listing scroll area
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(scroll_rect), |ui| {
         egui::ScrollArea::vertical()
-            .id_salt(if is_local { "local_scroll" } else { "remote_scroll" })
+            .id_salt(panel_id)
             .show(ui, |ui| {
             for (i, entry) in entries.iter().enumerate() {
                 let is_selected = selection.is_selected(i);
@@ -2783,35 +2791,37 @@ pub fn render_file_panel(
                     );
                 }
 
-                // Drag payload (multi-select aware)
-                if is_selected && selection.count() > 1 {
-                    // Dragging from a selected item → pack all selected entries
-                    let drag_entries: Vec<DragEntry> = selection.selected.iter()
-                        .filter_map(|&idx| entries.get(idx).map(|e| DragEntry {
-                            full_path: format!("{}/{}", current_path.trim_end_matches('/'), e.name),
-                            entry_name: e.name.clone(),
-                            is_dir: e.kind == SftpEntryKind::Directory,
-                        }))
-                        .collect();
-                    resp.dnd_set_drag_payload(DragPayload {
-                        is_local,
-                        entries: drag_entries,
-                    });
-                } else {
-                    // Single item drag
-                    let full_path = format!(
-                        "{}/{}",
-                        current_path.trim_end_matches('/'),
-                        entry.name
-                    );
-                    resp.dnd_set_drag_payload(DragPayload {
-                        is_local,
-                        entries: vec![DragEntry {
-                            full_path,
-                            entry_name: entry.name.clone(),
-                            is_dir,
-                        }],
-                    });
+                // Drag payload (multi-select aware) — only set when dragging
+                if resp.dragged() {
+                    if is_selected && selection.count() > 1 {
+                        // Dragging from a selected item → pack all selected entries
+                        let drag_entries: Vec<DragEntry> = selection.selected.iter()
+                            .filter_map(|&idx| entries.get(idx).map(|e| DragEntry {
+                                full_path: format!("{}/{}", current_path.trim_end_matches('/'), e.name),
+                                entry_name: e.name.clone(),
+                                is_dir: e.kind == SftpEntryKind::Directory,
+                            }))
+                            .collect();
+                        resp.dnd_set_drag_payload(DragPayload {
+                            is_local,
+                            entries: drag_entries,
+                        });
+                    } else {
+                        // Single item drag
+                        let full_path = format!(
+                            "{}/{}",
+                            current_path.trim_end_matches('/'),
+                            entry.name
+                        );
+                        resp.dnd_set_drag_payload(DragPayload {
+                            is_local,
+                            entries: vec![DragEntry {
+                                full_path,
+                                entry_name: entry.name.clone(),
+                                is_dir,
+                            }],
+                        });
+                    }
                 }
 
                 if resp.secondary_clicked() {

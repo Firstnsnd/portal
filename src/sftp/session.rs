@@ -241,6 +241,7 @@ impl LocalBrowser {
     /// Toggle visibility of hidden files (files starting with .).
     pub fn toggle_hidden_files(&mut self) {
         self.show_hidden_files = !self.show_hidden_files;
+        self.selection.clear();
     }
 
     /// Get filtered entries (hides dotfiles if show_hidden_files is false).
@@ -539,6 +540,7 @@ impl SftpBrowser {
     /// Toggle visibility of hidden files (files starting with .).
     pub fn toggle_hidden_files(&mut self) {
         self.show_hidden_files = !self.show_hidden_files;
+        self.selection.clear();
     }
 
     /// Get filtered entries (hides dotfiles if show_hidden_files is false).
