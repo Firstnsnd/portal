@@ -157,6 +157,9 @@ impl PortalApp {
                 egui::ScrollArea::vertical()
                     .id_salt("hosts_page_scroll")
                     .show(ui, |ui| {
+                        // Get the actual right edge of the scroll area for consistent button positioning
+                        let area_right = ui.min_rect().max.x;
+
                         ui.add_space(12.0);
 
                         // Filter bar (in content area, right-aligned with margin)
@@ -369,9 +372,9 @@ impl PortalApp {
                     self.theme.fg_dim,
                 );
                 // Edit button (only visible on hover)
-                // Position from right edge to avoid being cut off by filter bar or window edges
+                // Position from fixed right edge to maintain consistent position
                 let btn_rect = egui::Rect::from_center_size(
-                    egui::pos2(rect.max.x - 70.0, rect.center().y),
+                    egui::pos2(area_right - 70.0, rect.center().y),
                     egui::vec2(56.0, 22.0),
                 );
                 if hovered {
@@ -453,7 +456,7 @@ impl PortalApp {
                         self.theme.fg_dim,
                     );
                     let btn_rect = egui::Rect::from_center_size(
-                        egui::pos2(rect.max.x - 70.0, rect.center().y),
+                        egui::pos2(area_right - 70.0, rect.center().y),
                         egui::vec2(56.0, 22.0),
                     );
                     if hovered {
