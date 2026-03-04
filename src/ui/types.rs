@@ -442,7 +442,7 @@ impl TerminalSession {
             // Use longer debounce during active resize bursts (rapid drag / direction changes)
             // to ensure SIGWINCH only fires after the user has fully stopped dragging.
             let debounce = if self.pending_pty_size.is_some() {
-                Duration::from_millis(500)
+                Duration::from_millis(800)
             } else {
                 Duration::from_millis(150)
             };

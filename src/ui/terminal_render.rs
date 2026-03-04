@@ -92,7 +92,14 @@ pub fn render_terminal_session(
     if response.drag_stopped() {
         session.selection.active = false;
     }
-    if response.double_clicked() {
+    if response.triple_clicked() {
+        // Triple-click: select entire line
+        if let Some(pos) = response.interact_pointer_pos() {
+            let cell = pos_to_cell(pos);
+            session.selection.start = (cell.0, 0);
+            session.selection.end = (cell.0, new_cols.saturating_sub(1));
+        }
+    } else if response.double_clicked() {
         if let Some(pos) = response.interact_pointer_pos() {
             let cell = pos_to_cell(pos);
             if let Ok(grid) = session.grid.lock() {
@@ -270,6 +277,15 @@ pub fn render_terminal_session(
                         } else if *key == egui::Key::A {
                             session.selection.start = (0, 0);
                             session.selection.end = (new_rows.saturating_sub(1), new_cols.saturating_sub(1));
+                        } else if *key == egui::Key::V {
+                            // Cmd+V: paste from system clipboard
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                if let Ok(text) = clipboard.get_text() {
+                                    session.selection.clear();
+                                    session.write(&text);
+                                    input_bytes.extend_from_slice(text.as_bytes());
+                                }
+                            }
                         }
                         // Cmd+D / Cmd+Shift+D are consumed by split shortcuts — not forwarded to PTY
                     } else if modifiers.ctrl {

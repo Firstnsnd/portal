@@ -330,15 +330,15 @@ impl TerminalGrid {
             self.cursor_row = new_cursor_row.saturating_sub(overflow);
         }
 
-        // Enforce scrollback limit
-        while self.scrollback.len() > self.max_scrollback {
-            self.scrollback.pop_front();
-            self.scrollback_wrapped.pop_front();
-        }
+        // Don't enforce scrollback limit during reflow — content was already
+        // within limits before reflow and will merge back when widening.
+        // The limit is enforced by scroll_up() during normal terminal output.
 
         self.cols = new_cols;
         self.rows = new_rows;
+        self.scroll_top = 0;
         self.scroll_bottom = new_rows.saturating_sub(1);
+        self.wrap_pending = false;
         self.cursor_col = new_cursor_col.min(new_cols.saturating_sub(1));
         self.cursor_row = self.cursor_row.min(new_rows.saturating_sub(1));
     }
