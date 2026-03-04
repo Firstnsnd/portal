@@ -419,6 +419,25 @@ impl TerminalGrid {
 
     /// Erase from cursor to end of display
     pub fn erase_below(&mut self) {
+        // When erasing from column 0, also clear wrapped continuation rows above
+        // the cursor that are part of the same logical line (created by reflow).
+        // This handles the shell pattern: \r (go to col 0) then \x1b[J (erase below)
+        // after SIGWINCH — the shell doesn't know reflow expanded its prompt into
+        // extra rows above the cursor, so we clean them up here.
+        if self.cursor_col == 0 {
+            let mut r = self.cursor_row;
+            while r > 0 && self.line_wrapped[r - 1] {
+                r -= 1;
+                for c in 0..self.cols {
+                    self.cells[r][c] = TerminalCell::default();
+                }
+                self.line_wrapped[r] = false;
+            }
+            if r > 0 {
+                self.line_wrapped[r - 1] = false;
+            }
+        }
+
         // Erase from cursor to end of current line
         for c in self.cursor_col..self.cols {
             self.cells[self.cursor_row][c] = TerminalCell::default();
@@ -430,9 +449,6 @@ impl TerminalGrid {
             }
         }
         // Clear line_wrapped flags for erased rows
-        if self.cursor_col == 0 && self.cursor_row > 0 {
-            self.line_wrapped[self.cursor_row - 1] = false;
-        }
         for r in self.cursor_row..self.rows {
             self.line_wrapped[r] = false;
         }
