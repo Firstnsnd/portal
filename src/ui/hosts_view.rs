@@ -400,10 +400,19 @@ impl PortalApp {
             // Grouped SSH hosts
             for group in &groups {
                 ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(24.0);
-                    ui.label(egui::RichText::new(group).color(self.theme.fg_dim).size(10.0));
-                });
+                // Allocate space for group label
+                let label_rect = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 16.0),
+                    egui::Sense::hover()
+                ).0;
+                // Draw group label directly to avoid layout interference
+                ui.painter().text(
+                    egui::pos2(label_rect.min.x + 24.0, label_rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    group,
+                    egui::FontId::proportional(10.0),
+                    self.theme.fg_dim,
+                );
                 ui.add_space(2.0);
                 for (i, host) in self.hosts.iter().enumerate() {
                     if host.is_local || host.group != *group { continue; }
