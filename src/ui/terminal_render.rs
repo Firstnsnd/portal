@@ -205,12 +205,21 @@ pub fn render_terminal_session(
 
     if ctx_copy {
         if let Some(ref text) = selected_text {
-            ctx.copy_text(text.clone());
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                let _ = clipboard.set_text(text.clone());
+            }
             session.selection.clear();
         }
     }
     if ctx_paste {
-        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+        // Read clipboard text via egui's clipboard integration (avoids direct arboard errors)
+        let clip_text = ctx.input(|i| i.events.iter().find_map(|e| {
+            if let egui::Event::Paste(t) = e { Some(t.clone()) } else { None }
+        }));
+        if let Some(text) = clip_text {
+            session.write(&text);
+            input_bytes.extend_from_slice(text.as_bytes());
+        } else if let Ok(mut clipboard) = arboard::Clipboard::new() {
             if let Ok(text) = clipboard.get_text() {
                 session.write(&text);
                 input_bytes.extend_from_slice(text.as_bytes());
@@ -268,7 +277,9 @@ pub fn render_terminal_session(
                             action = Some(PaneAction::ToggleBroadcast);
                         } else if *key == egui::Key::C {
                             if let Some(ref text) = selected_text {
-                                ctx.copy_text(text.clone());
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    let _ = clipboard.set_text(text.clone());
+                                }
                                 session.selection.clear();
                             } else {
                                 session.write_bytes(&[0x03]);
@@ -278,14 +289,7 @@ pub fn render_terminal_session(
                             session.selection.start = (0, 0);
                             session.selection.end = (new_rows.saturating_sub(1), new_cols.saturating_sub(1));
                         } else if *key == egui::Key::V {
-                            // Cmd+V: paste from system clipboard
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                if let Ok(text) = clipboard.get_text() {
-                                    session.selection.clear();
-                                    session.write(&text);
-                                    input_bytes.extend_from_slice(text.as_bytes());
-                                }
-                            }
+                            // Cmd+V: handled by egui::Event::Paste below — no-op here
                         }
                         // Cmd+D / Cmd+Shift+D are consumed by split shortcuts — not forwarded to PTY
                     } else if modifiers.ctrl {
@@ -334,6 +338,18 @@ pub fn render_terminal_session(
                                 input_bytes.extend_from_slice(s.as_bytes());
                             }
                         }
+                    }
+                }
+                egui::Event::Copy => {
+                    // Cmd+C: copy selection, or send Ctrl-C if no selection
+                    if let Some(ref text) = selected_text {
+                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                            let _ = clipboard.set_text(text.clone());
+                        }
+                        session.selection.clear();
+                    } else {
+                        session.write_bytes(&[0x03]);
+                        input_bytes.push(0x03);
                     }
                 }
                 egui::Event::Paste(text) => {
