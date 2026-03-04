@@ -322,12 +322,30 @@ impl TerminalSession {
         }
     }
 
+    /// Helper to get effective username (current user if empty)
+    pub fn get_effective_username(username: &str) -> String {
+        if username.is_empty() {
+            std::env::var("USER").unwrap_or_else(|_| {
+                // Fallback to whoami command if USER env var not set
+                std::process::Command::new("whoami")
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .unwrap_or_else(|_| "root".to_string())
+            })
+        } else {
+            username.to_string()
+        }
+    }
+
     pub fn new_ssh(host: &HostEntry, runtime: &tokio::runtime::Runtime) -> Self {
+        // Use current system user if username is empty
+        let username = Self::get_effective_username(&host.username);
+
         let ssh = SshSession::connect(
             runtime,
             host.host.clone(),
             host.port,
-            host.username.clone(),
+            username,
             host.auth.clone(),
             host.name.clone(),
             80,

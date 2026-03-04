@@ -745,6 +745,16 @@ impl PortalApp {
                                 });
                                 ui.add_space(8.0);
 
+                                // Username for SSH key authentication (optional, defaults to current user)
+                                ui.label(egui::RichText::new(lang.t("username")).color(theme.fg_dim).size(12.0));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.add_host_dialog.username)
+                                        .hint_text(egui::RichText::new("Leave empty for current user").color(theme.hint_color()).italics())
+                                        .desired_width(f32::INFINITY)
+                                        .text_color(theme.fg_primary)
+                                );
+                                ui.add_space(8.0);
+
                                 match self.add_host_dialog.key_source {
                                     KeySourceChoice::LocalFile => {
                                         ui.label(egui::RichText::new(lang.t("key_path")).color(theme.fg_dim).size(12.0));
