@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
-use crate::config::AuthMethod;
+use crate::config::ResolvedAuth;
 use crate::ssh::connect_and_authenticate;
 
 // ─── Multi-selection state ────────────────────────────────────────────────
@@ -363,7 +363,7 @@ impl SftpBrowser {
         host: String,
         port: u16,
         username: String,
-        auth: AuthMethod,
+        auth: ResolvedAuth,
         host_name: String,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -371,7 +371,7 @@ impl SftpBrowser {
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let cancel_clone = cancel_flag.clone();
-        runtime.spawn(sftp_task(host, port, username, auth, host_name.clone(), cmd_rx, resp_tx, cancel_clone));
+        runtime.spawn(sftp_task(host, port, username, auth, cmd_rx, resp_tx, cancel_clone));
 
         Self {
             cmd_tx,
@@ -565,8 +565,7 @@ async fn sftp_task(
     host: String,
     port: u16,
     username: String,
-    auth: AuthMethod,
-    display_name: String,
+    auth: ResolvedAuth,
     mut cmd_rx: mpsc::UnboundedReceiver<SftpCommand>,
     resp_tx: mpsc::UnboundedSender<SftpResponse>,
     cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -579,7 +578,7 @@ async fn sftp_task(
     // 1. Connect + authenticate (with timeout)
     let handle = match tokio::time::timeout(
         CONNECT_TIMEOUT,
-        connect_and_authenticate(&host, port, &username, &auth, &display_name),
+        connect_and_authenticate(&host, port, &username, &auth),
     ).await {
         Ok(Ok(h)) => h,
         Ok(Err(e)) => {

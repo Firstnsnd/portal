@@ -3862,7 +3862,7 @@ dependencies = [
 
 [[package]]
 name = "portal"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3882,6 +3882,7 @@ dependencies = [
  "syntect",
  "tokio",
  "unicode-width 0.2.2",
+ "uuid",
  "vte",
 ]
 

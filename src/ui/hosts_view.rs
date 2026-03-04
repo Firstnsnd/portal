@@ -81,9 +81,9 @@ impl PortalApp {
                 if nav_btn(ui, "\u{2195}", language.t("sftp"), self.current_view == AppView::Sftp) {
                     self.current_view = AppView::Sftp;
                 }
-                if nav_btn(ui, "⚡", "批量执行", self.current_view == AppView::Batch) {
-                    self.current_view = AppView::Batch;
-                }
+                // if nav_btn(ui, "⚡", "批量执行", self.current_view == AppView::Batch) {
+                //     self.current_view = AppView::Batch;
+                // }
                 if nav_btn(ui, "\u{1f511}", language.t("keychain"), self.current_view == AppView::Keychain) {
                     self.current_view = AppView::Keychain;
                 }
@@ -161,6 +161,18 @@ impl PortalApp {
 
                         // Filter bar (in content area, right-aligned with margin)
                         ui.horizontal(|ui| {
+                            // Match ComboBox closed-state background to New Host TextEdit input
+                            let input_bg = ui.visuals().extreme_bg_color;
+                            let border = crate::ui::theme::brighter(self.theme.bg_elevated, 20);
+                            ui.style_mut().visuals.widgets.inactive.bg_fill = input_bg;
+                            ui.style_mut().visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, border);
+                            ui.style_mut().visuals.widgets.hovered.bg_fill = input_bg;
+                            ui.style_mut().visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, self.theme.accent_alpha(120));
+                            ui.style_mut().visuals.widgets.active.bg_fill = input_bg;
+                            ui.style_mut().visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, self.theme.accent);
+                            ui.style_mut().visuals.widgets.open.bg_fill = input_bg;
+                            ui.style_mut().visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, self.theme.accent);
+
                             // Add left space to push content to the right
                             ui.add_space(ui.available_width() - 210.0); // Adjusted for narrower filters
 
@@ -174,6 +186,7 @@ impl PortalApp {
                                 .selected_text(egui::RichText::new(group_label).color(self.theme.accent).size(12.0))
                                 .width(90.0)
                                 .show_ui(ui, |ui| {
+                                    ui.style_mut().visuals.window_fill = ui.visuals().extreme_bg_color;
                                     ui.style_mut().visuals.widgets.inactive.bg_fill = self.theme.bg_elevated;
                                     ui.style_mut().visuals.widgets.hovered.bg_fill = self.theme.bg_primary;
                                     ui.style_mut().visuals.selection.bg_fill = self.theme.accent_alpha(30);
@@ -214,6 +227,7 @@ impl PortalApp {
                                 .selected_text(egui::RichText::new(tag_label).color(self.theme.accent).size(12.0))
                                 .width(90.0)
                                 .show_ui(ui, |ui| {
+                                    ui.style_mut().visuals.window_fill = ui.visuals().extreme_bg_color;
                                     ui.style_mut().visuals.widgets.inactive.bg_fill = self.theme.bg_elevated;
                                     ui.style_mut().visuals.widgets.hovered.bg_fill = self.theme.bg_primary;
                                     ui.style_mut().visuals.selection.bg_fill = self.theme.accent_alpha(30);
@@ -436,10 +450,10 @@ impl PortalApp {
                     );
                 }
                 // Edit button (only visible on hover)
-                // Use screen right edge for consistent positioning regardless of filter
-                let screen_right = ui.ctx().input(|i| i.screen_rect().max.x);
+                // Use visible clip rect right edge to avoid being clipped by panel borders
+                let visible_right = ui.clip_rect().max.x;
                 let btn_rect = egui::Rect::from_center_size(
-                    egui::pos2(screen_right - 70.0, rect.min.y + 26.0),
+                    egui::pos2(visible_right - 40.0, rect.min.y + 26.0),
                     egui::vec2(56.0, 22.0),
                 );
                 if hovered {
@@ -588,10 +602,10 @@ impl PortalApp {
                         );
                     }
                     // Edit button (only visible on hover)
-                    // Use screen right edge for consistent positioning regardless of filter
-                    let screen_right = ui.ctx().input(|i| i.screen_rect().max.x);
+                    // Use visible clip rect right edge to avoid being clipped by panel borders
+                    let visible_right = ui.clip_rect().max.x;
                     let btn_rect = egui::Rect::from_center_size(
-                        egui::pos2(screen_right - 70.0, rect.min.y + 26.0),
+                        egui::pos2(visible_right - 40.0, rect.min.y + 26.0),
                         egui::vec2(56.0, 22.0),
                     );
                     if hovered {
@@ -777,136 +791,171 @@ impl PortalApp {
                         ui.separator();
                         ui.add_space(8.0);
 
+                        // ── Credential selection ──
                         ui.label(egui::RichText::new(lang.t("authentication")).color(theme.fg_dim).size(12.0));
                         ui.add_space(4.0);
+
+                        // Username (always visible for SSH login)
+                        ui.label(egui::RichText::new(lang.t("username")).color(theme.fg_dim).size(12.0));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.add_host_dialog.username)
+                                .hint_text(egui::RichText::new("root").color(theme.hint_color()).italics())
+                                .desired_width(f32::INFINITY)
+                                .text_color(theme.fg_primary)
+                        );
+                        ui.add_space(8.0);
+
+                        // Credential mode selector: None / Existing / New
                         ui.horizontal(|ui| {
-                            let pw_color = if self.add_host_dialog.auth_method == AuthMethodChoice::Password { theme.accent } else { theme.fg_primary };
                             ui.selectable_value(
-                                &mut self.add_host_dialog.auth_method,
-                                AuthMethodChoice::Password,
-                                egui::RichText::new(lang.t("password")).color(pw_color).size(12.0),
+                                &mut self.add_host_dialog.credential_mode,
+                                crate::ui::types::CredentialMode::None,
+                                egui::RichText::new(lang.t("credential_none")).size(12.0),
                             );
-                            let key_color = if self.add_host_dialog.auth_method == AuthMethodChoice::Key { theme.accent } else { theme.fg_primary };
+                            if !self.credentials.is_empty() {
+                                ui.selectable_value(
+                                    &mut self.add_host_dialog.credential_mode,
+                                    crate::ui::types::CredentialMode::Existing,
+                                    egui::RichText::new(lang.t("credential_existing")).size(12.0),
+                                );
+                            }
                             ui.selectable_value(
-                                &mut self.add_host_dialog.auth_method,
-                                AuthMethodChoice::Key,
-                                egui::RichText::new(lang.t("ssh_key")).color(key_color).size(12.0),
+                                &mut self.add_host_dialog.credential_mode,
+                                crate::ui::types::CredentialMode::Inline,
+                                egui::RichText::new(lang.t("credential_inline")).size(12.0),
                             );
                         });
+                        ui.add_space(8.0);
 
-                        ui.add_space(4.0);
-
-                        match self.add_host_dialog.auth_method {
-                            AuthMethodChoice::Password => {
-                                ui.label(egui::RichText::new(lang.t("username")).color(theme.fg_dim).size(12.0));
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.add_host_dialog.username)
-                                        .hint_text(egui::RichText::new("root").color(theme.hint_color()).italics())
-                                        .desired_width(f32::INFINITY)
-                                        .text_color(theme.fg_primary)
-                                );
-                                ui.add_space(4.0);
-                                ui.label(egui::RichText::new(lang.t("password")).color(theme.fg_dim).size(12.0));
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.add_host_dialog.password)
-                                        .password(true)
-                                        .hint_text(egui::RichText::new("Enter password").color(theme.hint_color()).italics())
-                                        .desired_width(f32::INFINITY)
-                                        .text_color(theme.fg_primary)
-                                );
+                        match self.add_host_dialog.credential_mode {
+                            crate::ui::types::CredentialMode::None => {
+                                // No authentication
                             }
-                            AuthMethodChoice::Key => {
-                                // Key source selection: Local file vs Import content
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new("Key Source:").color(theme.fg_dim).size(12.0));
-                                    ui.add_space(8.0);
-
-                                    let local_color = if self.add_host_dialog.key_source == KeySourceChoice::LocalFile { theme.accent } else { theme.fg_dim };
-                                    if ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new("Local File").color(local_color).size(12.0)
-                                        )
-                                        .stroke(egui::Stroke::NONE)
-                                        .fill(egui::Color32::TRANSPARENT)
-                                    ).clicked() {
-                                        self.add_host_dialog.key_source = KeySourceChoice::LocalFile;
-                                    }
-
-                                    ui.add_space(8.0);
-
-                                    let import_color = if self.add_host_dialog.key_source == KeySourceChoice::ImportContent { theme.accent } else { theme.fg_dim };
-                                    if ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new("Import Content").color(import_color).size(12.0)
-                                        )
-                                        .stroke(egui::Stroke::NONE)
-                                        .fill(egui::Color32::TRANSPARENT)
-                                    ).clicked() {
-                                        self.add_host_dialog.key_source = KeySourceChoice::ImportContent;
-                                    }
-                                });
-                                ui.add_space(8.0);
-
-                                // Username for SSH key authentication (optional, defaults to current user)
-                                ui.label(egui::RichText::new(lang.t("username")).color(theme.fg_dim).size(12.0));
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.add_host_dialog.username)
-                                        .hint_text(egui::RichText::new("Leave empty for current user").color(theme.hint_color()).italics())
-                                        .desired_width(f32::INFINITY)
-                                        .text_color(theme.fg_primary)
-                                );
-                                ui.add_space(8.0);
-
-                                match self.add_host_dialog.key_source {
-                                    KeySourceChoice::LocalFile => {
-                                        ui.label(egui::RichText::new(lang.t("key_path")).color(theme.fg_dim).size(12.0));
-                                        ui.add(
-                                            egui::TextEdit::singleline(&mut self.add_host_dialog.key_path)
-                                                .hint_text(egui::RichText::new("~/.ssh/id_rsa").color(theme.hint_color()).italics())
-                                                .desired_width(f32::INFINITY)
-                                                .text_color(theme.fg_primary)
-                                        );
-                                    }
-                                    KeySourceChoice::ImportContent => {
-                                        ui.label(egui::RichText::new("Private Key:").color(theme.fg_dim).size(12.0));
-                                        ui.add(
-                                            egui::TextEdit::multiline(&mut self.add_host_dialog.key_content)
-                                                .id(egui::Id::new("import_private_key"))
-                                                .hint_text(egui::RichText::new("Paste your private key content here...\n-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----").color(theme.hint_color()).italics())
-                                                .font(egui::TextStyle::Monospace)
-                                                .desired_width(f32::INFINITY)
-                                                .desired_rows(6)
-                                                .frame(true)
-                                                .text_color(theme.fg_primary)
-                                        );
-                                        ui.add_space(4.0);
-                                        ui.label(egui::RichText::new("Public Key (optional):").color(theme.fg_dim).size(12.0));
-                                        ui.add(
-                                            egui::TextEdit::multiline(&mut self.add_host_dialog.key_path)
-                                                .hint_text(egui::RichText::new("ssh-rsa AAAA... user@host").color(theme.hint_color()).italics())
-                                                .font(egui::TextStyle::Monospace)
-                                                .desired_width(f32::INFINITY)
-                                                .desired_rows(2)
-                                                .frame(true)
-                                                .text_color(theme.fg_primary)
-                                        );
-                                    }
-                                }
-
-                                if self.add_host_dialog.key_in_keychain {
-                                    ui.label(egui::RichText::new(lang.t("key_stored_in_keychain")).color(theme.green).size(11.0));
-                                }
+                            crate::ui::types::CredentialMode::Existing => {
+                                // Dropdown to pick an existing credential
+                                ui.label(egui::RichText::new(lang.t("select_credential")).color(theme.fg_dim).size(12.0));
                                 ui.add_space(4.0);
-                                ui.label(egui::RichText::new(lang.t("key_passphrase")).color(theme.fg_dim).size(12.0));
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.add_host_dialog.key_passphrase)
-                                        .password(true)
-                                        .hint_text(egui::RichText::new("Leave empty if none").color(theme.hint_color()).italics())
-                                        .desired_width(f32::INFINITY)
-                                        .text_color(theme.fg_primary)
-                                );
+                                let current_label = self.add_host_dialog.selected_credential_id.as_ref()
+                                    .and_then(|id| self.credentials.iter().find(|c| c.id == *id))
+                                    .map(|c| c.name.clone())
+                                    .unwrap_or_else(|| "---".to_string());
+                                egui::ComboBox::from_id_salt("credential_selector")
+                                    .selected_text(egui::RichText::new(&current_label).size(12.0))
+                                    .width(ui.available_width() - 8.0)
+                                    .show_ui(ui, |ui| {
+                                        for cred in &self.credentials {
+                                            let label = format!("{} ({})", cred.name, match &cred.credential_type {
+                                                crate::config::CredentialType::Password { .. } => lang.t("password"),
+                                                crate::config::CredentialType::SshKey { .. } => lang.t("ssh_key"),
+                                            });
+                                            let is_selected = self.add_host_dialog.selected_credential_id.as_ref() == Some(&cred.id);
+                                            if ui.selectable_label(is_selected, egui::RichText::new(&label).size(12.0)).clicked() {
+                                                self.add_host_dialog.selected_credential_id = Some(cred.id.clone());
+                                            }
+                                        }
+                                    });
+                            }
+                            crate::ui::types::CredentialMode::Inline => {
+                                // Inline credential creation (same fields as before)
+                                ui.horizontal(|ui| {
+                                    ui.selectable_value(
+                                        &mut self.add_host_dialog.auth_method,
+                                        AuthMethodChoice::Password,
+                                        egui::RichText::new(lang.t("password")).size(12.0),
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.add_host_dialog.auth_method,
+                                        AuthMethodChoice::Key,
+                                        egui::RichText::new(lang.t("ssh_key")).size(12.0),
+                                    );
+                                });
+                                ui.add_space(4.0);
+
+                                match self.add_host_dialog.auth_method {
+                                    AuthMethodChoice::Password => {
+                                        ui.label(egui::RichText::new(lang.t("password")).color(theme.fg_dim).size(12.0));
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut self.add_host_dialog.password)
+                                                .password(true)
+                                                .hint_text(egui::RichText::new("Enter password").color(theme.hint_color()).italics())
+                                                .desired_width(f32::INFINITY)
+                                                .text_color(theme.fg_primary)
+                                        );
+                                    }
+                                    AuthMethodChoice::Key => {
+                                        ui.horizontal(|ui| {
+                                            let local_color = if self.add_host_dialog.key_source == KeySourceChoice::LocalFile { theme.accent } else { theme.fg_dim };
+                                            if ui.add(
+                                                egui::Button::new(egui::RichText::new("Local File").color(local_color).size(12.0))
+                                                    .stroke(egui::Stroke::NONE).fill(egui::Color32::TRANSPARENT)
+                                            ).clicked() {
+                                                self.add_host_dialog.key_source = KeySourceChoice::LocalFile;
+                                            }
+                                            ui.add_space(8.0);
+                                            let import_color = if self.add_host_dialog.key_source == KeySourceChoice::ImportContent { theme.accent } else { theme.fg_dim };
+                                            if ui.add(
+                                                egui::Button::new(egui::RichText::new("Import Content").color(import_color).size(12.0))
+                                                    .stroke(egui::Stroke::NONE).fill(egui::Color32::TRANSPARENT)
+                                            ).clicked() {
+                                                self.add_host_dialog.key_source = KeySourceChoice::ImportContent;
+                                            }
+                                        });
+                                        ui.add_space(4.0);
+
+                                        match self.add_host_dialog.key_source {
+                                            KeySourceChoice::LocalFile => {
+                                                ui.label(egui::RichText::new(lang.t("key_path")).color(theme.fg_dim).size(12.0));
+                                                ui.add(
+                                                    egui::TextEdit::singleline(&mut self.add_host_dialog.key_path)
+                                                        .hint_text(egui::RichText::new("~/.ssh/id_rsa").color(theme.hint_color()).italics())
+                                                        .desired_width(f32::INFINITY)
+                                                        .text_color(theme.fg_primary)
+                                                );
+                                            }
+                                            KeySourceChoice::ImportContent => {
+                                                ui.label(egui::RichText::new("Private Key:").color(theme.fg_dim).size(12.0));
+                                                ui.add(
+                                                    egui::TextEdit::multiline(&mut self.add_host_dialog.key_content)
+                                                        .id(egui::Id::new("import_private_key"))
+                                                        .hint_text(egui::RichText::new("-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----").color(theme.hint_color()).italics())
+                                                        .font(egui::TextStyle::Monospace)
+                                                        .desired_width(f32::INFINITY)
+                                                        .desired_rows(6)
+                                                        .frame(true)
+                                                        .text_color(theme.fg_primary)
+                                                );
+                                            }
+                                        }
+
+                                        if self.add_host_dialog.key_in_keychain {
+                                            ui.label(egui::RichText::new(lang.t("key_stored_in_keychain")).color(theme.green).size(11.0));
+                                        }
+                                        ui.add_space(4.0);
+                                        ui.label(egui::RichText::new(lang.t("key_passphrase")).color(theme.fg_dim).size(12.0));
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut self.add_host_dialog.key_passphrase)
+                                                .password(true)
+                                                .hint_text(egui::RichText::new("Leave empty if none").color(theme.hint_color()).italics())
+                                                .desired_width(f32::INFINITY)
+                                                .text_color(theme.fg_primary)
+                                        );
+                                    }
+                                }
                             }
                         }
+
+                        ui.add_space(8.0);
+
+                        // Startup commands
+                        ui.label(egui::RichText::new(lang.t("startup_commands")).color(theme.fg_dim).size(12.0));
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.add_host_dialog.startup_commands)
+                                .desired_rows(3)
+                                .desired_width(f32::INFINITY)
+                                .font(egui::TextStyle::Monospace)
+                                .hint_text(egui::RichText::new(format!("{}\nexport PATH=/usr/local/bin:$PATH\nsource ~/.profile", lang.t("startup_commands_hint"))).color(theme.hint_color()).italics())
+                                .text_color(theme.fg_primary)
+                        );
 
                         ui.add_space(8.0);
 
@@ -969,31 +1018,60 @@ impl PortalApp {
             if host.is_empty() {
                 self.add_host_dialog.error = "Host is required for testing.".to_owned();
             } else {
-                let auth = match self.add_host_dialog.auth_method {
-                    AuthMethodChoice::Password => {
-                        let pw = self.add_host_dialog.password.clone();
-                        if pw.is_empty() {
-                            crate::config::AuthMethod::None
+                // Build ResolvedAuth based on credential mode
+                let resolved = match self.add_host_dialog.credential_mode {
+                    crate::ui::types::CredentialMode::None => crate::config::ResolvedAuth::None,
+                    crate::ui::types::CredentialMode::Existing => {
+                        if let Some(ref cid) = self.add_host_dialog.selected_credential_id {
+                            if let Some(cred) = self.credentials.iter().find(|c| c.id == *cid) {
+                                crate::config::resolve_credential(cred)
+                            } else {
+                                crate::config::ResolvedAuth::None
+                            }
                         } else {
-                            crate::config::AuthMethod::Password { password: pw }
+                            crate::config::ResolvedAuth::None
                         }
                     }
-                    AuthMethodChoice::Key => {
-                        let (path, key_content) = match self.add_host_dialog.key_source {
-                            KeySourceChoice::LocalFile => (
-                                self.add_host_dialog.key_path.trim().to_owned(),
-                                String::new()
-                            ),
-                            KeySourceChoice::ImportContent => (
-                                String::new(), // Empty path when importing content
-                                self.add_host_dialog.key_content.trim().to_owned()
-                            ),
-                        };
-                        crate::config::AuthMethod::Key {
-                            key_path: path,
-                            key_content,
-                            passphrase: self.add_host_dialog.key_passphrase.clone(),
-                            key_in_keychain: self.add_host_dialog.key_in_keychain,
+                    crate::ui::types::CredentialMode::Inline => {
+                        match self.add_host_dialog.auth_method {
+                            AuthMethodChoice::Password => {
+                                let pw = self.add_host_dialog.password.clone();
+                                if pw.is_empty() {
+                                    crate::config::ResolvedAuth::None
+                                } else {
+                                    crate::config::ResolvedAuth::Password { password: pw }
+                                }
+                            }
+                            AuthMethodChoice::Key => {
+                                let key_content = match self.add_host_dialog.key_source {
+                                    KeySourceChoice::LocalFile => {
+                                        let key_path = self.add_host_dialog.key_path.trim().to_owned();
+                                        if key_path.is_empty() {
+                                            String::new()
+                                        } else {
+                                            let expanded = if key_path.starts_with('~') {
+                                                if let Some(home) = dirs::home_dir() {
+                                                    home.join(&key_path[2..]).to_string_lossy().to_string()
+                                                } else {
+                                                    key_path.clone()
+                                                }
+                                            } else {
+                                                key_path
+                                            };
+                                            std::fs::read_to_string(&expanded).unwrap_or_default()
+                                        }
+                                    }
+                                    KeySourceChoice::ImportContent => {
+                                        self.add_host_dialog.key_content.trim().to_owned()
+                                    }
+                                };
+                                let passphrase = if self.add_host_dialog.key_passphrase.is_empty() {
+                                    None
+                                } else {
+                                    Some(self.add_host_dialog.key_passphrase.clone())
+                                };
+                                crate::config::ResolvedAuth::Key { key_content, passphrase }
+                            }
                         }
                     }
                 };
@@ -1004,9 +1082,8 @@ impl PortalApp {
                 self.add_host_dialog.test_conn_state = TestConnState::Testing;
                 self.add_host_dialog.error.clear();
 
-                let name = self.add_host_dialog.name.trim().to_owned();
                 self.runtime.spawn(async move {
-                    let result = test_connection(host, port, username, auth, name).await;
+                    let result = test_connection(host, port, username, resolved).await;
                     if let Ok(mut guard) = result_arc.lock() {
                         *guard = Some(result);
                     }
@@ -1025,51 +1102,99 @@ impl PortalApp {
                 return;
             }
 
-            let auth = match self.add_host_dialog.auth_method {
-                AuthMethodChoice::Password => {
-                    let pw = self.add_host_dialog.password.clone();
-                    if pw.is_empty() {
-                        crate::config::AuthMethod::None
-                    } else {
-                        crate::config::AuthMethod::Password { password: pw }
-                    }
+            // Determine credential_id based on mode
+            let credential_id = match self.add_host_dialog.credential_mode {
+                crate::ui::types::CredentialMode::None => None,
+                crate::ui::types::CredentialMode::Existing => {
+                    self.add_host_dialog.selected_credential_id.clone()
                 }
-                AuthMethodChoice::Key => {
-                    let (path, key_content) = match self.add_host_dialog.key_source {
-                        KeySourceChoice::LocalFile => {
-                            let path = self.add_host_dialog.key_path.trim().to_owned();
-                            if path.is_empty() {
-                                self.add_host_dialog.error = "Key path is required.".to_owned();
-                                return;
+                crate::ui::types::CredentialMode::Inline => {
+                    // Create a new credential entity from inline fields
+                    let cred = match self.add_host_dialog.auth_method {
+                        AuthMethodChoice::Password => {
+                            let pw = self.add_host_dialog.password.clone();
+                            if pw.is_empty() {
+                                None  // No credential needed
+                            } else {
+                                let cred = crate::config::Credential::new_password(
+                                    format!("{} (password)", name),
+                                    self.add_host_dialog.username.trim().to_owned(),
+                                );
+                                crate::config::store_credential_secret(&cred.id, &cred.name, "password", &pw);
+                                Some(cred)
                             }
-                            (path, String::new())
                         }
-                        KeySourceChoice::ImportContent => {
-                            let key_content = self.add_host_dialog.key_content.trim().to_owned();
-                            if key_content.is_empty() {
-                                self.add_host_dialog.error = "Private key content is required.".to_owned();
-                                return;
+                        AuthMethodChoice::Key => {
+                            let key_content = match self.add_host_dialog.key_source {
+                                KeySourceChoice::LocalFile => {
+                                    let key_path = self.add_host_dialog.key_path.trim();
+                                    if key_path.is_empty() {
+                                        self.add_host_dialog.error = "Key path is required.".to_owned();
+                                        return;
+                                    }
+                                    let expanded = if key_path.starts_with('~') {
+                                        if let Some(home) = dirs::home_dir() {
+                                            home.join(&key_path[2..]).to_string_lossy().to_string()
+                                        } else {
+                                            key_path.to_owned()
+                                        }
+                                    } else {
+                                        key_path.to_owned()
+                                    };
+                                    std::fs::read_to_string(&expanded).unwrap_or_default()
+                                }
+                                KeySourceChoice::ImportContent => {
+                                    let kc = self.add_host_dialog.key_content.trim().to_owned();
+                                    if kc.is_empty() {
+                                        self.add_host_dialog.error = "Private key content is required.".to_owned();
+                                        return;
+                                    }
+                                    kc
+                                }
+                            };
+                            let has_passphrase = !self.add_host_dialog.key_passphrase.is_empty();
+                            let mut cred = crate::config::Credential::new_ssh_key(
+                                format!("{} (key)", name),
+                                self.add_host_dialog.key_path.trim().to_owned(),
+                                false,
+                                has_passphrase,
+                            );
+                            if !key_content.is_empty() {
+                                crate::config::store_credential_secret(&cred.id, &cred.name, "privatekey", &key_content);
+                                if let crate::config::CredentialType::SshKey { ref mut key_in_keychain, .. } = cred.credential_type {
+                                    *key_in_keychain = true;
+                                }
                             }
-                            // Store optional public key in path field for reference
-                            (self.add_host_dialog.key_path.trim().to_owned(), key_content)
+                            if has_passphrase {
+                                crate::config::store_credential_secret(&cred.id, &cred.name, "passphrase", &self.add_host_dialog.key_passphrase);
+                            }
+                            Some(cred)
                         }
                     };
-                    crate::config::AuthMethod::Key {
-                        key_path: path,
-                        key_content,
-                        passphrase: self.add_host_dialog.key_passphrase.clone(),
-                        key_in_keychain: self.add_host_dialog.key_in_keychain,
+
+                    if let Some(cred) = cred {
+                        let id = cred.id.clone();
+                        self.credentials.push(cred);
+                        self.save_credentials();
+                        Some(id)
+                    } else {
+                        None
                     }
                 }
             };
 
-            let entry = HostEntry::new_ssh(
+            let mut entry = HostEntry::new_ssh(
                 name,
                 host,
                 port,
                 self.add_host_dialog.username.trim().to_owned(),
                 self.add_host_dialog.group.trim().to_owned(),
-                auth,
+                credential_id,
+                self.add_host_dialog.startup_commands
+                    .lines()
+                    .map(|l| l.trim().to_string())
+                    .filter(|l| !l.is_empty())
+                    .collect(),
             );
 
             // Parse tags from comma-separated string
@@ -1078,9 +1203,6 @@ impl PortalApp {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
-
-            // Create entry with tags
-            let mut entry = entry;
             entry.tags = tags;
 
             if let Some(idx) = self.add_host_dialog.edit_index {
@@ -1094,433 +1216,6 @@ impl PortalApp {
             self.save_hosts();
             self.add_host_dialog.reset();
         }
-    }
-
-    /// Render batch execution panel (right-side drawer, shadcn-style)
-    #[allow(dead_code)]
-    pub fn show_batch_execution_panel(&mut self, ctx: &egui::Context) {
-        if !self.batch_execution.show_panel {
-            return;
-        }
-
-        let panel_width = 420.0;
-        egui::SidePanel::right("batch_execution_panel")
-            .exact_width(panel_width)
-            .resizable(false)
-            .frame(egui::Frame {
-                fill: self.theme.bg_secondary,
-                inner_margin: egui::Margin::same(0.0),
-                stroke: egui::Stroke::NONE,
-                ..Default::default()
-            })
-            .show(ctx, |ui| {
-                // Header with title and close button
-                egui::Frame {
-                    fill: self.theme.bg_elevated,
-                    inner_margin: egui::Margin::symmetric(20.0, 16.0),
-                    ..Default::default()
-                }
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("⚡ 批量执行").color(self.theme.fg_primary).size(17.0).strong());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(
-                                egui::Button::new(egui::RichText::new("✕").color(self.theme.fg_dim).size(18.0))
-                                    .frame(false)
-                            ).clicked() {
-                                self.batch_execution.show_panel = false;
-                            }
-                        });
-                    });
-                });
-
-                egui::ScrollArea::vertical()
-                    .id_salt("batch_panel_scroll")
-                    .show(ui, |ui| {
-                        ui.add_space(16.0);
-
-                        // ── Target Machines Section ──
-                        egui::Frame {
-                            fill: self.theme.bg_elevated,
-                            rounding: egui::Rounding::same(8.0),
-                            inner_margin: egui::Margin::symmetric(16.0, 12.0),
-                            stroke: egui::Stroke::new(1.0, self.theme.border),
-                            ..Default::default()
-                        }
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("目标机器").color(self.theme.fg_dim).size(11.0).strong());
-                                ui.label(
-                                    egui::RichText::new(format!("{}", self.batch_execution.targets.len()))
-                                        .color(self.theme.fg_dim).size(11.0)
-                                );
-                            });
-                            ui.add_space(8.0);
-
-                            if self.batch_execution.targets.is_empty() {
-                                ui.vertical_centered(|ui| {
-                                    ui.add_space(20.0);
-                                    ui.label(egui::RichText::new("暂无目标").color(self.theme.fg_dim).size(12.0).italics());
-                                    ui.add_space(20.0);
-                                });
-                            } else {
-                                let mut target_to_remove: Option<usize> = None;
-                                for (i, target) in self.batch_execution.targets.iter().enumerate() {
-                                    egui::Frame {
-                                        fill: self.theme.bg_secondary,
-                                        rounding: egui::Rounding::same(6.0),
-                                        inner_margin: egui::Margin::symmetric(10.0, 8.0),
-                                        ..Default::default()
-                                    }
-                                    .show(ui, |ui| {
-                                        ui.horizontal(|ui| {
-                                            // Status indicator
-                                            let is_connected = target.tab_idx != usize::MAX;
-                                            ui.label(
-                                                egui::RichText::new(if is_connected { "●" } else { "○" })
-                                                    .color(if is_connected { self.theme.green } else { self.theme.fg_dim })
-                                                    .size(10.0)
-                                            );
-                                            ui.add_space(6.0);
-
-                                            ui.label(egui::RichText::new(&target.name).color(self.theme.fg_primary).size(13.0));
-
-                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                if ui.add(
-                                                    egui::Button::new(
-                                                        egui::RichText::new("✕").color(self.theme.fg_dim).size(14.0)
-                                                    )
-                                                    .frame(false)
-                                                    .rounding(4.0)
-                                                ).clicked() {
-                                                    target_to_remove = Some(i);
-                                                }
-                                            });
-                                        });
-                                    });
-                                    ui.add_space(4.0);
-                                }
-                                if let Some(i) = target_to_remove {
-                                    self.batch_execution.targets.remove(i);
-                                }
-                            }
-
-                            ui.add_space(8.0);
-
-                            // Add targets from hosts
-                            if ui.add_sized(
-                                [ui.available_width(), 32.0],
-                                egui::Button::new(
-                                    egui::RichText::new("+ 从主机列表添加").color(self.theme.accent).size(12.0)
-                                )
-                                .stroke(egui::Stroke::new(1.0, self.theme.accent))
-                                .fill(egui::Color32::TRANSPARENT)
-                                .rounding(6.0)
-                            ).clicked() {
-                                for host in &self.hosts {
-                                    if !host.is_local {
-                                        self.batch_execution.targets.push(BatchTarget {
-                                            tab_idx: usize::MAX,
-                                            session_idx: usize::MAX,
-                                            global_id: usize::MAX,
-                                            name: host.name.clone(),
-                                        });
-                                    }
-                                }
-                            }
-                        });
-
-                        ui.add_space(16.0);
-
-                        // ── Command Input Section ──
-                        egui::Frame {
-                            fill: self.theme.bg_elevated,
-                            rounding: egui::Rounding::same(8.0),
-                            inner_margin: egui::Margin::symmetric(16.0, 12.0),
-                            stroke: egui::Stroke::new(1.0, self.theme.border),
-                            ..Default::default()
-                        }
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("执行命令").color(self.theme.fg_dim).size(11.0).strong());
-
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    // History dropdown button
-                                    if !self.batch_execution.command_history.is_empty() {
-                                        let history_btn = egui::Button::new(
-                                            egui::RichText::new("🕒").size(14.0)
-                                        )
-                                        .frame(false)
-                                        .rounding(4.0);
-                                        if ui.add(history_btn).clicked() {
-                                            self.batch_execution.show_history = !self.batch_execution.show_history;
-                                        }
-                                    }
-                                });
-                            });
-                            ui.add_space(8.0);
-
-                            // Command history dropdown
-                            if self.batch_execution.show_history {
-                                egui::Frame {
-                                    fill: self.theme.bg_secondary,
-                                    rounding: egui::Rounding::same(6.0),
-                                    inner_margin: egui::Margin::symmetric(8.0, 6.0),
-                                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                                    ..Default::default()
-                                }
-                                .show(ui, |ui| {
-                                    ui.add_space(4.0);
-                                    ui.spacing_mut().item_spacing.y = 4.0;
-                                    for cmd in self.batch_execution.command_history.iter() {
-                                        if ui.add_sized(
-                                            [ui.available_width(), 24.0],
-                                            egui::Button::new(
-                                                egui::RichText::new(cmd.lines().next().unwrap_or(cmd))
-                                                    .color(self.theme.fg_primary).size(12.0)
-                                            )
-                                            .frame(false)
-                                            .fill(egui::Color32::TRANSPARENT)
-                                            .rounding(4.0)
-                                        ).clicked() {
-                                            self.batch_execution.command = cmd.clone();
-                                            self.batch_execution.show_history = false;
-                                        }
-                                    }
-                                    ui.add_space(4.0);
-                                });
-                                ui.add_space(8.0);
-                            }
-
-                            // Command input
-                            let command_label: &str = if self.batch_execution.command.is_empty() {
-                                "输入命令，例如: ls -la /tmp"
-                            } else {
-                                ""
-                            };
-
-                            ui.add(
-                                egui::TextEdit::multiline(&mut self.batch_execution.command)
-                                    .hint_text(egui::RichText::new(command_label)
-                                        .color(self.theme.hint_color())
-                                        .italics())
-                                    .desired_rows(4)
-                                    .frame(true)
-                                    .text_color(self.theme.fg_primary)
-                            );
-
-                            ui.add_space(12.0);
-
-                            // Execute button with better styling
-                            let can_execute = !self.batch_execution.command.trim().is_empty()
-                                && !self.batch_execution.targets.is_empty()
-                                && !self.batch_execution.executing;
-
-                            let has_results = !self.batch_execution.results.is_empty();
-
-                            ui.horizontal(|ui| {
-                                if ui.add_enabled(
-                                    can_execute,
-                                    egui::Button::new(
-                                        egui::RichText::new("▶ 执行").color(egui::Color32::WHITE).size(13.0)
-                                    )
-                                    .fill(self.theme.accent)
-                                    .rounding(6.0)
-                                    .min_size(egui::vec2(80.0, 36.0))
-                                ).clicked() {
-                                    self.execute_batch_command(ctx);
-                                }
-
-                                // Re-execute button (only show if has results)
-                                if has_results && !self.batch_execution.executing {
-                                    if ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new("↻ 重新执行").color(self.theme.fg_primary).size(13.0)
-                                        )
-                                        .stroke(egui::Stroke::new(1.0, self.theme.border))
-                                        .fill(egui::Color32::TRANSPARENT)
-                                        .rounding(6.0)
-                                        .min_size(egui::vec2(100.0, 36.0))
-                                    ).clicked() {
-                                        self.execute_batch_command(ctx);
-                                    }
-                                }
-
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if self.batch_execution.executing {
-                                        ui.spinner();
-                                        ui.label(egui::RichText::new("执行中...").color(self.theme.fg_dim).size(12.0));
-                                    }
-                                });
-                            });
-                        });
-
-                        ui.add_space(16.0);
-
-                        // ── Results Section ──
-                        if !self.batch_execution.results.is_empty() {
-                            egui::Frame {
-                                fill: self.theme.bg_elevated,
-                                rounding: egui::Rounding::same(8.0),
-                                inner_margin: egui::Margin::symmetric(16.0, 12.0),
-                                stroke: egui::Stroke::new(1.0, self.theme.border),
-                                ..Default::default()
-                            }
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new("执行结果").color(self.theme.fg_dim).size(11.0).strong());
-                                    ui.label(
-                                        egui::RichText::new(format!("{}", self.batch_execution.results.len()))
-                                            .color(self.theme.fg_dim).size(11.0)
-                                    );
-                                });
-                                ui.add_space(8.0);
-
-                                ui.spacing_mut().item_spacing.y = 8.0;
-
-                                // Collect results data to avoid borrow issues
-                                let results_data: Vec<(usize, BatchStatus, String, std::time::Instant, String)> = self.batch_execution.results
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(idx, r)| (idx, r.status.clone(), r.target.name.clone(), r.timestamp, r.output.clone()))
-                                    .collect();
-                                let expanded_set: std::collections::HashSet<usize> = self.batch_execution.expanded_results.iter().copied().collect();
-
-                                for (result_idx, status, target_name, timestamp, output_text) in results_data {
-                                    let is_expanded = expanded_set.contains(&result_idx);
-                                    let (icon, icon_color) = match status {
-                                        BatchStatus::Pending => ("⏳", self.theme.fg_dim),
-                                        BatchStatus::Running => ("⟳", self.theme.accent),
-                                        BatchStatus::Success => ("✓", self.theme.green),
-                                        BatchStatus::Failed(_) => ("✗", self.theme.red),
-                                    };
-
-                                    egui::Frame {
-                                        fill: self.theme.bg_secondary,
-                                        rounding: egui::Rounding::same(6.0),
-                                        inner_margin: egui::Margin::symmetric(12.0, 10.0),
-                                        stroke: egui::Stroke::new(1.0, egui::Color32::TRANSPARENT),
-                                        ..Default::default()
-                                    }
-                                    .show(ui, |ui| {
-                                        // Main result row
-                                        ui.horizontal(|ui| {
-                                            // Expand/collapse button
-                                            if ui.add(
-                                                egui::Button::new(
-                                                    egui::RichText::new(if is_expanded { "▼" } else { "▶" })
-                                                        .color(self.theme.fg_dim).size(10.0)
-                                                )
-                                                .frame(false)
-                                            ).clicked() {
-                                                if is_expanded {
-                                                    self.batch_execution.expanded_results.retain(|&x| x != result_idx);
-                                                } else {
-                                                    self.batch_execution.expanded_results.push(result_idx);
-                                                }
-                                            }
-
-                                            ui.add_space(4.0);
-
-                                            // Status icon
-                                            ui.label(egui::RichText::new(icon).color(icon_color).size(14.0));
-
-                                            ui.add_space(6.0);
-
-                                            // Target name
-                                            ui.label(egui::RichText::new(&target_name).color(self.theme.fg_primary).size(13.0));
-
-                                            // Get the actual result for accessing target data
-                                            let can_jump = self.batch_execution.results.get(result_idx)
-                                                .and_then(|r| if r.target.tab_idx != usize::MAX { Some(true) } else { Some(false) })
-                                                .unwrap_or(false);
-
-                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                // Jump to session button (only for completed results)
-                                                if matches!(status, BatchStatus::Success | BatchStatus::Failed(_)) {
-                                                    if ui.add_enabled(
-                                                        can_jump,
-                                                        egui::Button::new(
-                                                            egui::RichText::new("↗").color(self.theme.fg_dim).size(14.0)
-                                                        )
-                                                        .frame(false)
-                                                        .rounding(4.0)
-                                                    ).on_hover_text("跳转到会话").clicked() {
-                                                        // TODO: Implement jump to session
-                                                        // Switch to terminal view and focus the target tab/session
-                                                    }
-
-                                                    // Re-execute individual command (only for failed results)
-                                                    if matches!(status, BatchStatus::Failed(_)) {
-                                                        if ui.add(
-                                                            egui::Button::new(
-                                                                egui::RichText::new("↻").color(self.theme.fg_dim).size(12.0)
-                                                            )
-                                                            .frame(false)
-                                                            .rounding(4.0)
-                                                        ).on_hover_text("重新执行此命令").clicked() {
-                                                            // TODO: Re-execute single command
-                                                        }
-                                                    }
-                                                }
-                                            });
-                                        });
-
-                                        // Expanded output section
-                                        if is_expanded {
-                                            ui.add_space(8.0);
-
-                                            egui::Frame {
-                                                fill: self.theme.bg_elevated,
-                                                rounding: egui::Rounding::same(4.0),
-                                                inner_margin: egui::Margin::symmetric(10.0, 8.0),
-                                                ..Default::default()
-                                            }
-                                            .show(ui, |ui| {
-                                                // Output with monospace font
-                                                if output_text.is_empty() {
-                                                    ui.label(
-                                                        egui::RichText::new("无输出")
-                                                            .color(self.theme.fg_dim).size(11.0).italics()
-                                                    );
-                                                } else {
-                                                    // Create a static reference for display
-                                                    let output_lines = output_text.lines().count();
-                                                    let display_output = if output_lines > 5 {
-                                                        output_text.lines().take(5).collect::<Vec<&str>>().join("\n")
-                                                    } else {
-                                                        output_text.clone()
-                                                    };
-                                                    ui.label(
-                                                        egui::RichText::new(display_output)
-                                                            .text_style(egui::TextStyle::Monospace)
-                                                            .color(self.theme.fg_primary).size(11.0)
-                                                    );
-                                                    if output_lines > 5 {
-                                                        ui.label(
-                                                            egui::RichText::new(format!("... ({} more lines)", output_lines - 5))
-                                                                .color(self.theme.fg_dim).size(10.0).italics()
-                                                        );
-                                                    }
-                                                }
-
-                                                // Timestamp
-                                                ui.add_space(4.0);
-                                                let elapsed = timestamp.elapsed();
-                                                ui.label(
-                                                    egui::RichText::new(format!("{} ago", self.format_duration(elapsed)))
-                                                        .color(self.theme.fg_dim).size(10.0)
-                                                );
-                                            });
-                                        }
-                                    });
-                                }
-                            });
-                        }
-
-                        ui.add_space(16.0);
-                    });
-            });
     }
 
     /// Format duration for display
@@ -1681,456 +1376,386 @@ impl PortalApp {
 
     /// Show batch execution page (main view)
     pub fn show_batch_page(&mut self, ctx: &egui::Context) {
-        // Main content area with command input and results
-        egui::CentralPanel::default()
+        // Top navigation bar (matching hosts page style)
+        egui::TopBottomPanel::top("batch_nav_bar")
             .frame(egui::Frame {
                 fill: self.theme.bg_secondary,
+                inner_margin: egui::Margin::symmetric(16.0, 8.0),
+                stroke: egui::Stroke::NONE,
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(self.language.t("batch")).color(self.theme.fg_dim).size(13.0).strong());
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Select hosts button
+                        if ui.add(
+                            egui::Button::new(egui::RichText::new(self.language.t("batch_select_hosts")).color(self.theme.accent).size(12.0))
+                                .frame(false)
+                        ).clicked() {
+                            self.batch_execution.show_hosts_drawer = true;
+                        }
+                    });
+                });
+            });
+
+        // Main content area
+        egui::CentralPanel::default()
+            .frame(egui::Frame {
+                fill: self.theme.bg_primary,
                 ..Default::default()
             })
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("batch_page_scroll")
                     .show(ui, |ui| {
-                        ui.add_space(20.0);
+                        ui.add_space(12.0);
 
-                        // Page header (inline, like hosts page)
+                        // ── TARGETS section ──
                         ui.horizontal(|ui| {
                             ui.add_space(24.0);
-                            ui.label(egui::RichText::new(self.language.t("batch")).color(self.theme.fg_dim).size(12.0).strong());
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{} ({})",
+                                    self.language.t("batch_targets"),
+                                    self.batch_execution.targets.len()
+                                ))
+                                .color(self.theme.fg_dim).size(10.0).strong()
+                            );
+                        });
+                        ui.add_space(4.0);
+
+                        if self.batch_execution.targets.is_empty() {
+                            let width = ui.available_width();
+                            let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 36.0), egui::Sense::hover());
+                            ui.painter().text(
+                                egui::pos2(rect.min.x + 46.0, rect.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                self.language.t("batch_no_targets"),
+                                egui::FontId::proportional(12.0),
+                                self.theme.fg_dim,
+                            );
+                        } else {
+                            let mut remove_idx: Option<usize> = None;
+                            for (i, target) in self.batch_execution.targets.iter().enumerate() {
+                                let is_connected = target.tab_idx != usize::MAX;
+                                let width = ui.available_width();
+                                let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 36.0), egui::Sense::click());
+                                let hovered = resp.hovered();
+                                if hovered {
+                                    ui.painter().rect_filled(rect, 0.0, self.theme.hover_bg);
+                                }
+                                // Status dot
+                                ui.painter().text(
+                                    egui::pos2(rect.min.x + 24.0, rect.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    if is_connected { "●" } else { "○" },
+                                    egui::FontId::proportional(10.0),
+                                    if is_connected { self.theme.green } else { self.theme.fg_dim },
+                                );
+                                // Target name
+                                ui.painter().text(
+                                    egui::pos2(rect.min.x + 46.0, rect.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    &target.name,
+                                    egui::FontId::proportional(13.0),
+                                    self.theme.fg_primary,
+                                );
+                                // Remove button on hover
+                                if hovered {
+                                    let visible_right = ui.clip_rect().max.x;
+                                    let btn_rect = egui::Rect::from_center_size(
+                                        egui::pos2(visible_right - 40.0, rect.center().y),
+                                        egui::vec2(40.0, 22.0),
+                                    );
+                                    let pointer_pos = ui.ctx().input(|inp| inp.pointer.hover_pos());
+                                    let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
+                                    let btn_bg = if over_btn { self.theme.red } else { self.theme.bg_elevated };
+                                    let btn_fg = if over_btn { egui::Color32::WHITE } else { self.theme.fg_dim };
+                                    ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::NONE);
+                                    ui.painter().text(btn_rect.center(), egui::Align2::CENTER_CENTER, "✕", egui::FontId::proportional(11.0), btn_fg);
+                                    if resp.clicked() {
+                                        if let Some(pos) = ui.ctx().input(|inp| inp.pointer.interact_pos()) {
+                                            if btn_rect.contains(pos) {
+                                                remove_idx = Some(i);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(idx) = remove_idx {
+                                self.batch_execution.targets.remove(idx);
+                            }
+
+                            // Clear all link
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                ui.add_space(24.0);
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new(self.language.t("batch_clear_all")).color(self.theme.fg_dim).size(11.0))
+                                        .frame(false)
+                                ).clicked() {
+                                    self.batch_execution.targets.clear();
+                                    self.batch_execution.results.clear();
+                                }
+                            });
+                        }
+
+                        ui.add_space(16.0);
+
+                        // ── COMMAND section ──
+                        ui.horizontal(|ui| {
+                            ui.add_space(24.0);
+                            ui.label(egui::RichText::new(self.language.t("batch_command")).color(self.theme.fg_dim).size(10.0).strong());
+
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 ui.add_space(24.0);
-                            });
-                        });
-                        ui.add_space(16.0);
-
-                        // Targets summary card
-                        egui::Frame {
-                            fill: self.theme.bg_elevated,
-                            rounding: egui::Rounding::same(8.0),
-                            inner_margin: egui::Margin::symmetric(16.0, 12.0),
-                            stroke: egui::Stroke::new(1.0, self.theme.border),
-                            ..Default::default()
-                        }
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new(format!("{} {}", self.language.t("batch_targets"), self.batch_execution.targets.len()))
-                                        .color(self.theme.fg_dim)
-                                        .size(11.0)
-                                        .strong()
-                                );
-
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    // Select hosts button
+                                if !self.batch_execution.command_history.is_empty() {
                                     if ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new(self.language.t("batch_select_hosts"))
-                                                .color(self.theme.fg_primary)
-                                                .size(12.0)
-                                        )
-                                        .fill(self.theme.accent)
-                                        .rounding(4.0)
-                                        .min_size(egui::vec2(100.0, 28.0))
+                                        egui::Button::new(egui::RichText::new("🕒").size(12.0)).frame(false)
                                     ).clicked() {
-                                        self.batch_execution.show_hosts_drawer = true;
+                                        self.batch_execution.show_history = !self.batch_execution.show_history;
                                     }
-
-                                    // Clear all button
-                                    if !self.batch_execution.targets.is_empty() {
-                                        if ui.add(
-                                            egui::Button::new(
-                                                egui::RichText::new(self.language.t("batch_clear_all"))
-                                                    .color(self.theme.fg_dim)
-                                                    .size(12.0)
-                                            )
-                                            .stroke(egui::Stroke::new(1.0, self.theme.border))
-                                            .fill(egui::Color32::TRANSPARENT)
-                                            .rounding(4.0)
-                                            .min_size(egui::vec2(70.0, 28.0))
-                                        ).clicked() {
-                                            self.batch_execution.targets.clear();
-                                            self.batch_execution.results.clear();
-                                        }
-                                    }
-                                });
+                                }
                             });
+                        });
+                        ui.add_space(4.0);
 
-                            // Selected targets preview
-                            if !self.batch_execution.targets.is_empty() {
-                                ui.add_space(8.0);
-                                let target_count = self.batch_execution.targets.len().min(5);
-                                for (i, target) in self.batch_execution.targets.iter().take(target_count).enumerate() {
-                                    let is_connected = target.tab_idx != usize::MAX;
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            egui::RichText::new(if is_connected { "●" } else { "○" })
-                                                .color(if is_connected { self.theme.green } else { self.theme.fg_dim })
-                                                .size(10.0)
-                                        );
-                                        ui.add_space(6.0);
-                                        ui.label(
-                                            egui::RichText::new(&target.name)
-                                                .color(self.theme.fg_primary)
-                                                .size(12.0)
-                                        );
-                                    });
-                                    if i < target_count - 1 {
-                                        ui.add_space(4.0);
+                        // Command history dropdown
+                        if self.batch_execution.show_history {
+                            egui::Frame {
+                                fill: self.theme.bg_secondary,
+                                rounding: egui::Rounding::same(6.0),
+                                inner_margin: egui::Margin::symmetric(24.0, 6.0),
+                                ..Default::default()
+                            }
+                            .show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.y = 4.0;
+                                for cmd in self.batch_execution.command_history.clone() {
+                                    if ui.add_sized(
+                                        [ui.available_width(), 24.0],
+                                        egui::Button::new(
+                                            egui::RichText::new(cmd.lines().next().unwrap_or(&cmd))
+                                                .color(self.theme.fg_primary).size(12.0)
+                                        ).frame(false).fill(egui::Color32::TRANSPARENT).rounding(4.0)
+                                    ).clicked() {
+                                        self.batch_execution.command = cmd;
+                                        self.batch_execution.show_history = false;
                                     }
                                 }
-                                if self.batch_execution.targets.len() > 5 {
-                                    ui.add_space(4.0);
-                                    ui.label(
-                                        egui::RichText::new(format!("+{}", self.batch_execution.targets.len() - 5))
-                                            .color(self.theme.fg_dim)
-                                            .size(11.0)
-                                            .italics()
-                                    );
-                                }
-                            }
-                        });
+                            });
+                            ui.add_space(4.0);
+                        }
 
-                        ui.add_space(16.0);
-
-                        // Command input card
+                        // Command input
                         egui::Frame {
-                            fill: self.theme.bg_elevated,
-                            rounding: egui::Rounding::same(8.0),
-                            inner_margin: egui::Margin::symmetric(16.0, 12.0),
-                            stroke: egui::Stroke::new(1.0, self.theme.border),
+                            inner_margin: egui::Margin::symmetric(24.0, 0.0),
                             ..Default::default()
                         }
                         .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new(self.language.t("batch_command"))
-                                        .color(self.theme.fg_dim)
-                                        .size(11.0)
-                                        .strong()
-                                );
-
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    // History dropdown button
-                                    if !self.batch_execution.command_history.is_empty() {
-                                        if ui.add(
-                                            egui::Button::new(
-                                                egui::RichText::new("🕒").size(12.0)
-                                            )
-                                            .frame(false)
-                                            .rounding(4.0)
-                                        ).clicked() {
-                                            self.batch_execution.show_history = !self.batch_execution.show_history;
-                                        }
-                                    }
-                                });
-                            });
-
-                            ui.add_space(6.0);
-
-                            // Command history dropdown
-                            if self.batch_execution.show_history {
-                                egui::Frame {
-                                    fill: self.theme.bg_secondary,
-                                    rounding: egui::Rounding::same(6.0),
-                                    inner_margin: egui::Margin::symmetric(8.0, 6.0),
-                                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                                    ..Default::default()
-                                }
-                                .show(ui, |ui| {
-                                    ui.add_space(4.0);
-                                    ui.spacing_mut().item_spacing.y = 4.0;
-                                    for cmd in self.batch_execution.command_history.iter() {
-                                        if ui.add_sized(
-                                            [ui.available_width(), 24.0],
-                                            egui::Button::new(
-                                                egui::RichText::new(cmd.lines().next().unwrap_or(cmd))
-                                                    .color(self.theme.fg_primary)
-                                                    .size(12.0)
-                                            )
-                                            .frame(false)
-                                            .fill(egui::Color32::TRANSPARENT)
-                                            .rounding(4.0)
-                                        ).clicked() {
-                                            self.batch_execution.command = cmd.clone();
-                                            self.batch_execution.show_history = false;
-                                        }
-                                    }
-                                    ui.add_space(4.0);
-                                });
-                                ui.add_space(8.0);
-                            }
-
-                            // Command input
-                            let command_label: &str = if self.batch_execution.command.is_empty() {
-                                "输入命令，例如: ls -la /tmp"
-                            } else {
-                                ""
-                            };
-
-                            ui.add_sized(
-                                [ui.available_width(), 80.0],
+                            ui.add(
                                 egui::TextEdit::multiline(&mut self.batch_execution.command)
-                                    .hint_text(egui::RichText::new(command_label)
-                                        .color(self.theme.hint_color())
-                                        .italics())
+                                    .hint_text(egui::RichText::new("ls -la /tmp").color(self.theme.hint_color()).italics())
                                     .desired_rows(3)
-                                    .frame(true)
+                                    .desired_width(f32::INFINITY)
+                                    .font(egui::TextStyle::Monospace)
                                     .text_color(self.theme.fg_primary)
                             );
+                        });
 
-                            ui.add_space(10.0);
+                        ui.add_space(12.0);
 
-                            // Execute buttons
-                            let can_execute = !self.batch_execution.command.trim().is_empty()
-                                && !self.batch_execution.targets.is_empty()
-                                && !self.batch_execution.executing;
+                        // Execute buttons
+                        let can_execute = !self.batch_execution.command.trim().is_empty()
+                            && !self.batch_execution.targets.is_empty()
+                            && !self.batch_execution.executing;
+                        let has_results = !self.batch_execution.results.is_empty();
 
-                            let has_results = !self.batch_execution.results.is_empty();
+                        ui.horizontal(|ui| {
+                            ui.add_space(24.0);
+                            if ui.add_enabled(
+                                can_execute,
+                                egui::Button::new(
+                                    egui::RichText::new(format!("▶ {}", self.language.t("batch_execute")))
+                                        .color(self.theme.bg_primary).size(12.0)
+                                )
+                                .fill(self.theme.accent)
+                                .rounding(4.0)
+                                .min_size(egui::vec2(80.0, 28.0))
+                            ).clicked() {
+                                self.execute_batch_command(ctx);
+                            }
 
-                            ui.horizontal(|ui| {
-                                if ui.add_enabled(
-                                    can_execute,
+                            if has_results && !self.batch_execution.executing {
+                                if ui.add(
                                     egui::Button::new(
-                                        egui::RichText::new(format!("▶ {}", self.language.t("batch_execute")))
-                                            .color(egui::Color32::WHITE)
-                                            .size(12.0)
+                                        egui::RichText::new(format!("↻ {}", self.language.t("batch_reexecute")))
+                                            .color(self.theme.fg_primary).size(12.0)
                                     )
-                                    .fill(self.theme.accent)
+                                    .stroke(egui::Stroke::new(1.0, self.theme.border))
+                                    .fill(egui::Color32::TRANSPARENT)
                                     .rounding(4.0)
                                     .min_size(egui::vec2(80.0, 28.0))
                                 ).clicked() {
                                     self.execute_batch_command(ctx);
                                 }
+                            }
 
-                                // Re-execute button
-                                if has_results && !self.batch_execution.executing {
-                                    if ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new(format!("↻ {}", self.language.t("batch_reexecute")))
-                                                .color(self.theme.fg_primary)
-                                                .size(12.0)
-                                        )
-                                        .stroke(egui::Stroke::new(1.0, self.theme.border))
-                                        .fill(egui::Color32::TRANSPARENT)
-                                        .rounding(4.0)
-                                        .min_size(egui::vec2(100.0, 28.0))
-                                    ).clicked() {
-                                        self.execute_batch_command(ctx);
+                            if self.batch_execution.executing {
+                                ui.spinner();
+                                ui.label(egui::RichText::new(self.language.t("batch_executing")).color(self.theme.fg_dim).size(11.0));
+                            }
+                        });
+
+                        // ── RESULTS section ──
+                        if !self.batch_execution.results.is_empty() {
+                            ui.add_space(16.0);
+                            ui.horizontal(|ui| {
+                                ui.add_space(24.0);
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{} ({})",
+                                        self.language.t("batch_results"),
+                                        self.batch_execution.results.len()
+                                    ))
+                                    .color(self.theme.fg_dim).size(10.0).strong()
+                                );
+                            });
+                            ui.add_space(4.0);
+
+                            // Collect results data to avoid borrow issues
+                            let results_data: Vec<(usize, BatchStatus, String, std::time::Instant, String)> = self.batch_execution.results
+                                .iter().enumerate()
+                                .map(|(idx, r)| (idx, r.status.clone(), r.target.name.clone(), r.timestamp, r.output.clone()))
+                                .collect();
+                            let expanded_set: std::collections::HashSet<usize> = self.batch_execution.expanded_results.iter().copied().collect();
+
+                            for (result_idx, status, target_name, timestamp, output_text) in results_data {
+                                let (icon, icon_color) = match status {
+                                    BatchStatus::Pending => ("⏳", self.theme.fg_dim),
+                                    BatchStatus::Running => ("⟳", self.theme.accent),
+                                    BatchStatus::Success => ("✓", self.theme.green),
+                                    BatchStatus::Failed(_) => ("✗", self.theme.red),
+                                };
+                                let is_expanded = expanded_set.contains(&result_idx);
+
+                                // Result row (host-list style)
+                                let width = ui.available_width();
+                                let row_h = if is_expanded { 36.0 } else { 36.0 };
+                                let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, row_h), egui::Sense::click());
+                                let hovered = resp.hovered();
+                                if hovered {
+                                    ui.painter().rect_filled(rect, 0.0, self.theme.hover_bg);
+                                }
+
+                                // Status icon
+                                ui.painter().text(
+                                    egui::pos2(rect.min.x + 24.0, rect.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    icon,
+                                    egui::FontId::proportional(12.0),
+                                    icon_color,
+                                );
+                                // Target name
+                                ui.painter().text(
+                                    egui::pos2(rect.min.x + 46.0, rect.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    &target_name,
+                                    egui::FontId::proportional(13.0),
+                                    self.theme.fg_primary,
+                                );
+                                // Status text
+                                let status_text = match &status {
+                                    BatchStatus::Pending => self.language.t("batch_waiting"),
+                                    BatchStatus::Running => self.language.t("batch_running"),
+                                    BatchStatus::Success => self.language.t("batch_success"),
+                                    BatchStatus::Failed(_) => self.language.t("batch_failed"),
+                                };
+                                ui.painter().text(
+                                    egui::pos2(rect.min.x + 200.0, rect.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    status_text,
+                                    egui::FontId::proportional(11.0),
+                                    icon_color,
+                                );
+                                // Expand indicator
+                                let visible_right = ui.clip_rect().max.x;
+                                ui.painter().text(
+                                    egui::pos2(visible_right - 40.0, rect.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    if is_expanded { "▼" } else { "▶" },
+                                    egui::FontId::proportional(10.0),
+                                    self.theme.fg_dim,
+                                );
+
+                                if resp.clicked() {
+                                    if is_expanded {
+                                        self.batch_execution.expanded_results.retain(|&x| x != result_idx);
+                                    } else {
+                                        self.batch_execution.expanded_results.push(result_idx);
                                     }
                                 }
 
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if self.batch_execution.executing {
-                                        ui.spinner();
-                                        ui.label(
-                                            egui::RichText::new(self.language.t("batch_executing"))
-                                                .color(self.theme.fg_dim)
-                                                .size(11.0)
-                                        );
-                                    }
-                                });
-                            });
-                        });
-
-                        // Results section
-                        if !self.batch_execution.results.is_empty() {
-                            ui.add_space(16.0);
-
-                            egui::Frame {
-                                fill: self.theme.bg_elevated,
-                                rounding: egui::Rounding::same(8.0),
-                                inner_margin: egui::Margin::symmetric(16.0, 12.0),
-                                stroke: egui::Stroke::new(1.0, self.theme.border),
-                                ..Default::default()
-                            }
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(self.language.t("batch_results"))
-                                            .color(self.theme.fg_dim)
-                                            .size(11.0)
-                                            .strong()
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(format!("{}", self.batch_execution.results.len()))
-                                            .color(self.theme.fg_dim)
-                                            .size(11.0)
-                                    );
-                                });
-                                ui.add_space(10.0);
-
-                                ui.spacing_mut().item_spacing.y = 8.0;
-
-                                // Collect results data to avoid borrow issues
-                                let results_data: Vec<(usize, BatchStatus, String, std::time::Instant, String)> = self.batch_execution.results
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(idx, r)| (idx, r.status.clone(), r.target.name.clone(), r.timestamp, r.output.clone()))
-                                    .collect();
-                                let expanded_set: std::collections::HashSet<usize> = self.batch_execution.expanded_results.iter().copied().collect();
-
-                                for (result_idx, status, target_name, timestamp, output_text) in results_data {
-                                    let (icon, icon_color) = match status {
-                                        BatchStatus::Pending => ("⏳", self.theme.fg_dim),
-                                        BatchStatus::Running => ("⟳", self.theme.accent),
-                                        BatchStatus::Success => ("✓", self.theme.green),
-                                        BatchStatus::Failed(_) => ("✗", self.theme.red),
-                                    };
-
-                                    let is_expanded = expanded_set.contains(&result_idx);
-
+                                // Expanded output
+                                if is_expanded {
                                     egui::Frame {
                                         fill: self.theme.bg_secondary,
-                                        rounding: egui::Rounding::same(6.0),
-                                        inner_margin: egui::Margin::symmetric(12.0, 10.0),
-                                        stroke: egui::Stroke::new(1.0, egui::Color32::TRANSPARENT),
+                                        rounding: egui::Rounding::same(4.0),
+                                        inner_margin: egui::Margin::symmetric(16.0, 10.0),
+                                        outer_margin: egui::Margin { left: 24.0, right: 24.0, top: 0.0, bottom: 4.0 },
                                         ..Default::default()
                                     }
                                     .show(ui, |ui| {
-                                        // Main result row
-                                        ui.horizontal(|ui| {
-                                            // Expand/collapse button
-                                            if ui.add(
-                                                egui::Button::new(
-                                                    egui::RichText::new(if is_expanded { "▼" } else { "▶" })
-                                                        .color(self.theme.fg_dim)
-                                                        .size(10.0)
-                                                )
-                                                .frame(false)
-                                            ).clicked() {
-                                                if is_expanded {
-                                                    self.batch_execution.expanded_results.retain(|&x| x != result_idx);
-                                                } else {
-                                                    self.batch_execution.expanded_results.push(result_idx);
-                                                }
-                                            }
-
-                                            ui.add_space(4.0);
-
-                                            // Status icon
+                                        if output_text.is_empty() {
                                             ui.label(
-                                                egui::RichText::new(icon)
-                                                    .color(icon_color)
-                                                    .size(14.0)
+                                                egui::RichText::new(self.language.t("batch_no_output"))
+                                                    .color(self.theme.fg_dim).size(11.0).italics()
                                             );
-
-                                            ui.add_space(6.0);
-
-                                            // Target name
-                                            ui.label(
-                                                egui::RichText::new(&target_name)
-                                                    .color(self.theme.fg_primary)
-                                                    .size(12.0)
-                                                    .strong()
-                                            );
-
-                                            // Status text
-                                            let status_text = match status {
-                                                BatchStatus::Pending => self.language.t("batch_waiting"),
-                                                BatchStatus::Running => self.language.t("batch_running"),
-                                                BatchStatus::Success => self.language.t("batch_success"),
-                                                BatchStatus::Failed(_) => self.language.t("batch_failed"),
+                                        } else {
+                                            let output_lines = output_text.lines().count();
+                                            let display_output = if output_lines > 10 {
+                                                output_text.lines().take(10).collect::<Vec<&str>>().join("\n")
+                                            } else {
+                                                output_text.clone()
                                             };
                                             ui.label(
-                                                egui::RichText::new(status_text)
-                                                    .color(icon_color)
-                                                    .size(11.0)
+                                                egui::RichText::new(display_output)
+                                                    .text_style(egui::TextStyle::Monospace)
+                                                    .color(self.theme.fg_primary).size(11.0)
+                                            );
+                                            if output_lines > 10 {
+                                                ui.add_space(4.0);
+                                                ui.label(
+                                                    egui::RichText::new(format!("... ({} more lines)", output_lines - 10))
+                                                        .color(self.theme.fg_dim).size(10.0).italics()
+                                                );
+                                            }
+                                        }
+                                        // Timestamp
+                                        ui.add_space(4.0);
+                                        let elapsed = timestamp.elapsed();
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                egui::RichText::new(format!("{} {}", self.format_duration(elapsed), self.language.t("batch_ago")))
+                                                    .color(self.theme.fg_dim).size(10.0)
                                             );
 
-                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                // Jump to session button
+                                            // Action buttons
+                                            if matches!(status, BatchStatus::Success | BatchStatus::Failed(_)) {
                                                 let can_jump = self.batch_execution.results.get(result_idx)
-                                                    .and_then(|r| if r.target.tab_idx != usize::MAX { Some(true) } else { Some(false) })
-                                                    .unwrap_or(false);
-
-                                                if matches!(status, BatchStatus::Success | BatchStatus::Failed(_)) {
-                                                    if ui.add_enabled(
-                                                        can_jump,
-                                                        egui::Button::new(
-                                                            egui::RichText::new("↗")
-                                                                .color(self.theme.fg_dim)
-                                                                .size(14.0)
-                                                        )
-                                                        .frame(false)
-                                                        .rounding(4.0)
-                                                    ).on_hover_text(self.language.t("batch_jump_to_session")).clicked() {
-                                                        // TODO: Implement jump to session
-                                                    }
-
-                                                    // Re-execute individual command
-                                                    if matches!(status, BatchStatus::Failed(_)) {
-                                                        if ui.add(
-                                                            egui::Button::new(
-                                                                egui::RichText::new("↻")
-                                                                    .color(self.theme.fg_dim)
-                                                                    .size(12.0)
-                                                            )
-                                                            .frame(false)
-                                                            .rounding(4.0)
-                                                        ).on_hover_text(self.language.t("batch_reexecute_single")).clicked() {
-                                                            // TODO: Re-execute single command
-                                                        }
-                                                    }
+                                                    .map_or(false, |r| r.target.tab_idx != usize::MAX);
+                                                if ui.add_enabled(
+                                                    can_jump,
+                                                    egui::Button::new(egui::RichText::new(self.language.t("batch_jump_to_session")).color(self.theme.accent).size(10.0)).frame(false)
+                                                ).clicked() {
+                                                    // TODO: Implement jump to session
                                                 }
-                                            });
-                                        });
-
-                                        // Expanded output section
-                                        if is_expanded {
-                                            ui.add_space(8.0);
-
-                                            egui::Frame {
-                                                fill: self.theme.bg_elevated,
-                                                rounding: egui::Rounding::same(4.0),
-                                                inner_margin: egui::Margin::symmetric(10.0, 8.0),
-                                                ..Default::default()
                                             }
-                                            .show(ui, |ui| {
-                                                // Output with monospace font
-                                                if output_text.is_empty() {
-                                                    ui.label(
-                                                        egui::RichText::new(self.language.t("batch_no_output"))
-                                                            .color(self.theme.fg_dim)
-                                                            .size(11.0)
-                                                            .italics()
-                                                    );
-                                                } else {
-                                                    let output_lines = output_text.lines().count();
-                                                    let display_output = if output_lines > 10 {
-                                                        output_text.lines().take(10).collect::<Vec<&str>>().join("\n")
-                                                    } else {
-                                                        output_text.clone()
-                                                    };
-                                                    ui.label(
-                                                        egui::RichText::new(display_output)
-                                                            .text_style(egui::TextStyle::Monospace)
-                                                            .color(self.theme.fg_primary)
-                                                            .size(11.0)
-                                                    );
-                                                    if output_lines > 10 {
-                                                        ui.add_space(4.0);
-                                                        ui.label(
-                                                            egui::RichText::new(format!("... ({} more lines)", output_lines - 10))
-                                                                .color(self.theme.fg_dim)
-                                                                .size(10.0)
-                                                                .italics()
-                                                        );
-                                                    }
-                                                }
-
-                                                // Timestamp
-                                                ui.add_space(4.0);
-                                                let elapsed = timestamp.elapsed();
-                                                ui.label(
-                                                    egui::RichText::new(format!("{} {}", self.format_duration(elapsed), self.language.t("batch_ago")))
-                                                        .color(self.theme.fg_dim)
-                                                        .size(10.0)
-                                                );
-                                            });
-                                        }
+                                        });
                                     });
                                 }
-                            });
+                            }
                         }
 
                         ui.add_space(20.0);

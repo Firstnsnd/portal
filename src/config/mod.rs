@@ -3,8 +3,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
-/// Authentication method for SSH connections
+/// Authentication method for SSH connections (LEGACY — kept for migration/fallback)
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(tag = "type")]
 pub enum AuthMethod {
@@ -26,6 +28,70 @@ pub enum AuthMethod {
     },
 }
 
+// ── Credential (first-class entity) ─────────────────────────────────
+
+/// A reusable credential stored in credentials.json.
+/// Secrets (password, private key, passphrase) are NEVER in JSON — only in macOS keychain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Credential {
+    pub id: String,
+    pub name: String,
+    pub credential_type: CredentialType,
+    #[serde(default)]
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+pub enum CredentialType {
+    #[serde(rename = "password")]
+    Password { username: String },
+    #[serde(rename = "ssh_key")]
+    SshKey {
+        #[serde(default)]
+        key_path: String,
+        #[serde(default)]
+        key_in_keychain: bool,
+        #[serde(default)]
+        has_passphrase: bool,
+    },
+}
+
+impl Credential {
+    pub fn new_password(name: String, username: String) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name,
+            credential_type: CredentialType::Password { username },
+            created_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        }
+    }
+
+    pub fn new_ssh_key(name: String, key_path: String, key_in_keychain: bool, has_passphrase: bool) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name,
+            credential_type: CredentialType::SshKey { key_path, key_in_keychain, has_passphrase },
+            created_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        }
+    }
+}
+
+/// Resolved authentication data (transient, in-memory only).
+/// Built on-demand by `resolve_auth` — loads secrets from keychain.
+#[derive(Debug, Clone)]
+pub enum ResolvedAuth {
+    None,
+    Password { password: String },
+    Key { key_content: String, passphrase: Option<String> },
+}
+
 /// A saved host/connection entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostEntry {
@@ -42,7 +108,11 @@ pub struct HostEntry {
     #[serde(default)]
     pub is_local: bool,
     #[serde(default)]
+    pub credential_id: Option<String>,
+    #[serde(default)]
     pub auth: AuthMethod,
+    #[serde(default)]
+    pub startup_commands: Vec<String>,
 }
 
 fn default_port() -> u16 {
@@ -59,11 +129,13 @@ impl HostEntry {
             group: String::new(),
             tags: Vec::new(),
             is_local: true,
+            credential_id: None,
             auth: AuthMethod::None,
+            startup_commands: Vec::new(),
         }
     }
 
-    pub fn new_ssh(name: String, host: String, port: u16, username: String, group: String, auth: AuthMethod) -> Self {
+    pub fn new_ssh(name: String, host: String, port: u16, username: String, group: String, credential_id: Option<String>, startup_commands: Vec<String>) -> Self {
         Self {
             name,
             host,
@@ -72,7 +144,9 @@ impl HostEntry {
             group,
             tags: Vec::new(),
             is_local: false,
-            auth,
+            credential_id,
+            auth: AuthMethod::None,
+            startup_commands,
         }
     }
 }
@@ -101,7 +175,7 @@ fn keyring_key(host: &str, port: u16, username: &str, kind: &str) -> String {
 
 /// Store a credential in the system keychain via `security` CLI.
 /// Uses `-A` to allow any application to access (no password prompt on rebuild).
-fn store_credential(host: &str, port: u16, username: &str, kind: &str, secret: &str, display_name: &str) -> bool {
+fn store_host_credential(host: &str, port: u16, username: &str, kind: &str, secret: &str, display_name: &str) -> bool {
     let account = keyring_key(host, port, username, kind);
     let service = keyring_service(display_name);
 
@@ -180,9 +254,9 @@ fn security_find_password(service: &str, account: &str) -> Option<String> {
     Option::None
 }
 
-/// Load a credential from the system keychain.
+/// Load a credential from the system keychain (host-based key scheme).
 /// Tries new per-host service first, then falls back to legacy "portal-ssh".
-pub fn load_credential(host: &str, port: u16, username: &str, kind: &str, display_name: &str) -> Option<String> {
+pub fn load_host_credential(host: &str, port: u16, username: &str, kind: &str, display_name: &str) -> Option<String> {
     let account = keyring_key(host, port, username, kind);
 
     // Try per-host service first
@@ -200,8 +274,8 @@ pub fn load_credential(host: &str, port: u16, username: &str, kind: &str, displa
     Option::None
 }
 
-/// Delete a credential from the system keychain (both new and legacy service).
-pub fn delete_credential(host: &str, port: u16, username: &str, kind: &str, display_name: &str) {
+/// Delete a host-based credential from the system keychain (both new and legacy service).
+pub fn delete_host_credential(host: &str, port: u16, username: &str, kind: &str, display_name: &str) {
     let account = keyring_key(host, port, username, kind);
     // Delete from new service
     let service = keyring_service(display_name);
@@ -214,17 +288,265 @@ pub fn delete_credential(host: &str, port: u16, username: &str, kind: &str, disp
         .output();
 }
 
-/// Delete all keychain entries associated with a host entry.
+/// Delete all keychain entries associated with a host entry (legacy scheme).
 pub fn delete_host_credentials(host: &HostEntry) {
     match &host.auth {
         AuthMethod::Password { .. } => {
-            delete_credential(&host.host, host.port, &host.username, "password", &host.name);
+            delete_host_credential(&host.host, host.port, &host.username, "password", &host.name);
         }
         AuthMethod::Key { .. } => {
-            delete_credential(&host.host, host.port, &host.username, "passphrase", &host.name);
-            delete_credential(&host.host, host.port, &host.username, "privatekey", &host.name);
+            delete_host_credential(&host.host, host.port, &host.username, "passphrase", &host.name);
+            delete_host_credential(&host.host, host.port, &host.username, "privatekey", &host.name);
         }
         AuthMethod::None => {}
+    }
+}
+
+// ── Credential-based keychain functions (new scheme) ─────────────
+
+/// Build the keychain service name for a credential entity.
+fn credential_keyring_service(cred_name: &str) -> String {
+    format!("Portal Credential: {cred_name}")
+}
+
+/// Build the keychain account key for a credential entity.
+fn credential_keyring_key(cred_id: &str, kind: &str) -> String {
+    format!("credential:{cred_id}:{kind}")
+}
+
+/// Store a secret for a Credential entity in the system keychain.
+pub fn store_credential_secret(cred_id: &str, cred_name: &str, kind: &str, secret: &str) -> bool {
+    let account = credential_keyring_key(cred_id, kind);
+    let service = credential_keyring_service(cred_name);
+
+    let _ = Command::new("security")
+        .args(["delete-generic-password", "-a", &account, "-s", &service])
+        .output();
+
+    let result = Command::new("security")
+        .args(["add-generic-password", "-a", &account, "-s", &service, "-w", secret, "-A"])
+        .output();
+
+    match result {
+        Ok(o) if o.status.success() => true,
+        Ok(o) => {
+            log::warn!(
+                "Failed to store credential secret in keychain: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            );
+            false
+        }
+        Err(e) => {
+            log::warn!("Failed to run security command: {e}");
+            false
+        }
+    }
+}
+
+/// Load a secret for a Credential entity from the system keychain.
+pub fn load_credential_secret(cred_id: &str, cred_name: &str, kind: &str) -> Option<String> {
+    let account = credential_keyring_key(cred_id, kind);
+    let service = credential_keyring_service(cred_name);
+    security_find_password(&service, &account)
+}
+
+/// Delete all keychain secrets for a Credential entity.
+pub fn delete_credential_secrets(cred_id: &str, cred_name: &str) {
+    for kind in &["password", "privatekey", "passphrase"] {
+        let account = credential_keyring_key(cred_id, kind);
+        let service = credential_keyring_service(cred_name);
+        let _ = Command::new("security")
+            .args(["delete-generic-password", "-a", &account, "-s", &service])
+            .output();
+    }
+}
+
+// ── resolve_auth ────────────────────────────────────────────────────
+
+/// Build a `ResolvedAuth` for a host by looking up its credential.
+/// Falls back to legacy `AuthMethod` if no `credential_id` is set.
+pub fn resolve_auth(host: &HostEntry, credentials: &[Credential]) -> ResolvedAuth {
+    // New path: credential_id is set
+    if let Some(ref cred_id) = host.credential_id {
+        if let Some(cred) = credentials.iter().find(|c| c.id == *cred_id) {
+            return resolve_credential(cred);
+        }
+        log::warn!("Credential id {} not found for host {}", cred_id, host.name);
+    }
+
+    // Legacy fallback: use embedded AuthMethod
+    resolve_legacy_auth(host)
+}
+
+/// Resolve a Credential to ResolvedAuth by loading secrets from keychain.
+pub fn resolve_credential(cred: &Credential) -> ResolvedAuth {
+    match &cred.credential_type {
+        CredentialType::Password { .. } => {
+            if let Some(pw) = load_credential_secret(&cred.id, &cred.name, "password") {
+                ResolvedAuth::Password { password: pw }
+            } else {
+                ResolvedAuth::None
+            }
+        }
+        CredentialType::SshKey { key_in_keychain, has_passphrase, .. } => {
+            let key_content = if *key_in_keychain {
+                load_credential_secret(&cred.id, &cred.name, "privatekey").unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let passphrase = if *has_passphrase {
+                load_credential_secret(&cred.id, &cred.name, "passphrase")
+            } else {
+                None
+            };
+            if key_content.is_empty() && passphrase.is_none() {
+                ResolvedAuth::None
+            } else {
+                ResolvedAuth::Key { key_content, passphrase }
+            }
+        }
+    }
+}
+
+/// Resolve legacy AuthMethod from host-based keychain scheme.
+fn resolve_legacy_auth(host: &HostEntry) -> ResolvedAuth {
+    match &host.auth {
+        AuthMethod::None => ResolvedAuth::None,
+        AuthMethod::Password { password } => {
+            let pw = if password.is_empty() {
+                load_host_credential(&host.host, host.port, &host.username, "password", &host.name)
+                    .unwrap_or_default()
+            } else {
+                password.clone()
+            };
+            if pw.is_empty() {
+                ResolvedAuth::None
+            } else {
+                ResolvedAuth::Password { password: pw }
+            }
+        }
+        AuthMethod::Key { key_path, key_content, passphrase, key_in_keychain } => {
+            let key_data = if *key_in_keychain {
+                load_host_credential(&host.host, host.port, &host.username, "privatekey", &host.name)
+                    .unwrap_or_default()
+            } else if !key_content.is_empty() {
+                key_content.clone()
+            } else if !key_path.is_empty() {
+                let expanded = if key_path.starts_with('~') {
+                    if let Some(home) = dirs::home_dir() {
+                        home.join(&key_path[2..]).to_string_lossy().to_string()
+                    } else {
+                        key_path.clone()
+                    }
+                } else {
+                    key_path.clone()
+                };
+                std::fs::read_to_string(&expanded).unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            let pp = if passphrase.is_empty() {
+                load_host_credential(&host.host, host.port, &host.username, "passphrase", &host.name)
+            } else {
+                Some(passphrase.clone())
+            };
+
+            ResolvedAuth::Key { key_content: key_data, passphrase: pp }
+        }
+    }
+}
+
+// ── Credentials persistence ─────────────────────────────────────────
+
+/// Get the credentials file path
+pub fn credentials_file_path() -> PathBuf {
+    config_dir().join("credentials.json")
+}
+
+/// Load credentials from JSON file.
+pub fn load_credentials(path: &Path) -> Vec<Credential> {
+    if let Ok(data) = std::fs::read_to_string(path) {
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Save credentials to JSON file.
+pub fn save_credentials(path: &Path, credentials: &[Credential]) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(credentials) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+// ── Migration ───────────────────────────────────────────────────────
+
+/// Migrate hosts with embedded AuthMethod to credential-based references.
+/// Creates Credential entities, re-keys keychain entries from old→new scheme,
+/// and sets `credential_id` on each host. Idempotent (skips already-migrated hosts).
+pub fn migrate_hosts_to_credentials(hosts: &mut [HostEntry], credentials: &mut Vec<Credential>) {
+    let mut changed = false;
+
+    for host in hosts.iter_mut() {
+        if host.is_local || host.credential_id.is_some() || host.auth == AuthMethod::None {
+            continue;
+        }
+
+        match &host.auth {
+            AuthMethod::Password { .. } => {
+                let cred = Credential::new_password(
+                    format!("{} (password)", host.name),
+                    host.username.clone(),
+                );
+
+                // Re-key: load from old scheme, store to new scheme
+                if let Some(pw) = load_host_credential(&host.host, host.port, &host.username, "password", &host.name) {
+                    store_credential_secret(&cred.id, &cred.name, "password", &pw);
+                }
+
+                host.credential_id = Some(cred.id.clone());
+                credentials.push(cred);
+                changed = true;
+            }
+            AuthMethod::Key { key_path, key_in_keychain, passphrase, .. } => {
+                let has_passphrase = !passphrase.is_empty() ||
+                    load_host_credential(&host.host, host.port, &host.username, "passphrase", &host.name).is_some();
+
+                let cred = Credential::new_ssh_key(
+                    format!("{} (key)", host.name),
+                    key_path.clone(),
+                    *key_in_keychain,
+                    has_passphrase,
+                );
+
+                // Re-key private key
+                if *key_in_keychain {
+                    if let Some(key_data) = load_host_credential(&host.host, host.port, &host.username, "privatekey", &host.name) {
+                        store_credential_secret(&cred.id, &cred.name, "privatekey", &key_data);
+                    }
+                }
+
+                // Re-key passphrase
+                if has_passphrase {
+                    if let Some(pp) = load_host_credential(&host.host, host.port, &host.username, "passphrase", &host.name) {
+                        store_credential_secret(&cred.id, &cred.name, "passphrase", &pp);
+                    }
+                }
+
+                host.credential_id = Some(cred.id.clone());
+                credentials.push(cred);
+                changed = true;
+            }
+            AuthMethod::None => {}
+        }
+    }
+
+    if changed {
+        log::info!("Migrated {} host(s) to credential-based auth", credentials.len());
     }
 }
 
@@ -324,13 +646,13 @@ pub fn load_hosts(path: &Path) -> Vec<HostEntry> {
             AuthMethod::Password { password } => {
                 if !password.is_empty() {
                     // Plaintext password in JSON — migrate to keychain
-                    if store_credential(&host.host, host.port, &host.username, "password", password, &host.name) {
+                    if store_host_credential(&host.host, host.port, &host.username, "password", password, &host.name) {
                         password.clear();
                         needs_resave = true;
                     }
                 } else {
                     // Empty password in JSON — restore from keychain
-                    if let Some(secret) = load_credential(&host.host, host.port, &host.username, "password", &host.name) {
+                    if let Some(secret) = load_host_credential(&host.host, host.port, &host.username, "password", &host.name) {
                         *password = secret;
                     }
                 }
@@ -338,13 +660,13 @@ pub fn load_hosts(path: &Path) -> Vec<HostEntry> {
             AuthMethod::Key { passphrase, .. } => {
                 if !passphrase.is_empty() {
                     // Plaintext passphrase in JSON — migrate to keychain
-                    if store_credential(&host.host, host.port, &host.username, "passphrase", passphrase, &host.name) {
+                    if store_host_credential(&host.host, host.port, &host.username, "passphrase", passphrase, &host.name) {
                         passphrase.clear();
                         needs_resave = true;
                     }
                 } else {
                     // Empty passphrase in JSON — restore from keychain
-                    if let Some(secret) = load_credential(&host.host, host.port, &host.username, "passphrase", &host.name) {
+                    if let Some(secret) = load_host_credential(&host.host, host.port, &host.username, "passphrase", &host.name) {
                         *passphrase = secret;
                     }
                 }
@@ -378,7 +700,7 @@ pub fn save_hosts(path: &Path, hosts: &[HostEntry]) {
             match &mut entry.auth {
                 AuthMethod::Password { password } => {
                     if !password.is_empty() {
-                        if store_credential(&h.host, h.port, &h.username, "password", password, &h.name) {
+                        if store_host_credential(&h.host, h.port, &h.username, "password", password, &h.name) {
                             password.clear();
                         }
                         // If keychain store failed, keep plaintext as fallback
@@ -413,14 +735,14 @@ pub fn save_hosts(path: &Path, hosts: &[HostEntry]) {
                         };
 
                         if !key_data.is_empty() {
-                            if store_credential(&h.host, h.port, &h.username, "privatekey", &key_data, &h.name) {
+                            if store_host_credential(&h.host, h.port, &h.username, "privatekey", &key_data, &h.name) {
                                 *key_in_keychain = true;
                                 log::info!("Imported private key into keychain for {}@{}:{}", h.username, h.host, h.port);
                             }
                         }
                     }
                     if !passphrase.is_empty() {
-                        if store_credential(&h.host, h.port, &h.username, "passphrase", passphrase, &h.name) {
+                        if store_host_credential(&h.host, h.port, &h.username, "passphrase", passphrase, &h.name) {
                             passphrase.clear();
                         }
                     }

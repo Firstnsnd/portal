@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::config::HostEntry;
+use crate::config::{HostEntry, ResolvedAuth};
 use crate::ssh::{SshSession, SshConnectionState};
 use crate::terminal::{TerminalGrid, RealPtySession};
 
@@ -144,6 +144,15 @@ impl SessionBackend {
     }
 }
 
+/// Credential mode for the host dialog
+#[derive(Default, PartialEq, Clone, Copy)]
+pub enum CredentialMode {
+    #[default]
+    None,
+    Existing,
+    Inline,
+}
+
 /// Add Host dialog state
 pub struct AddHostDialog {
     pub open: bool,
@@ -155,6 +164,10 @@ pub struct AddHostDialog {
     pub group: String,
     pub tags: String,
     pub error: String,
+    // Credential selection
+    pub credential_mode: CredentialMode,
+    pub selected_credential_id: Option<String>,
+    // Inline credential fields (used when credential_mode == Inline)
     pub auth_method: AuthMethodChoice,
     pub password: String,
     pub key_path: String,
@@ -162,6 +175,7 @@ pub struct AddHostDialog {
     pub key_source: KeySourceChoice,
     pub key_passphrase: String,
     pub key_in_keychain: bool,
+    pub startup_commands: String,
     pub test_conn_state: TestConnState,
     pub test_conn_result: Option<Arc<Mutex<Option<Result<String, String>>>>>,
 }
@@ -186,6 +200,8 @@ impl Default for AddHostDialog {
             group: String::new(),
             tags: String::new(),
             error: String::new(),
+            credential_mode: CredentialMode::None,
+            selected_credential_id: None,
             auth_method: AuthMethodChoice::Password,
             password: String::new(),
             key_path: String::new(),
@@ -193,6 +209,7 @@ impl Default for AddHostDialog {
             key_source: KeySourceChoice::LocalFile,
             key_passphrase: String::new(),
             key_in_keychain: false,
+            startup_commands: String::new(),
             test_conn_state: TestConnState::Idle,
             test_conn_result: None,
         }
@@ -218,28 +235,39 @@ impl AddHostDialog {
         self.username = host.username.clone();
         self.group = host.group.clone();
         self.tags = host.tags.join(", ");
+        self.startup_commands = host.startup_commands.join("\n");
         self.error = String::new();
-        match &host.auth {
-            crate::config::AuthMethod::Password { password } => {
-                self.auth_method = AuthMethodChoice::Password;
-                self.password = password.clone();
+
+        // Set credential mode based on host state
+        if let Some(ref cid) = host.credential_id {
+            self.credential_mode = CredentialMode::Existing;
+            self.selected_credential_id = Some(cid.clone());
+        } else if host.auth != crate::config::AuthMethod::None {
+            // Legacy host with embedded auth — show as inline
+            self.credential_mode = CredentialMode::Inline;
+            self.selected_credential_id = None;
+            match &host.auth {
+                crate::config::AuthMethod::Password { password } => {
+                    self.auth_method = AuthMethodChoice::Password;
+                    self.password = password.clone();
+                }
+                crate::config::AuthMethod::Key { key_path, key_content, passphrase, key_in_keychain } => {
+                    self.auth_method = AuthMethodChoice::Key;
+                    self.key_path = key_path.clone();
+                    self.key_content = key_content.clone();
+                    self.key_passphrase = passphrase.clone();
+                    self.key_in_keychain = *key_in_keychain;
+                    self.key_source = if !key_content.is_empty() {
+                        KeySourceChoice::ImportContent
+                    } else {
+                        KeySourceChoice::LocalFile
+                    };
+                }
+                crate::config::AuthMethod::None => {}
             }
-            crate::config::AuthMethod::Key { key_path, key_content, passphrase, key_in_keychain } => {
-                self.auth_method = AuthMethodChoice::Key;
-                self.key_path = key_path.clone();
-                self.key_content = key_content.clone();
-                self.key_passphrase = passphrase.clone();
-                self.key_in_keychain = *key_in_keychain;
-                // Determine key source based on whether key_content is present
-                self.key_source = if !key_content.is_empty() {
-                    KeySourceChoice::ImportContent
-                } else {
-                    KeySourceChoice::LocalFile
-                };
-            }
-            crate::config::AuthMethod::None => {
-                self.auth_method = AuthMethodChoice::Password;
-            }
+        } else {
+            self.credential_mode = CredentialMode::None;
+            self.selected_credential_id = None;
         }
     }
 }
@@ -288,6 +316,8 @@ pub struct TerminalSession {
     pub scroll_offset: usize,
     /// Saved host config for SSH reconnection
     pub ssh_host: Option<HostEntry>,
+    /// Saved resolved auth for SSH reconnection (avoids needing credentials vec)
+    pub resolved_auth: Option<ResolvedAuth>,
     /// Per-session text selection
     pub selection: Selection,
     /// Shell path used for local sessions (e.g. "/bin/zsh")
@@ -314,6 +344,7 @@ impl TerminalSession {
             last_rows: 24,
             scroll_offset: 0,
             ssh_host: None,
+            resolved_auth: None,
             selection: Selection::default(),
             local_shell: shell.to_string(),
             created_at: Instant::now(),
@@ -337,7 +368,7 @@ impl TerminalSession {
         }
     }
 
-    pub fn new_ssh(host: &HostEntry, runtime: &tokio::runtime::Runtime) -> Self {
+    pub fn new_ssh(host: &HostEntry, auth: ResolvedAuth, runtime: &tokio::runtime::Runtime) -> Self {
         // Use current system user if username is empty
         let username = Self::get_effective_username(&host.username);
 
@@ -346,10 +377,10 @@ impl TerminalSession {
             host.host.clone(),
             host.port,
             username,
-            host.auth.clone(),
-            host.name.clone(),
+            auth.clone(),
             80,
             24,
+            host.startup_commands.clone(),
         );
         let grid = ssh.get_grid();
         Self {
@@ -359,6 +390,7 @@ impl TerminalSession {
             last_rows: 24,
             scroll_offset: 0,
             ssh_host: Some(host.clone()),
+            resolved_auth: Some(auth),
             selection: Selection::default(),
             local_shell: String::new(),
             created_at: Instant::now(),
@@ -385,16 +417,16 @@ impl TerminalSession {
 
     /// Reconnect a disconnected SSH session
     pub fn reconnect_ssh(&mut self, runtime: &tokio::runtime::Runtime) {
-        if let Some(ref host) = self.ssh_host {
+        if let (Some(ref host), Some(ref auth)) = (&self.ssh_host, &self.resolved_auth) {
             let ssh = SshSession::connect(
                 runtime,
                 host.host.clone(),
                 host.port,
                 host.username.clone(),
-                host.auth.clone(),
-                host.name.clone(),
+                auth.clone(),
                 self.last_cols as u16,
                 self.last_rows as u16,
+                host.startup_commands.clone(),
             );
             self.grid = ssh.get_grid();
             self.session = Some(SessionBackend::Ssh(ssh));
@@ -579,10 +611,93 @@ pub enum AppView {
 
 /// Pending keychain credential deletion (awaiting user confirmation).
 pub enum KeychainDeleteRequest {
-    /// Delete a single credential: (host_index, kind: "password" | "privatekey" | "passphrase")
-    Single { host_index: usize, kind: String },
+    /// Delete a credential by id, with list of affected host names
+    ById { credential_id: String, affected_hosts: Vec<String> },
     /// Delete all credentials
     All,
+}
+
+/// Credential create/edit dialog state
+pub struct CredentialDialog {
+    pub open: bool,
+    pub edit_id: Option<String>,
+    pub name: String,
+    pub cred_type: CredentialTypeChoice,
+    pub username: String,
+    pub password: String,
+    pub key_path: String,
+    pub key_content: String,
+    pub key_source: KeySourceChoice,
+    pub key_passphrase: String,
+    pub error: String,
+}
+
+impl Default for CredentialDialog {
+    fn default() -> Self {
+        Self {
+            open: false,
+            edit_id: None,
+            name: String::new(),
+            cred_type: CredentialTypeChoice::Password,
+            username: String::new(),
+            password: String::new(),
+            key_path: String::new(),
+            key_content: String::new(),
+            key_source: KeySourceChoice::LocalFile,
+            key_passphrase: String::new(),
+            error: String::new(),
+        }
+    }
+}
+
+impl CredentialDialog {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn open_new(&mut self) {
+        self.reset();
+        self.open = true;
+    }
+
+    pub fn open_edit(&mut self, cred: &crate::config::Credential) {
+        self.open = true;
+        self.edit_id = Some(cred.id.clone());
+        self.name = cred.name.clone();
+        self.error.clear();
+        match &cred.credential_type {
+            crate::config::CredentialType::Password { username } => {
+                self.cred_type = CredentialTypeChoice::Password;
+                self.username = username.clone();
+                // Load password from keychain for display
+                self.password = crate::config::load_credential_secret(&cred.id, &cred.name, "password")
+                    .unwrap_or_default();
+            }
+            crate::config::CredentialType::SshKey { key_path, has_passphrase, .. } => {
+                self.cred_type = CredentialTypeChoice::SshKey;
+                self.key_path = key_path.clone();
+                self.key_source = if key_path.is_empty() {
+                    KeySourceChoice::ImportContent
+                } else {
+                    KeySourceChoice::LocalFile
+                };
+                self.key_passphrase = if *has_passphrase {
+                    crate::config::load_credential_secret(&cred.id, &cred.name, "passphrase")
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+            }
+        }
+    }
+}
+
+/// Credential type choice for the dialog
+#[derive(Default, PartialEq, Clone, Copy)]
+pub enum CredentialTypeChoice {
+    #[default]
+    Password,
+    SshKey,
 }
 
 /// Load shells from /etc/shells (Unix), filtering to executables.

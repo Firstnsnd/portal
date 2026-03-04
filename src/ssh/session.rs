@@ -8,7 +8,7 @@ use std::sync::{
 use tokio::sync::mpsc;
 
 use crate::terminal::{CellAttrs, TerminalGrid, VteHandler};
-use crate::config::{self, AuthMethod};
+use crate::config::ResolvedAuth;
 
 /// Commands sent from the synchronous GUI thread to the async SSH task
 enum SshCommand {
@@ -89,8 +89,7 @@ pub async fn connect_and_authenticate(
     host: &str,
     port: u16,
     username: &str,
-    auth: &AuthMethod,
-    display_name: &str,
+    auth: &ResolvedAuth,
 ) -> Result<russh::client::Handle<SshClient>, String> {
     let config = Arc::new(russh::client::Config::default());
     let addr = format!("{}:{}", host, port);
@@ -107,64 +106,21 @@ pub async fn connect_and_authenticate(
         })?;
 
     let auth_ok = match auth {
-        AuthMethod::Password { password } => {
+        ResolvedAuth::Password { password } => {
             handle
                 .authenticate_password(username, password)
                 .await
                 .map(|r| r.success())
                 .map_err(|e| format!("Auth error: {}", e))?
         }
-        AuthMethod::Key { key_path, key_content, passphrase, key_in_keychain } => {
-            let pw = if passphrase.is_empty() {
-                None
-            } else {
-                Some(passphrase.as_str())
-            };
+        ResolvedAuth::Key { key_content, passphrase } => {
+            let pw = passphrase.as_deref();
 
-            let key_pair = if *key_in_keychain {
-                // Try keychain first
-                if let Some(stored_key) = config::load_credential(host, port, username, "privatekey", display_name) {
-                    russh::keys::decode_secret_key(&stored_key, pw)
-                        .map_err(|e| format!("Key decode failed: {}", e))?
-                } else if !key_content.is_empty() {
-                    // Use imported key content
-                    russh::keys::decode_secret_key(&key_content, pw)
-                        .map_err(|e| format!("Key decode failed: {}", e))?
-                } else if !key_path.is_empty() {
-                    // Fall back to local file
-                    let expanded_path = if key_path.starts_with('~') {
-                        if let Some(home) = dirs::home_dir() {
-                            home.join(&key_path[2..])
-                        } else {
-                            std::path::PathBuf::from(key_path)
-                        }
-                    } else {
-                        std::path::PathBuf::from(key_path)
-                    };
-                    log::warn!("Private key not found in keychain, falling back to file: {}", key_path);
-                    russh::keys::load_secret_key(&expanded_path, pw)
-                        .map_err(|e| format!("Key load failed (fallback): {}", e))?
-                } else {
-                    return Err("Private key not found in keychain, no imported content, and no key path configured".to_string());
-                }
+            let key_pair = if !key_content.is_empty() {
+                russh::keys::decode_secret_key(key_content, pw)
+                    .map_err(|e| format!("Key decode failed: {}", e))?
             } else {
-                // Not using keychain - try imported content first, then local file
-                if !key_content.is_empty() {
-                    russh::keys::decode_secret_key(&key_content, pw)
-                        .map_err(|e| format!("Key decode failed: {}", e))?
-                } else {
-                    let expanded_path = if key_path.starts_with('~') {
-                        if let Some(home) = dirs::home_dir() {
-                            home.join(&key_path[2..])
-                        } else {
-                            std::path::PathBuf::from(key_path)
-                        }
-                    } else {
-                        std::path::PathBuf::from(key_path)
-                    };
-                    russh::keys::load_secret_key(&expanded_path, pw)
-                        .map_err(|e| format!("Key load failed: {}", e))?
-                }
+                return Err("No key content available for authentication".to_string());
             };
 
             let rsa_hash = handle
@@ -182,7 +138,7 @@ pub async fn connect_and_authenticate(
                 .map(|r| r.success())
                 .map_err(|e| format!("Auth error: {}", e))?
         }
-        AuthMethod::None => return Err("No authentication configured".to_string()),
+        ResolvedAuth::None => return Err("No authentication configured".to_string()),
     };
 
     if auth_ok {
@@ -207,10 +163,10 @@ impl SshSession {
         host: String,
         port: u16,
         username: String,
-        auth: AuthMethod,
-        display_name: String,
+        auth: ResolvedAuth,
         cols: u16,
         rows: u16,
+        startup_commands: Vec<String>,
     ) -> Self {
         let grid = Arc::new(Mutex::new(TerminalGrid::new(cols as usize, rows as usize)));
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -225,8 +181,8 @@ impl SshSession {
 
         runtime.spawn(async move {
             Self::ssh_task(
-                host, port, username, auth, display_name, cols, rows, grid_clone, cmd_rx,
-                state_clone, alive_clone, shell_hint_clone,
+                host, port, username, auth, cols, rows, grid_clone, cmd_rx,
+                state_clone, alive_clone, shell_hint_clone, startup_commands,
             )
             .await;
         });
@@ -243,8 +199,7 @@ impl SshSession {
         host: String,
         port: u16,
         username: String,
-        auth: AuthMethod,
-        display_name: String,
+        auth: ResolvedAuth,
         cols: u16,
         rows: u16,
         grid: Arc<Mutex<TerminalGrid>>,
@@ -252,6 +207,7 @@ impl SshSession {
         state: Arc<Mutex<SshConnectionState>>,
         alive: Arc<AtomicBool>,
         shell_hint: Arc<Mutex<Option<String>>>,
+        startup_commands: Vec<String>,
     ) {
         let set_state = |s: SshConnectionState| {
             if let Ok(mut st) = state.lock() {
@@ -262,7 +218,7 @@ impl SshSession {
         // 1. Connect + Authenticate using shared helper
         set_state(SshConnectionState::Authenticating);
 
-        let handle = match connect_and_authenticate(&host, port, &username, &auth, &display_name).await {
+        let handle = match connect_and_authenticate(&host, port, &username, &auth).await {
             Ok(h) => h,
             Err(e) => {
                 set_state(SshConnectionState::Error(e));
@@ -328,6 +284,14 @@ impl SshSession {
         }
 
         set_state(SshConnectionState::Connected);
+
+        // Send startup commands
+        for cmd in &startup_commands {
+            let cmd_line = format!("{}\n", cmd.trim());
+            if channel.data(cmd_line.as_bytes()).await.is_err() {
+                break;
+            }
+        }
 
         // 4. Main I/O loop
         let mut parser = vte::Parser::new();
@@ -436,9 +400,8 @@ pub async fn test_connection(
     host: String,
     port: u16,
     username: String,
-    auth: AuthMethod,
-    display_name: String,
+    auth: ResolvedAuth,
 ) -> Result<String, String> {
-    let _handle = connect_and_authenticate(&host, port, &username, &auth, &display_name).await?;
+    let _handle = connect_and_authenticate(&host, port, &username, &auth).await?;
     Ok("Connection successful! Authentication passed.".to_string())
 }

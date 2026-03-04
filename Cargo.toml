@@ -1,6 +1,6 @@
 [package]
 name = "portal"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 description = "A modern terminal emulator with GUI"
 
@@ -20,6 +20,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
 dirs = "5.0"
+uuid = { version = "1", features = ["v4"] }
 
 # Clipboard
 arboard = "3.4"

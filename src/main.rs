@@ -11,12 +11,12 @@ use eframe::egui;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use config::HostEntry;
+use config::{HostEntry, Credential};
 use sftp::{LocalBrowser, SftpBrowser};
 use ssh::SshConnectionState;
 
 use ui::*;
-use ui::types::{BatchExecutionState, HostFilter};
+use ui::types::{BatchExecutionState, HostFilter, CredentialDialog};
 
 struct PortalApp {
     tabs: Vec<Tab>,
@@ -24,6 +24,8 @@ struct PortalApp {
     current_view: AppView,
     hosts: Vec<HostEntry>,
     hosts_file: PathBuf,
+    credentials: Vec<Credential>,
+    credentials_file: PathBuf,
     next_id: usize,
     add_host_dialog: AddHostDialog,
     host_filter: HostFilter,
@@ -69,8 +71,9 @@ struct PortalApp {
     broadcast_state: BroadcastState,
     // Batch execution state
     batch_execution: BatchExecutionState,
-    // Keychain delete confirmation
+    // Keychain
     keychain_confirm_delete: Option<KeychainDeleteRequest>,
+    credential_dialog: CredentialDialog,
     // Settings
     theme: ThemeColors,
     theme_preset: ThemePreset, // For UI selection only, not persisted
@@ -164,7 +167,14 @@ impl PortalApp {
         };
 
         let hosts_file = config::hosts_file_path();
-        let hosts = config::load_hosts(&hosts_file);
+        let mut hosts = config::load_hosts(&hosts_file);
+
+        // Load credentials and run migration
+        let credentials_file = config::credentials_file_path();
+        let mut credentials = config::load_credentials(&credentials_file);
+        config::migrate_hosts_to_credentials(&mut hosts, &mut credentials);
+        config::save_credentials(&credentials_file, &credentials);
+        config::save_hosts(&hosts_file, &hosts);
 
         Self {
             tabs: vec![first_tab],
@@ -172,6 +182,8 @@ impl PortalApp {
             current_view: AppView::Terminal,
             hosts,
             hosts_file,
+            credentials,
+            credentials_file,
             next_id: 1,
             add_host_dialog: AddHostDialog::default(),
             host_filter: HostFilter::default(),
@@ -210,6 +222,7 @@ impl PortalApp {
             broadcast_state: BroadcastState::default(),
             batch_execution: BatchExecutionState::default(),
             keychain_confirm_delete: None,
+            credential_dialog: CredentialDialog::default(),
             theme,
             theme_preset,
             language,
@@ -236,7 +249,8 @@ impl PortalApp {
     }
 
     fn add_tab_ssh(&mut self, host: &HostEntry) {
-        let session = TerminalSession::new_ssh(host, &self.runtime);
+        let auth = config::resolve_auth(host, &self.credentials);
+        let session = TerminalSession::new_ssh(host, auth, &self.runtime);
         let tab = Tab {
             title: host.name.clone(),
             sessions: vec![session],
@@ -256,8 +270,10 @@ impl PortalApp {
         let old_idx = tab.focused_session;
         // Clone connection info from the focused session
         let ssh_host = tab.sessions.get(old_idx).and_then(|s| s.ssh_host.clone());
+        let resolved_auth = tab.sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
         let new_session = if let Some(host) = &ssh_host {
-            TerminalSession::new_ssh(host, &self.runtime)
+            let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
+            TerminalSession::new_ssh(host, auth, &self.runtime)
         } else {
             let shell = self.selected_shell.clone();
             TerminalSession::new_local(new_id, &shell)
@@ -340,6 +356,10 @@ impl PortalApp {
 
     fn save_hosts(&self) {
         config::save_hosts(&self.hosts_file, &self.hosts);
+    }
+
+    fn save_credentials(&self) {
+        config::save_credentials(&self.credentials_file, &self.credentials);
     }
 }
 
@@ -430,8 +450,10 @@ impl eframe::App for PortalApp {
                         let tab = &dw.tabs[active];
                         let old_idx = tab.focused_session;
                         let ssh_host = tab.sessions.get(old_idx).and_then(|s| s.ssh_host.clone());
+                        let resolved_auth = tab.sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                         let new_session = if let Some(host) = &ssh_host {
-                            TerminalSession::new_ssh(host, &self.runtime)
+                            let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
+                            TerminalSession::new_ssh(host, auth, &self.runtime)
                         } else {
                             let id = dw.next_id;
                             dw.next_id += 1;
@@ -454,8 +476,10 @@ impl eframe::App for PortalApp {
                         let tab = &dw.tabs[active];
                         let old_idx = tab.focused_session;
                         let ssh_host = tab.sessions.get(old_idx).and_then(|s| s.ssh_host.clone());
+                        let resolved_auth = tab.sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                         let new_session = if let Some(host) = &ssh_host {
-                            TerminalSession::new_ssh(host, &self.runtime)
+                            let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
+                            TerminalSession::new_ssh(host, auth, &self.runtime)
                         } else {
                             let id = dw.next_id;
                             dw.next_id += 1;
@@ -1055,8 +1079,10 @@ impl eframe::App for PortalApp {
                                         PaneAction::SplitHorizontal => {
                                             let old_idx = idx;
                                             let ssh_host = dw.tabs[active].sessions.get(old_idx).and_then(|s| s.ssh_host.clone());
+                                            let resolved_auth = dw.tabs[active].sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                                             let new_session = if let Some(host) = &ssh_host {
-                                                TerminalSession::new_ssh(host, &self.runtime)
+                                                let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
+                                                TerminalSession::new_ssh(host, auth, &self.runtime)
                                             } else {
                                                 let id = dw.next_id;
                                                 dw.next_id += 1;
@@ -1075,8 +1101,10 @@ impl eframe::App for PortalApp {
                                         PaneAction::SplitVertical => {
                                             let old_idx = idx;
                                             let ssh_host = dw.tabs[active].sessions.get(old_idx).and_then(|s| s.ssh_host.clone());
+                                            let resolved_auth = dw.tabs[active].sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                                             let new_session = if let Some(host) = &ssh_host {
-                                                TerminalSession::new_ssh(host, &self.runtime)
+                                                let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
+                                                TerminalSession::new_ssh(host, auth, &self.runtime)
                                             } else {
                                                 let id = dw.next_id;
                                                 dw.next_id += 1;

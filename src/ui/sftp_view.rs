@@ -923,12 +923,13 @@ impl PortalApp {
         if let Some(idx) = left_connect_host {
             let host = &self.hosts[idx];
             let username = crate::ui::types::TerminalSession::get_effective_username(&host.username);
+            let auth = crate::config::resolve_auth(host, &self.credentials);
             self.sftp_browser_left = Some(crate::sftp::SftpBrowser::connect(
                 &self.runtime,
                 host.host.clone(),
                 host.port,
                 username,
-                host.auth.clone(),
+                auth,
                 host.name.clone(),
             ));
         }
@@ -937,12 +938,13 @@ impl PortalApp {
         if let Some(idx) = connect_host {
             let host = &self.hosts[idx];
             let username = crate::ui::types::TerminalSession::get_effective_username(&host.username);
+            let auth = crate::config::resolve_auth(host, &self.credentials);
             self.sftp_browser = Some(crate::sftp::SftpBrowser::connect(
                 &self.runtime,
                 host.host.clone(),
                 host.port,
                 username,
-                host.auth.clone(),
+                auth,
                 host.name.clone(),
             ));
         }
