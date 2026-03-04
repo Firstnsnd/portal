@@ -377,7 +377,7 @@ impl PortalApp {
                         egui::pos2(rect.max.x, rect.max.y - 4.0),
                     );
                     let _ = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(tag_rect), |ui| {
-                        ui.label(egui::RichText::new(format!("🏷️ {}", tag_text))
+                        ui.label(egui::RichText::new(format!("🏷️{}", tag_text))
                             .italics()
                             .size(9.0)
                             .color(self.theme.fg_dim)
