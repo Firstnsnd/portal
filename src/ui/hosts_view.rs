@@ -325,7 +325,7 @@ impl PortalApp {
                 if !self.host_filter.matches(host) {
                     continue;
                 }
-                let row_h = 52.0;  // Increased for shadcn-style spacing
+                let row_h = 58.0;  // Increased to accommodate tags without overflow
                 let width = ui.available_width();
                 let (rect, resp) = ui.allocate_exact_size(
                     egui::vec2(width, row_h),
@@ -372,23 +372,68 @@ impl PortalApp {
                 // Tags (subtle, italic, displayed below detail with shadcn-style spacing)
                 if !host.tags.is_empty() {
                     let tag_text = host.tags.join(", ");
-                    let tag_rect = egui::Rect::from_min_max(
-                        egui::pos2(rect.min.x + 46.0, rect.min.y + 42.0),
-                        egui::pos2(rect.max.x, rect.max.y - 4.0),
+                    let full_tag_text = format!("tag: {}", tag_text);
+
+                    // Define tag area with proper clipping (stay within row bounds)
+                    let tag_y = rect.min.y + 44.0;
+                    let tag_bottom = rect.min.y + row_h - 4.0;
+                    let tag_clip_rect = egui::Rect::from_min_max(
+                        egui::pos2(rect.min.x + 46.0, tag_y),
+                        egui::pos2(rect.max.x - 80.0, tag_bottom),  // Leave space for edit button
                     );
-                    let _ = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(tag_rect), |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("tag:")
-                                .size(9.0)
-                                .color(self.theme.fg_dim)
-                            );
-                            ui.label(egui::RichText::new(tag_text)
-                                .italics()
-                                .size(9.0)
-                                .color(self.theme.fg_dim)
-                            );
-                        });
+
+                    // Check if text fits
+                    let text_width = ui.fonts(|f| {
+                        f.layout_no_wrap(full_tag_text.clone(), egui::FontId::proportional(9.0), self.theme.fg_dim)
+                            .size().x
                     });
+
+                    let display_text = if text_width > tag_clip_rect.width() {
+                        // Text too long, truncate with ellipsis
+                        let ellipsis = String::from("...");
+                        let ellipsis_width = ui.fonts(|f| {
+                            f.layout_no_wrap(ellipsis.clone(), egui::FontId::proportional(9.0), self.theme.fg_dim)
+                                .size().x
+                        });
+
+                        // Find max characters that fit
+                        let mut fitted = String::from("tag: ");
+                        let mut current_width = ui.fonts(|f| {
+                            f.layout_no_wrap(fitted.clone(), egui::FontId::proportional(9.0), self.theme.fg_dim)
+                                .size().x
+                        });
+
+                        for ch in tag_text.chars() {
+                            let char_width = ui.fonts(|f| {
+                                f.layout_no_wrap(ch.to_string(), egui::FontId::proportional(9.0), self.theme.fg_dim)
+                                    .size().x
+                            });
+
+                            if current_width + char_width + ellipsis_width <= tag_clip_rect.width() {
+                                fitted.push(ch);
+                                current_width += char_width;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        if current_width + ellipsis_width <= tag_clip_rect.width() {
+                            fitted.push_str(&ellipsis);
+                        }
+
+                        fitted
+                    } else {
+                        full_tag_text
+                    };
+
+                    // Draw with clipping to prevent overflow
+                    ui.painter().with_clip_rect(tag_clip_rect).text(
+                        egui::pos2(tag_clip_rect.min.x, tag_clip_rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        display_text,
+                        egui::FontId::proportional(9.0),
+                        self.theme.fg_dim,
+                    );
                 }
                 // Edit button (only visible on hover)
                 // Use screen right edge for consistent positioning regardless of filter
@@ -435,7 +480,7 @@ impl PortalApp {
                     if !self.host_filter.matches(host) {
                         continue;
                     }
-                    let row_h = 52.0;  // Increased for shadcn-style spacing
+                    let row_h = 58.0;  // Increased to accommodate tags without overflow
                     let width = ui.available_width();
                     let (rect, resp) = ui.allocate_exact_size(
                         egui::vec2(width, row_h),
@@ -479,23 +524,68 @@ impl PortalApp {
                     // Tags (subtle, italic, displayed below detail with shadcn-style spacing)
                     if !host.tags.is_empty() {
                         let tag_text = host.tags.join(", ");
-                        let tag_rect = egui::Rect::from_min_max(
-                            egui::pos2(rect.min.x + 46.0, rect.min.y + 42.0),
-                            egui::pos2(rect.max.x, rect.max.y - 4.0),
+                        let full_tag_text = format!("tag: {}", tag_text);
+
+                        // Define tag area with proper clipping (stay within row bounds)
+                        let tag_y = rect.min.y + 44.0;
+                        let tag_bottom = rect.min.y + row_h - 4.0;
+                        let tag_clip_rect = egui::Rect::from_min_max(
+                            egui::pos2(rect.min.x + 46.0, tag_y),
+                            egui::pos2(rect.max.x - 80.0, tag_bottom),  // Leave space for edit button
                         );
-                        let _ = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(tag_rect), |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("tag:")
-                                    .size(9.0)
-                                    .color(self.theme.fg_dim)
-                                );
-                                ui.label(egui::RichText::new(tag_text)
-                                    .italics()
-                                    .size(9.0)
-                                    .color(self.theme.fg_dim)
-                                );
-                            });
+
+                        // Check if text fits
+                        let text_width = ui.fonts(|f| {
+                            f.layout_no_wrap(full_tag_text.clone(), egui::FontId::proportional(9.0), self.theme.fg_dim)
+                                .size().x
                         });
+
+                        let display_text = if text_width > tag_clip_rect.width() {
+                            // Text too long, truncate with ellipsis
+                            let ellipsis = String::from("...");
+                            let ellipsis_width = ui.fonts(|f| {
+                                f.layout_no_wrap(ellipsis.clone(), egui::FontId::proportional(9.0), self.theme.fg_dim)
+                                    .size().x
+                            });
+
+                            // Find max characters that fit
+                            let mut fitted = String::from("tag: ");
+                            let mut current_width = ui.fonts(|f| {
+                                f.layout_no_wrap(fitted.clone(), egui::FontId::proportional(9.0), self.theme.fg_dim)
+                                    .size().x
+                            });
+
+                            for ch in tag_text.chars() {
+                                let char_width = ui.fonts(|f| {
+                                    f.layout_no_wrap(ch.to_string(), egui::FontId::proportional(9.0), self.theme.fg_dim)
+                                        .size().x
+                                });
+
+                                if current_width + char_width + ellipsis_width <= tag_clip_rect.width() {
+                                    fitted.push(ch);
+                                    current_width += char_width;
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            if current_width + ellipsis_width <= tag_clip_rect.width() {
+                                fitted.push_str(&ellipsis);
+                            }
+
+                            fitted
+                        } else {
+                            full_tag_text
+                        };
+
+                        // Draw with clipping to prevent overflow
+                        ui.painter().with_clip_rect(tag_clip_rect).text(
+                            egui::pos2(tag_clip_rect.min.x, tag_clip_rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            display_text,
+                            egui::FontId::proportional(9.0),
+                            self.theme.fg_dim,
+                        );
                     }
                     // Edit button (only visible on hover)
                     // Use screen right edge for consistent positioning regardless of filter
