@@ -1146,6 +1146,14 @@ impl eframe::App for PortalApp {
                                         PaneAction::ToggleBroadcast => {
                                             dw.tabs[active].broadcast_enabled = !dw.tabs[active].broadcast_enabled;
                                         }
+                                        PaneAction::RemoveHostKey => {
+                                            // Remove old SSH host key and reconnect
+                                            if let Some(host) = dw.tabs[active].sessions.get(idx).and_then(|s| s.ssh_host.clone()) {
+                                                let _ = crate::ssh::remove_known_hosts_key(&host.host, host.port);
+                                                // Reconnect the SSH session
+                                                dw.tabs[active].sessions[idx].reconnect_ssh(&self.runtime);
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1965,6 +1973,14 @@ impl eframe::App for PortalApp {
                                 PaneAction::ClosePane       => self.close_pane(idx),
                                 PaneAction::ToggleBroadcast => {
                                     self.tabs[active].broadcast_enabled = !self.tabs[active].broadcast_enabled;
+                                }
+                                PaneAction::RemoveHostKey => {
+                                    // Remove old SSH host key and reconnect
+                                    if let Some(host) = self.tabs[active].sessions.get(idx).and_then(|s| s.ssh_host.clone()) {
+                                        let _ = crate::ssh::remove_known_hosts_key(&host.host, host.port);
+                                        // Reconnect the SSH session
+                                        self.tabs[active].sessions[idx].reconnect_ssh(&self.runtime);
+                                    }
                                 }
                             }
                         }

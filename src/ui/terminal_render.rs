@@ -1109,10 +1109,48 @@ pub fn render_terminal_session(
                     // Filter out control characters from error message
                     let safe_err: String = err.chars().filter(|c| !c.is_control()).collect();
                     let msg = language.tf("ssh_error", &safe_err);
-                    let galley = ui.fonts(|f| f.layout_no_wrap(msg,
-                        egui::FontId::monospace(14.0), theme.red));
+
+                    // Check if this is a host key verification error
+                    let is_key_error = err.contains("Host key verification failed") ||
+                                      err.contains("MITM attack");
+
+                    // Use wrap layout to support newline characters
+                    let galley = ui.fonts(|f| f.layout(msg,
+                        egui::FontId::monospace(13.0), theme.red, rect.width() * 0.85));
+
+                    let text_y = rect.center().y - galley.rect.height() / 2.0 - 10.0;
                     painter.galley(egui::pos2(rect.center().x - galley.rect.width() / 2.0,
-                        rect.center().y - galley.rect.height() / 2.0), galley, egui::Color32::TRANSPARENT);
+                        text_y), galley, egui::Color32::TRANSPARENT);
+
+                    // Show "Remove old key" button for host key verification failures
+                    if is_key_error {
+                        let btn_size = egui::vec2(120.0, 28.0);
+                        let btn_pos = egui::pos2(rect.center().x - btn_size.x / 2.0,
+                            rect.center().y + 10.0);
+                        let btn_rect = egui::Rect::from_min_size(btn_pos, btn_size);
+                        let btn_resp = ui.allocate_rect(btn_rect, egui::Sense::click());
+
+                        // Button background (stroke style for alert)
+                        painter.rect_filled(btn_rect, 4.0, theme.bg_elevated);
+                        painter.rect_stroke(btn_rect, 4.0, egui::Stroke::new(1.0, theme.red));
+
+                        let btn_text = "Remove old key";
+                        let btn_galley = ui.fonts(|f| f.layout_no_wrap(
+                            btn_text.to_string(),
+                            egui::FontId::proportional(12.0),
+                            theme.fg_primary,
+                        ));
+                        painter.galley(
+                            egui::pos2(btn_rect.center().x - btn_galley.rect.width() / 2.0,
+                                btn_rect.center().y - btn_galley.rect.height() / 2.0),
+                            btn_galley,
+                            egui::Color32::TRANSPARENT,
+                        );
+
+                        if btn_resp.clicked() {
+                            action = Some(PaneAction::RemoveHostKey);
+                        }
+                    }
                 }
                 SshConnectionState::Disconnected(ref reason) => {
                     // Filter out control characters from reason

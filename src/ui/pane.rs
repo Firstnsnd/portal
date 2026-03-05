@@ -190,6 +190,8 @@ pub enum PaneAction {
     SplitVertical,
     ClosePane,
     ToggleBroadcast,
+    /// Remove old SSH host key from known_hosts
+    RemoveHostKey,
 }
 
 /// A workspace tab: one or more split panes sharing a single tab entry.
