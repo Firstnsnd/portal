@@ -604,41 +604,23 @@ pub fn render_pane_tree(
         }
         PaneNode::Split { direction, ratio, first, second } => {
             let dir = *direction;
-            let (rect1, rect2) = split_rect(rect, dir, *ratio);
 
-            // Divider rect (sits between rect1 and rect2)
+            // Update ratio on drag BEFORE calculating rects
             let gap = 2.0;
             let divider_rect = match dir {
                 SplitDirection::Horizontal => egui::Rect::from_min_max(
-                    egui::pos2(rect1.max.x, rect.min.y),
-                    egui::pos2(rect1.max.x + gap, rect.max.y),
+                    egui::pos2(rect.min.x + rect.width() * *ratio - gap / 2.0, rect.min.y),
+                    egui::pos2(rect.min.x + rect.width() * *ratio + gap / 2.0, rect.max.y),
                 ),
                 SplitDirection::Vertical => egui::Rect::from_min_max(
-                    egui::pos2(rect.min.x, rect1.max.y),
-                    egui::pos2(rect.max.x, rect1.max.y + gap),
+                    egui::pos2(rect.min.x, rect.min.y + rect.height() * *ratio - gap / 2.0),
+                    egui::pos2(rect.max.x, rect.min.y + rect.height() * *ratio + gap / 2.0),
                 ),
             };
 
             let divider_id = egui::Id::new("split_divider")
                 .with((rect.min.x as i32, rect.min.y as i32, dir == SplitDirection::Horizontal));
             let divider_resp = ui.interact(divider_rect, divider_id, egui::Sense::drag());
-
-            // Draw divider — highlighted on hover/drag
-            let div_color = if divider_resp.hovered() || divider_resp.dragged() {
-                theme.accent
-            } else {
-                theme.border
-            };
-            ui.painter().rect_filled(divider_rect, 0.0, div_color);
-
-            // Resize cursor
-            if divider_resp.hovered() || divider_resp.dragged() {
-                let icon = match dir {
-                    SplitDirection::Horizontal => egui::CursorIcon::ResizeHorizontal,
-                    SplitDirection::Vertical   => egui::CursorIcon::ResizeVertical,
-                };
-                ctx.set_cursor_icon(icon);
-            }
 
             // Update ratio on drag
             if divider_resp.dragged() {
@@ -653,14 +635,40 @@ pub fn render_pane_tree(
                 }
             }
 
+            // Calculate rects with current ratio
+            let (rect1, rect2) = split_rect(rect, dir, *ratio);
+
+            // Resize cursor
+            if divider_resp.hovered() || divider_resp.dragged() {
+                let icon = match dir {
+                    SplitDirection::Horizontal => egui::CursorIcon::ResizeHorizontal,
+                    SplitDirection::Vertical   => egui::CursorIcon::ResizeVertical,
+                };
+                ctx.set_cursor_icon(icon);
+            }
+
+            // Render panes
             let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language);
             let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language);
+
             // Prefer the pane with a non-Focus action (split) over a plain focus
-            match (f1, f2) {
+            let result = match (f1, f2) {
                 (Some((_, PaneAction::Focus, _)), Some(other)) => Some(other),
                 (Some(a), _) => Some(a),
                 (None, b)    => b,
-            }
+            };
+
+            // Draw divider AFTER panes to ensure it's on top
+            let div_color = if divider_resp.hovered() || divider_resp.dragged() {
+                theme.accent
+            } else {
+                theme.border
+            };
+            // Use layer_painter to draw divider on top of everything
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("divider").with(divider_id)));
+            painter.rect_filled(divider_rect, 0.0, div_color);
+
+            result
         }
     }
 }
