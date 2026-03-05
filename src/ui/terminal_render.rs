@@ -237,8 +237,12 @@ pub fn render_terminal_session(
             if let egui::Event::Paste(t) = e { Some(t.clone()) } else { None }
         }));
         if let Some(text) = clip_text {
-            session.write(&text);
-            input_bytes.extend_from_slice(text.as_bytes());
+            // Filter out control characters (except tab, newline, carriage return)
+            let safe_text: String = text.chars()
+                .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
+                .collect();
+            session.write(&safe_text);
+            input_bytes.extend_from_slice(safe_text.as_bytes());
         } else if let Ok(mut clipboard) = arboard::Clipboard::new() {
             if let Ok(text) = clipboard.get_text() {
                 session.write(&text);
@@ -303,10 +307,14 @@ pub fn render_terminal_session(
                     egui::ImeEvent::Commit(text) => {
                         ime_preedit.clear();
                         session.selection.clear();
-                        session.write(text);
-                        input_bytes.extend_from_slice(text.as_bytes());
+                        // Filter out control characters (except common safe ones like tab, newline)
+                        let safe_text: String = text.chars()
+                            .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
+                            .collect();
+                        session.write(&safe_text);
+                        input_bytes.extend_from_slice(safe_text.as_bytes());
                         ime_committed = true;
-                        session.last_non_ascii_input = !text.chars().all(|c| c.is_ascii());
+                        session.last_non_ascii_input = !safe_text.chars().all(|c| c.is_ascii());
                         *ime_composing = false;
                     }
                     egui::ImeEvent::Disabled => {
@@ -350,8 +358,14 @@ pub fn render_terminal_session(
                     // Process non-ASCII text (e.g., direct Unicode input)
                     if !text.chars().all(|c| c.is_ascii()) {
                         session.selection.clear();
-                        session.write(text);
-                        input_bytes.extend_from_slice(text.as_bytes());
+                        // Filter out control characters (except tab, newline, carriage return)
+                        let safe_text: String = text.chars()
+                            .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
+                            .collect();
+                        if !safe_text.is_empty() {
+                            session.write(&safe_text);
+                            input_bytes.extend_from_slice(safe_text.as_bytes());
+                        }
                         session.last_non_ascii_input = true;
                     } else if !is_punct {
                         // Non-punctuation ASCII text - reset flag
@@ -456,8 +470,12 @@ pub fn render_terminal_session(
                 }
                 egui::Event::Paste(text) => {
                     session.selection.clear();
-                    session.write(text);
-                    input_bytes.extend_from_slice(text.as_bytes());
+                    // Filter out control characters (except tab, newline, carriage return)
+                    let safe_text: String = text.chars()
+                        .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
+                        .collect();
+                    session.write(&safe_text);
+                    input_bytes.extend_from_slice(safe_text.as_bytes());
                 }
                 _ => {}
             }
@@ -623,63 +641,20 @@ pub fn render_terminal_session(
                 }
 
                 // Use galley for precise character positions
-                // For accurate positioning, we need to measure each character's actual rendered width
+                // Build layout for the selected range and use its actual width
+                let job = build_row_layout(cells, &font_id, col_end);
+                let galley = ui.fonts(|f| f.layout_job(job.clone()));
 
-                let mut start_x = 0.0;
-                let mut end_x = 0.0;
+                // Use galley size to get accurate total width
+                let galley_width = galley.rect.width();
+                let n_cols = col_end;
+                let avg_col_width = if n_cols > 0 { galley_width / n_cols as f32 } else { char_width };
 
-                // First pass: calculate each visible character's actual rendered width
-                let mut char_widths: Vec<f32> = Vec::new();
-
-                for idx in 0..cells.len().min(grid.cols) {
-                    let cell = &cells[idx];
-
-                    if cell.wide_continuation {
-                        // Continuation cells share their parent's width
-                        char_widths.push(0.0);
-                        continue;
-                    }
-
-                    // Create a galley for just this character to get its actual width
-                    let single_char_job = build_row_layout(&cells[idx..idx+1], &font_id, 1);
-                    let single_char_galley = ui.fonts(|f| f.layout_job(single_char_job.clone()));
-                    let actual_width = single_char_galley.rect.width();
-
-                    char_widths.push(actual_width);
-                }
-
-                // Second pass: find selection boundaries
-                let mut found_start = false;
-                let mut x_position = 0.0;
-
-                for idx in 0..col_end.min(cells.len()) {
-                    if cells[idx].wide_continuation {
-                        continue;
-                    }
-
-                    let char_width = char_widths[idx];
-
-                    // Check if this cell starts the selection
-                    if idx == col_start && !found_start {
-                        start_x = x_position;
-                        found_start = true;
-                    }
-
-                    // Update end_x if we're within selection
-                    if idx >= col_start && idx < col_end {
-                        end_x = x_position + char_width;
-                    }
-
-                    x_position += char_width;
-
-                    if idx >= col_end {
-                        break;
-                    }
-                }
+                // Calculate positions based on column indices
+                let start_x = col_start as f32 * avg_col_width;
+                let end_x = col_end as f32 * avg_col_width;
 
                 // Get actual rendered height from galley
-                let _job = build_row_layout(cells, &font_id, cells.len().min(grid.cols));
-                let _galley = ui.fonts(|f| f.layout_job(_job.clone()));
                 let char_height = sample_galley.rect.height();  // Use actual text height for proper alignment
 
                 let row_y = rect.min.y + screen_row as f32 * line_height;
@@ -717,12 +692,19 @@ pub fn render_terminal_session(
 
         // IME preedit overlay
         if is_focused && !ime_preedit.is_empty() && grid.cursor_col < grid.cols && grid.cursor_row < grid.rows {
-            let px = rect.min.x + grid.cursor_col as f32 * char_width;
-            let py = rect.min.y + grid.cursor_row as f32 * line_height + vertical_offset;
-            let galley = ui.fonts(|f| f.layout_no_wrap(ime_preedit.clone(), font_id.clone(), theme.accent));
-            let bg_rect = egui::Rect::from_min_size(egui::pos2(px, py), galley.size() + egui::vec2(4.0, 0.0));
-            painter.rect_filled(bg_rect, 2.0, theme.bg_elevated);
-            painter.galley(egui::pos2(px + 2.0, py), galley, egui::Color32::TRANSPARENT);
+            // Filter out control characters that could cause layout issues
+            let safe_preedit: String = ime_preedit.chars()
+                .filter(|c| !c.is_control())
+                .collect();
+
+            if !safe_preedit.is_empty() {
+                let px = rect.min.x + grid.cursor_col as f32 * char_width;
+                let py = rect.min.y + grid.cursor_row as f32 * line_height + vertical_offset;
+                let galley = ui.fonts(|f| f.layout_no_wrap(safe_preedit, font_id.clone(), theme.accent));
+                let bg_rect = egui::Rect::from_min_size(egui::pos2(px, py), galley.size() + egui::vec2(4.0, 0.0));
+                painter.rect_filled(bg_rect, 2.0, theme.bg_elevated);
+                painter.galley(egui::pos2(px + 2.0, py), galley, egui::Color32::TRANSPARENT);
+            }
         }
 
         // Scrollback indicator
@@ -772,13 +754,18 @@ pub fn render_terminal_session(
                 SshConnectionState::Error(ref err) => {
                     painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_premultiplied(
                         theme.bg_primary.r(), theme.bg_primary.g(), theme.bg_primary.b(), 220));
-                    let galley = ui.fonts(|f| f.layout_no_wrap(language.tf("ssh_error", err),
+                    // Filter out control characters from error message
+                    let safe_err: String = err.chars().filter(|c| !c.is_control()).collect();
+                    let msg = language.tf("ssh_error", &safe_err);
+                    let galley = ui.fonts(|f| f.layout_no_wrap(msg,
                         egui::FontId::monospace(14.0), theme.red));
                     painter.galley(egui::pos2(rect.center().x - galley.rect.width() / 2.0,
                         rect.center().y - galley.rect.height() / 2.0), galley, egui::Color32::TRANSPARENT);
                 }
                 SshConnectionState::Disconnected(ref reason) => {
-                    let galley = ui.fonts(|f| f.layout_no_wrap(language.tf("disconnected", reason),
+                    // Filter out control characters from reason
+                    let safe_reason: String = reason.chars().filter(|c| !c.is_control()).collect();
+                    let galley = ui.fonts(|f| f.layout_no_wrap(language.tf("disconnected", &safe_reason),
                         egui::FontId::monospace(11.0), theme.red));
                     painter.galley(egui::pos2(rect.min.x + 4.0, rect.max.y - galley.rect.height() - 4.0),
                         galley, egui::Color32::TRANSPARENT);
