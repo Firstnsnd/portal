@@ -1,3 +1,64 @@
+//! # UI Type Definitions
+//!
+//! This module defines shared data structures used across the UI layer.
+//!
+//! ## Core Concepts
+//!
+//! ### Terminal Sessions
+//!
+//! `TerminalSession` represents a single terminal emulator instance with:
+//! - **Terminal Grid**: Character cells, cursor, scrollback buffer
+//! - **PTY Backend**: Unix PTY or SSH session
+//! - **Selection**: Mouse selection state (start, end, active)
+//! - **Scroll Offset**: Current scrollback position
+//!
+//! ### Session Backend
+//!
+//! Sessions can be backed by different implementations:
+//! - **Local**: Unix PTY for local shell (default)
+//! - **Ssh**: Remote SSH connection with authentication
+//!
+//! ### Pane Tree
+//!
+//! Terminal panes are organized in a recursive tree structure:
+//! ```text
+//! PaneNode::Split {
+//!     direction: Horizontal,
+//!     first: Leaf(session_id),
+//!     second: Split {
+//!         direction: Vertical,
+//!         first: Leaf(session_id),
+//!         second: Leaf(session_id),
+//!         ratio: 0.5,
+//!     },
+//!     ratio: 0.7,
+//! }
+//! ```
+//!
+//! ### Broadcast Mode
+//!
+//! When broadcast is enabled, keyboard input is sent to all panes in the current tab,
+//! enabling simultaneous command execution across multiple terminals.
+//!
+//! ## Dialog Types
+//!
+//! Various dialog types for user interactions:
+//! - **AddHostDialog**: Add/edit SSH host configuration
+//! - **SftpContextMenu**: Right-click menu for SFTP entries
+//! - **SftpRenameDialog**: Rename files/directories
+//! - **SftpNewFolderDialog / SftpNewFileDialog**: Create new folders/files
+//! - **SftpConfirmDelete**: Confirm deletion with progress tracking
+//! - **SftpEditorDialog**: Built-in file editor
+//! - **SftpErrorDialog**: Display SFTP operation errors
+//!
+//! ## Key Structures
+//!
+//! - **TerminalSession**: Main terminal session type
+//! - **SessionBackend**: Backend implementation (Local/Ssh)
+//! - **PaneNode**: Pane tree node (Split or Leaf)
+//! - **BroadcastState**: Broadcast mode state
+//! - **Selection**: Text selection state (start, end, active)
+
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 

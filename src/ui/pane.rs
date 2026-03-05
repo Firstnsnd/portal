@@ -1,3 +1,76 @@
+//! # Split Pane Layout System
+//!
+//! This module implements a recursive pane tree layout system that supports:
+//! - **Horizontal splits**: Left/right panes
+//! - **Vertical splits**: Top/bottom panes
+//! - **Resizable dividers**: Drag to adjust split ratio
+//! - **Unlimited nesting**: Recursive split depth
+//! - **Dynamic restructuring**: Add/remove panes at runtime
+//!
+//! ## Data Structures
+//!
+//! ### PaneNode
+//!
+//! The core data structure representing the pane tree:
+//!
+//! ```text
+//! PaneNode::Terminal(session_id)  // Leaf node - actual terminal
+//! PaneNode::Split {               // Internal node - split pane
+//!     direction: Horizontal/Vertical,
+//!     ratio: 0.0-1.0,             // Split position (0.5 = center)
+//!     first: Box<PaneNode>,      // Left or top child
+//!     second: Box<PaneNode>,     // Right or bottom child
+//! }
+//! ```
+//!
+//! ### Example Tree
+//!
+//! ```text
+//! Split(Vertical, 0.6)           // Top 60%, Bottom 40%
+//! ├── Split(Horizontal, 0.5)     // Top half split 50/50
+//! │   ├── Terminal(0)             // Top-left pane
+//! │   └── Terminal(1)             // Top-right pane
+//! └── Terminal(2)                 // Bottom pane
+//! ```
+//!
+//! ## Operations
+//!
+//! ### replace
+//! Replace a terminal node with another node (used for closing panes).
+//!
+//! ### remove
+//! Remove a terminal node and collapse the tree:
+//! - If removing from a split, collapse to the remaining child
+//! - If only one child remains, replace the split with that child
+//! - If removing the root, return None (drop entire tree)
+//!
+//! ### decrement_indices_above
+//! After removing a session, decrement all higher indices to maintain continuity.
+//!
+//! ### offset_indices
+//! Add offset to all indices (used when merging tabs).
+//!
+//! ## Coordinate System
+//!
+//! ### split_rect
+//! Split a rectangle into two sub-rectangles based on direction and ratio.
+//! Accounts for a 2-pixel divider gap.
+//!
+//! ```text
+//! Horizontal split (ratio = 0.5):
+//!   ┌─────────────┬─────────────┐
+//!   │   Left       │   Right      │
+//!   │   (50%)      │   (50%)      │
+//!   └─────────────┴─────────────┘
+//!
+//! Vertical split (ratio = 0.3):
+//!   ┌─────────────┐
+//!   │    Top     │ (30%)
+//!   ├─────────────┤
+//!   │   Bottom   │ (70%)
+//!   └─────────────┘
+//! ```
+
 use eframe::egui;
 
 use crate::ui::types::{TerminalSession, AppView, BroadcastState};
