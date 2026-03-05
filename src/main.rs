@@ -865,7 +865,7 @@ impl eframe::App for PortalApp {
                                     SshConnectionState::Connecting => format!("SSH  {} (connecting…)", host),
                                     SshConnectionState::Authenticating => format!("SSH  {} (authenticating…)", host),
                                     SshConnectionState::Disconnected(_) => format!("SSH  {} (disconnected)", host),
-                                    SshConnectionState::Error(e) => format!("SSH  {} ({})", host, e),
+                                    SshConnectionState::Error(_) => format!("SSH  {}", host),
                                 }
                             }
                             _ => "Local".to_string(),
@@ -1656,7 +1656,7 @@ impl eframe::App for PortalApp {
                             SshConnectionState::Connecting => format!("SSH  {} (connecting…)", host),
                             SshConnectionState::Authenticating => format!("SSH  {} (authenticating…)", host),
                             SshConnectionState::Disconnected(_) => format!("SSH  {} (disconnected)", host),
-                            SshConnectionState::Error(e) => format!("SSH  {} ({})", host, e),
+                            SshConnectionState::Error(_) => format!("SSH  {}", host),
                         }
                     }
                     _ => "Local".to_string(),
