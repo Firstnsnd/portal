@@ -1,16 +1,62 @@
-//! Terminal rendering and text selection system.
+//! # Terminal Rendering System
 //!
-//! # Text Selection Index System
+//! This module provides comprehensive terminal emulation rendering with advanced text selection,
+//! mouse interaction, and multi-language support (CJK characters).
 //!
-//! The terminal uses a **unified global index system** for text selection that allows seamless
-//! selection across scrollback history and current grid content.
+//! ## Architecture Overview
 //!
-//! ## Index Ranges
+//! The rendering system is built on top of egui's immediate mode GUI framework and follows
+//! a layered architecture:
 //!
-//! - **Scrollback rows**: `[0, scrollback_len)` - historical content that has scrolled off screen
-//! - **Grid rows**: `[scrollback_len, scrollback_len + grid.rows)` - currently visible terminal content
+//! ```text
+//! ┌─────────────────────────────────────────┐
+//! │   Pane Tree (split/multiple tabs)      │
+//! ├─────────────────────────────────────────┤
+//! │   Terminal Panes (detached windows)    │
+//! ├─────────────────────────────────────────┤
+//! │   Terminal Session (per pane/tab)      │
+//! │   - Text rendering                     │
+//! │   - Mouse selection                    │
+//! │   - Keyboard input                     │
+//! │   - IME support                        │
+//! └─────────────────────────────────────────┘
+//! ```
 //!
-//! ## Example
+//! ## Core Features
+//!
+//! ### 1. Terminal Content Rendering
+//! - **VTE Parsing**: Full ANSI escape sequence support (colors, attributes, alternate screen)
+//! - **Character Rendering**: Unicode support with CJK double-width character handling
+//! - **Scrollback**: Historical content buffer with scroll-to-view functionality
+//! - **Text Layout**: egui galley-based layout with proper font metrics
+//!
+//! ### 2. Text Selection System
+//! - **Mouse Selection**: Click, drag, double-click (word), triple-click (line)
+//! - **Unified Indexing**: Seamless selection across scrollback and current grid
+//! - **CJK Word Boundaries**: Proper word detection for CJK text
+//! - **Visual Feedback**: Selection highlight with accurate positioning
+//!
+//! ### 3. Input Handling
+//! - **Keyboard Input**: Direct character input with support for all Unicode
+//! - **IME Integration**: Input Method Editor for CJK composition (Chinese/Japanese/Korean)
+//! - **Shortcuts**: Cmd+D (split horizontal), Cmd+Shift+D (split vertical), etc.
+//! - **Copy/Paste**: Clipboard integration with selected text
+//!
+//! ### 4. UI Components
+//! - **Split Panes**: Horizontal/vertical split with resizable dividers
+//! - **Close Button**: Per-pane close functionality
+//! - **Status Bar**: Connection type, shell, encoding display
+//! - **Scrollback Indicator**: Shows number of lines above current view
+//!
+//! ## Design Decisions
+//!
+//! ### Why egui Immediate Mode?
+//! - **Simplicity**: No retained state tree to manage
+//! - **Performance**: Efficient redraw with egui's clipping and caching
+//! - **Flexibility**: Easy to add custom UI elements
+//!
+//! ### Global Selection Index System
+//! The terminal uses a **unified global index system** that combines scrollback and grid rows:
 //!
 //! ```text
 //! scrollback_len = 100, grid.rows = 30
@@ -18,6 +64,58 @@
 //! Global indices:
 //!   0-99:   scrollback rows (history)
 //!   100-129: grid rows (current content)
+//! ```
+//!
+//! **Benefits**:
+//! - Selection can span scrollback and grid seamlessly
+//! - Single coordinate system for all selection operations
+//! - Simplifies selection rendering logic
+//!
+//! ### Text Layout Strategy
+//! - **egui Galleys**: Use egui's text layout for accurate metrics
+//! - **Per-Row Layout**: Build layout job for each row independently
+//! - **Wide Character Handling**: Filter continuation cells for layout
+//! - **Color Preserving**: Maintain per-character colors from VTE
+//!
+//! ## Performance Considerations
+//!
+//! ### Rendering Optimization
+//! - **Clipping**: Only render visible rows (with scrollback offset)
+//! - **Layout Caching**: egui caches galley layouts internally
+//! - **Minimal Redraw**: egui's dirty rect tracking reduces unnecessary draws
+//!
+//! ### Memory Management
+//! - **Scrollback Buffer**: Limited size (typically 1000-10000 lines)
+//! - **Grid Resize**: Dynamic resizing based on pane size
+//! - **Selection State**: Minimal state (start/end positions only)
+//!
+//! ## Coordinate Systems
+//!
+//! ### Screen Coordinates
+//! - **Origin**: Top-left of the pane
+//! - **Units**: Pixels (f32)
+//! - **Usage**: Mouse events, rendering
+//!
+//! ### Grid Coordinates
+//! - **Origin**: Top-left of terminal content
+//! - **Units**: Character cells (row, col)
+//! - **Usage**: Selection, cursor positioning
+//!
+//! ### Global Selection Coordinates
+//! - **Scrollback**: [0, scrollback_len)
+//! - **Grid**: [scrollback_len, scrollback_len + grid.rows)
+//! - **Usage**: Unified selection storage
+//!
+//! ## Text Selection Index System
+//!
+//! ### Index Ranges
+//! - **Scrollback rows**: `[0, scrollback_len)` - historical content
+//! - **Grid rows**: `[scrollback_len, scrollback_len + grid.rows)` - current content
+//!
+//! ### Example
+//!
+//! ```text
+//! scrollback_len = 100, grid.rows = 30
 //!
 //! User clicks on screen row 5 (grid area):
 //!   → pixel_to_cell returns global index = 100 + 5 = 105
@@ -25,26 +123,79 @@
 //!   → renderer knows: 105 >= 100, so it's grid row 5 (105 - 100)
 //! ```
 //!
-//! ## Coordinate Transformations
+//! ### Coordinate Transformations
 //!
-//! ### Click Detection (pixel → global index)
-//! - Calculate `screen_row` from Y position
-//! - If in scrollback area: return scrollback index
-//! - If in grid area: return `scrollback_len + local_grid_row`
+//! #### Click Detection (pixel → global index)
+//! ```text
+//! screen_row = (pos.y - rect.min.y) / line_height
+//! if screen_row < offset:
+//!     return scrollback_index  // [0, scrollback_len)
+//! else:
+//!     return scrollback_len + grid_row  // [scrollback_len, ...)
+//! ```
 //!
-//! ### Selection Rendering (global index → screen position)
-//! - If `sel_row < scrollback_len`: render scrollback content
-//! - If `sel_row >= scrollback_len`: render grid content at `sel_row - scrollback_len`
+//! #### Selection Rendering (global index → screen position)
+//! ```text
+//! if sel_row < scrollback_len:
+//!     render_scrollback(sel_row)
+//! else:
+//!     render_grid(sel_row - scrollback_len)
+//! ```
 //!
-//! ### Word Boundary Detection (global → local)
-//! - `find_word_boundaries` requires local grid index (access to `grid.cells[]`)
-//! - Convert: `local_row = global_row - scrollback_len` (for grid rows)
+//! #### Word Boundary Detection (global → local)
+//! ```text
+//! local_row = global_row - scrollback_len  // for grid rows
+//! find_word_boundaries(grid, local_row, col)
+//! ```
 //!
-//! ## Key Functions
+//! ## Public API
 //!
-//! - `pixel_to_cell`: Converts pixel coordinates to global (row, col) index
-//! - `render_terminal_session`: Renders selection highlight using global indices
-//! - `find_word_boundaries`: Finds word boundaries using local grid indices
+//! ### Main Rendering Functions
+//! - `render_terminal_session()`: Core terminal session renderer
+//! - `render_terminal_pane()`: Pane wrapper with UI chrome
+//! - `render_pane_tree()`: Recursive pane tree renderer
+//!
+//! ### Utility Functions
+//! - `find_word_boundaries()`: Word boundary detection for selection
+//! - `build_row_layout()`: Build egui layout job for terminal row
+//!
+//! ## Usage Example
+//!
+//! ```rust
+//! // Render a single terminal pane
+//! let (action, input_bytes) = render_terminal_session(
+//!     ui,
+//!     ctx,
+//!     &mut session,
+//!     session_id,
+//!     focused_session_id,
+//!     &broadcast_state,
+//!     &mut ime_composing,
+//!     &mut ime_preedit,
+//!     pane_rect,
+//!     pane_id,
+//!     true,  // show_close_btn
+//!     true,  // can_close_pane
+//!     &theme,
+//!     14.0,  // font_size
+//!     &language,
+//! );
+//!
+//! // Handle action (close pane, focus, etc.)
+//! if let Some(action) = action {
+//!     match action {
+//!         PaneAction::ClosePane => { /* ... */ }
+//!         PaneAction::Focus => { /* ... */ }
+//!         PaneAction::SplitHorizontal => { /* ... */ }
+//!         PaneAction::SplitVertical => { /* ... */ }
+//!     }
+//! }
+//!
+//! // Send input bytes to terminal
+//! if !input_bytes.is_empty() {
+//!     session.write(&input_bytes);
+//! }
+//! ```
 
 use eframe::egui;
 
@@ -56,8 +207,55 @@ use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
 use crate::ui::input::{key_to_ctrl_byte, key_to_char};
 
-/// Core terminal session rendering helper.
-/// Used by both in-tab panes and detached windows.
+/// Core terminal session rendering function.
+///
+/// This is the main rendering function that handles all terminal UI including:
+/// - Text content rendering (grid + scrollback)
+/// - Mouse selection (click, drag, double-click, triple-click)
+/// - Keyboard input processing
+/// - IME (Input Method Editor) for CJK languages
+/// - Close button interaction
+/// - Status bar and scrollback indicator
+///
+/// # Arguments
+///
+/// * `ui` - egui UI context for rendering
+/// * `ctx` - egui context for input/output
+/// * `session` - Terminal session state (grid, scrollback, selection, etc.)
+/// * `session_id` - Unique identifier for this session
+/// * `focused_session_id` - Currently focused session ID
+/// * `broadcast_state` - Broadcast mode state (typing to multiple terminals)
+/// * `ime_composing` - IME composition state flag
+/// * `ime_preedit` - IME preedit text buffer
+/// * `pane_rect` - Rectangle for this pane's content area
+/// * `pane_id` - egui ID for this pane
+/// * `show_close_btn` - Whether to show close button
+/// * `can_close_pane` - Whether this pane can be closed
+/// * `theme` - Color theme for rendering
+/// * `font_size` - Monospace font size in points
+/// * `language` - Language for UI text (EN/ZH/JA/KO)
+///
+/// # Returns
+///
+/// * `(Option<PaneAction>, Vec<u8>)` - Action to perform (close/focus/split) and input bytes to send
+///
+/// # Rendering Pipeline
+///
+/// 1. **Setup**: Calculate dimensions, font metrics, layout rects
+/// 2. **Input**: Handle keyboard input, IME composition, shortcuts
+/// 3. **Interaction**: Process mouse events (click, drag, scroll)
+/// 4. **Render**: Draw background, text, selection, cursor, IME preedit, UI chrome
+/// 5. **Return**: Action and input bytes for terminal session
+///
+/// # Example
+///
+/// ```rust
+/// let (action, input) = render_terminal_session(
+///     ui, ctx, &mut session, 0, 0,
+///     &broadcast_state, &mut ime_composing, &mut ime_preedit,
+///     pane_rect, pane_id, true, true, &theme, 14.0, &language
+/// );
+/// ```
 #[allow(clippy::too_many_arguments)]
 pub fn render_terminal_session(
     ui: &mut egui::Ui,
@@ -896,7 +1094,30 @@ pub fn render_terminal_session(
 }
 
 /// Render a single terminal pane into the given rect (thin wrapper around render_terminal_session).
-/// Render a single terminal pane leaf.
+/// Render a single terminal pane leaf node.
+///
+/// Wraps `render_terminal_session` with UI chrome including:
+/// - Close button in top-right corner
+/// - Border (accent color when broadcasting, standard border otherwise)
+/// - Proper spacing and padding
+///
+/// # Arguments
+///
+/// Same as `render_terminal_session` plus:
+/// * `session_idx` - Index into sessions vector
+/// * `sessions` - Mutable slice of all terminal sessions
+/// * `focused_session` - Index of currently focused session
+///
+/// # Notes
+///
+/// This function is called from `render_pane_tree` when it reaches a leaf node.
+/// For detached windows, this is the entry point. For tabbed panes, the parent
+/// manages the tab UI.
+///
+/// # See Also
+///
+/// * `render_terminal_session` - Core rendering logic
+/// * `render_pane_tree` - Recursive pane tree renderer
 #[allow(clippy::too_many_arguments)]
 pub fn render_terminal_pane(
     ui: &mut egui::Ui,
@@ -933,7 +1154,67 @@ pub fn render_terminal_pane(
 }
 
 /// Recursively render a pane layout tree into the given rect.
-/// Returns `(session_idx, action, input_bytes)` when the user interacts with a pane.
+/// Recursively render a pane tree with split panes and terminal sessions.
+///
+/// This function handles the pane tree structure which supports:
+/// - **Horizontal splits**: Panes stacked vertically (Cmd+D)
+/// - **Vertical splits**: Panes side-by-side (Cmd+Shift+D)
+/// - **Leaf nodes**: Terminal sessions
+/// - **Resizable dividers**: Drag to adjust split ratio
+/// - **Close button**: Per-pane close functionality
+///
+/// # Pane Tree Structure
+///
+/// ```text
+/// PaneNode::Split {
+///     direction: Horizontal,
+///     first: PaneNode::Leaf(0),      // Top pane
+///     second: PaneNode::Leaf(1),     // Bottom pane
+///     ratio: 0.5,                    // Split at 50%
+/// }
+/// ```
+///
+/// # Arguments
+///
+/// * `ui` - egui UI context
+/// * `ctx` - egui context for I/O
+/// * `node` - Pane tree node (mutable to update ratio from drag)
+/// * `rect` - Available rectangle for this pane
+/// * `sessions` - All terminal sessions
+/// * `focused_session` - Currently focused session index
+/// * `broadcast_state` - Broadcast mode state
+/// * `ime_composing` - IME composition state
+/// * `ime_preedit` - IME preedit text
+/// * `can_close_pane` - Whether panes can be closed
+/// * `theme` - Color theme
+/// * `font_size` - Terminal font size
+/// * `language` - UI language
+///
+/// # Returns
+///
+/// * `(Option<usize>, Option<PaneAction>, Vec<u8>)`
+///   - Session index (if any)
+///   - Action to perform (close/focus/split)
+///   - Input bytes to send to terminal
+///
+/// # Divider Interaction
+///
+/// Split dividers are interactive areas between panes:
+/// - **Width**: 2 pixels with 10-pixel hit area
+/// - **Cursor**: Changes to resize cursor on hover
+/// - **Drag**: Adjusts the split ratio
+/// - **Bounds**: Ratio clamped to [0.1, 0.9]
+///
+/// # Example
+///
+/// ```rust
+/// let (session_idx, action, input) = render_pane_tree(
+///     ui, ctx, &mut pane_root, available_rect,
+///     &mut sessions, focused_session, &broadcast_state,
+///     &mut ime_composing, &mut ime_preedit,
+///     true, &theme, 14.0, &language
+/// );
+/// ```
 #[allow(clippy::too_many_arguments)]
 pub fn render_pane_tree(
     ui: &mut egui::Ui,
@@ -1036,7 +1317,87 @@ pub fn render_pane_tree(
     }
 }
 
-/// Find word boundaries around a given cell position
+/// Find word boundaries around a given cell position for double-click selection.
+///
+/// This function identifies the start and end column indices of the word containing
+/// the specified cell. It handles both ASCII and CJK characters, as well as
+/// wide character continuation cells.
+///
+/// # Word Definition
+///
+/// A "word" is defined as a contiguous sequence of:
+/// - ASCII alphanumeric characters (a-z, A-Z, 0-9)
+/// - Underscore (_)
+/// - CJK ideographs (Chinese, Japanese, Korean characters)
+///
+/// Everything else (spaces, punctuation, symbols) is treated as a word separator.
+///
+/// # Arguments
+///
+/// * `grid` - Terminal grid containing character cells
+/// * `row` - Row index (must be < grid.rows)
+/// * `col` - Column index to find word around
+///
+/// # Returns
+///
+/// * `(usize, usize)` - Start and end column indices (inclusive range)
+///
+/// # Special Cases
+///
+/// ## Wide Characters
+///
+/// CJK characters occupy two cells (main + continuation). If clicking on a
+/// continuation cell, the function moves to the main cell first:
+///
+/// ```text
+/// Grid:  你  好  (ni hao - "hello" in Chinese)
+/// Cells: [0] [1] [2] [3]
+///        main  cont main  cont
+///
+/// Click on col 1 (continuation):
+///   → Moves to col 0 (main cell)
+///   → Returns (0, 3) - selects both characters
+/// ```
+///
+/// ## Boundary Cases
+///
+/// - Clicking on a separator (space, punctuation): returns (col, col)
+/// - Out of bounds row: returns (col, col) - no selection
+/// - Empty/separator line: returns (col, col) - single character
+///
+/// # Algorithm
+///
+/// 1. **Wide character check**: If on continuation cell, move to main cell
+/// 2. **Character classification**: Determine if clicked char is a word char
+/// 3. **Expand left**: Walk left while chars are word chars
+/// 4. **Expand right**: Walk right while chars are word chars
+/// 5. **Return**: (start_col, end_col)
+///
+/// # Example
+///
+/// ```rust
+/// let grid = /* terminal with "echo hello_world" */;
+/// let (start, end) = find_word_boundaries(&grid, 0, 8);
+/// // start = 5, end = 15 (selects "hello_world")
+///
+/// let (start, end) = find_word_boundaries(&grid, 0, 10);
+/// // start = 5, end = 15 (clicking in middle of "hello_world")
+/// ```
+///
+/// # Note
+///
+/// This function only works with grid rows, not scrollback rows. When calling
+/// from selection code, convert global index to local grid index first:
+///
+/// ```rust
+/// let local_row = if global_row < scrollback_len {
+///     /* Can't select scrollback words - not supported */
+///     return;
+/// } else {
+///     global_row - scrollback_len
+/// };
+/// let (start, end) = find_word_boundaries(&grid, local_row, col);
+/// ```
 pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usize) -> (usize, usize) {
     if row >= grid.rows {
         return (col, col);
@@ -1161,7 +1522,94 @@ pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usiz
     (start, end)
 }
 
-/// Build a colored LayoutJob for one terminal row
+/// Build a colored egui LayoutJob for rendering a terminal row.
+///
+/// This function converts terminal cell data into an egui text layout job, handling:
+/// - Character filtering (removes wide character continuation placeholders)
+/// - Color preservation (foreground and background from VTE)
+/// - Text attributes (bold, italic, underline)
+/// - Run-length optimization (groups cells with same attributes)
+///
+/// # Arguments
+///
+/// * `cells` - Terminal cell data for this row
+/// * `font_id` - egui font identifier (typically monospace)
+/// * `cols` - Number of columns to include (max(calls.len(), grid.cols))
+///
+/// # Returns
+///
+/// * `LayoutJob` - egui text layout job ready for rendering
+///
+/// # Layout Job Structure
+///
+/// The layout job consists of multiple "runs" - contiguous character sequences
+/// with the same formatting. Each run specifies:
+/// - Text substring (byte range into the full text)
+/// - Font ID
+/// - Color (foreground)
+///
+/// ## Example
+///
+/// ```text
+/// Terminal cells (with VTE colors):
+///   [H] [e] [l] [l] [o] [ ] [🌍]
+///    red red red red red white blue
+///
+/// → Text: "Hello 🌍"
+/// → Runs:
+///   - "Hello" with red color
+///   - " " with white color
+///   - "🌍" with blue color
+/// ```
+///
+/// # Wide Character Handling
+///
+/// CJK characters occupy two grid cells (main + continuation). This function
+/// automatically filters out continuation cells:
+///
+/// ```text
+/// Grid cells: [A] [你] [好] [B]
+///             (main) (main)
+/// Cells iter:  0    1    2    3
+/// Wide cont:   false false true false
+///
+/// → Visible chars: [A, 你, B]
+/// → Continuation cell at index 3 is filtered out
+/// ```
+///
+/// # Color Format
+///
+/// Terminal cells store colors as RGB tuples (u8, u8, u8). These are converted
+/// to egui's Color32 format (RGBA premultiplied).
+///
+/// Background colors use a special value (`DEFAULT_BG = (255, 255, 255)`) to
+/// indicate transparent (inherits from terminal background).
+///
+/// # Performance Notes
+///
+/// ## Run-Length Optimization
+///
+/// Instead of creating one layout section per character, the function groups
+/// consecutive characters with identical attributes into runs:
+///
+/// ```text
+/// Before: 100 chars → 100 layout sections
+/// After: 100 chars → 1-5 layout sections (typical)
+/// ```
+///
+/// This significantly reduces egui's internal overhead.
+///
+/// ## Memory Allocation
+///
+/// - `visible` vector: Pre-allocated with `cols` capacity
+/// - `text` string: Pre-allocated with `visible.len()` capacity
+/// - Byte offsets: Calculated on-demand using `char().len_utf8()`
+///
+/// # See Also
+///
+/// * `TerminalCell` - Terminal cell data structure
+/// * `egui::text::LayoutJob` - egui text layout API
+/// * `vte` crate - ANSI escape sequence parsing
 pub fn build_row_layout(
     cells: &[terminal::TerminalCell],
     font_id: &egui::FontId,
