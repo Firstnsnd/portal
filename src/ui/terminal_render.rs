@@ -73,21 +73,53 @@ pub fn render_terminal_session(
     // Mouse selection - record pixel positions first, will convert to grid coords later
     let mut drag_start_pos: Option<egui::Pos2> = None;
     let mut drag_end_pos: Option<egui::Pos2> = None;
-    let mut is_dragging = false;
     let mut triple_click_pos: Option<egui::Pos2> = None;
     let mut double_click_pos: Option<egui::Pos2> = None;
 
-    if response.drag_started() {
-        drag_start_pos = response.interact_pointer_pos();
-        drag_end_pos = drag_start_pos;
-        is_dragging = true;
+    // Use ctx.input to get raw mouse state for more reliable drag detection
+    let mouse_state = ctx.input(|i| (
+        i.pointer.primary_pressed(),
+        i.pointer.primary_down(),
+        i.pointer.primary_released(),
+        i.pointer.hover_pos(),
+        i.pointer.is_moving(),
+    ));
+    let (primary_pressed, primary_down, primary_released, hover_pos, is_moving) = mouse_state;
+
+    // Track drag state locally
+    let was_dragging = session.selection.active;
+    let is_hovering = response.hovered();
+
+    // Start dragging on left button press while hovering
+    if primary_pressed && is_hovering {
+        if let Some(pos) = hover_pos {
+            if rect.contains(pos) {
+                drag_start_pos = Some(pos);
+                drag_end_pos = Some(pos);
+                session.selection.active = true;
+            }
+        }
     }
-    if response.dragged() && is_dragging {
-        drag_end_pos = ctx.input(|i| i.pointer.hover_pos());
+
+    // Continue dragging while button is held
+    if primary_down && session.selection.active {
+        if let Some(pos) = hover_pos {
+            // Only update if we're within or near the terminal rect
+            if pos.x >= rect.min.x - 10.0 && pos.x <= rect.max.x + 10.0 &&
+               pos.y >= rect.min.y - 10.0 && pos.y <= rect.max.y + 10.0 {
+                let clamped_x = pos.x.clamp(rect.min.x, rect.max.x);
+                let clamped_y = pos.y.clamp(rect.min.y, rect.max.y);
+                drag_end_pos = Some(egui::pos2(clamped_x, clamped_y));
+            }
+        }
     }
-    if response.drag_stopped() {
-        is_dragging = false;
+
+    // Stop dragging on button release
+    if primary_released {
+        session.selection.active = false;
     }
+
+    // Handle triple-click for line selection
     if response.triple_clicked() {
         triple_click_pos = response.interact_pointer_pos();
     } else if response.double_clicked() {
@@ -407,16 +439,13 @@ pub fn render_terminal_session(
             let (grid_row, grid_col) = pixel_to_cell(pos);
             session.selection.start = (grid_row, grid_col);
             session.selection.end = (grid_row, grid_col);
-            session.selection.active = true;
         }
-        if is_dragging {
+        // Update selection end position while dragging
+        if session.selection.active {
             if let Some(pos) = drag_end_pos {
                 let (grid_row, grid_col) = pixel_to_cell(pos);
                 session.selection.end = (grid_row, grid_col);
             }
-        }
-        if response.drag_stopped() {
-            session.selection.active = false;
         }
         if let Some(pos) = triple_click_pos {
             let (grid_row, _) = pixel_to_cell(pos);
