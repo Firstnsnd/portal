@@ -2,7 +2,7 @@
 
 A modern GUI terminal emulator built with Rust and egui, inspired by Termius.
 
-![Portal](https://img.shields.io/badge/Portal-0.9.0-blue)
+![Portal](https://img.shields.io/badge/Portal-0.10.0-blue)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)
 
 ## Features
@@ -14,7 +14,8 @@ A modern GUI terminal emulator built with Rust and egui, inspired by Termius.
 - **ANSI Support** - Full 256 color + Truecolor, SGR attributes, alternate screen
 - **Scrollback** - Mouse wheel scrollback history
 - **CJK Characters** - Unicode double-width rendering with font fallback
-- **Text Selection** - Mouse drag select, Cmd+C/V, right-click context menu
+- **Text Selection** - Mouse drag select, double-click word, triple-click line selection
+- **Click to Focus** - Click terminal pane to focus and type
 
 ### SSH
 - **SSH Connections** - Password and SSH key authentication (russh)
@@ -28,12 +29,14 @@ A modern GUI terminal emulator built with Rust and egui, inspired by Termius.
 ### SFTP File Browser
 - **Dual-panel Layout** - Local and remote file browsers side by side
 - **Drag & Drop** - Transfer files by dragging between panels
+- **Built-in Editor** - Double-click files to open in embedded editor
 - **File Management** - Right-click context menu with Rename, Delete, New Folder
-- **Breadcrumb Navigation** - Clickable path segments
+- **Breadcrumb Navigation** - Clickable path segments, parent directory button
+- **Hidden Files** - Toggle visibility with Cmd+Shift+H
 - **File Permissions** - Unix permission display (rwxrwxrwx)
-- **Status Bar** - File/folder count and total size per directory
-- **Transfer Progress** - Real-time speed, progress bar, cancel support
-- **Refresh Animation** - Spinner feedback on refresh button click
+- **File Details** - Size, modification time display with aligned columns
+- **Error Display** - Operation errors shown in status bar
+- **Delete Confirmation** - Interactive dialog with progress feedback
 
 ### Host Management
 - **Host List** - Grouped SSH hosts with search
