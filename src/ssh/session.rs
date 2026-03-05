@@ -99,7 +99,7 @@ pub async fn connect_and_authenticate(
         .map_err(|e| {
             let msg = e.to_string();
             if msg.contains("KeyChanged") || msg.contains("key changed") {
-                format!("Host key verification failed: server key has changed for {}:{}. This could indicate a MITM attack. Remove the old key from ~/.ssh/known_hosts to connect.", host, port)
+                format!("Host key verification failed: server key has changed for {}:{}.\nThis could indicate a MITM attack.\nRemove the old key from ~/.ssh/known_hosts to connect.", host, port)
             } else {
                 format!("Connect failed: {}", e)
             }
@@ -404,4 +404,94 @@ pub async fn test_connection(
 ) -> Result<String, String> {
     let _handle = connect_and_authenticate(&host, port, &username, &auth).await?;
     Ok("Connection successful! Authentication passed.".to_string())
+}
+
+/// Remove a host key from the user's known_hosts file.
+/// This is useful when a server's host key has changed.
+/// Returns Ok(lines_removed) on success or Err(message) on failure.
+pub fn remove_known_hosts_key(host: &str, port: u16) -> Result<usize, String> {
+    use std::env;
+    use std::fs::File;
+    use std::io::{BufRead, BufReader, Write};
+
+    // Get the known_hosts file path
+    let home = env::var("HOME").map_err(|_| "Failed to get HOME directory".to_string())?;
+    let known_hosts_path = format!("{}/.ssh/known_hosts", home);
+
+    // Read the existing known_hosts file
+    let file = File::open(&known_hosts_path);
+    if file.is_err() {
+        return Err("known_hosts file not found".to_string());
+    }
+
+    let reader = BufReader::new(file.unwrap());
+    let mut lines = Vec::new();
+    let mut removed_count = 0;
+
+    // Parse each line and filter out matching entries
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("Failed to read known_hosts: {}", e))?;
+        let trimmed = line.trim();
+
+        // Skip empty lines and comments
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            lines.push(line);
+            continue;
+        }
+
+        // Parse the host pattern from the line
+        // Format: [host]:port keytype keydata OR host keytype keydata
+        let host_pattern = if let Some(stripped_hash) = trimmed.strip_prefix("@") {
+            // Hashed hostname entry - skip as we can't easily parse it
+            // These entries start with "|1|..." or similar
+            if stripped_hash.starts_with('|') {
+                lines.push(line);
+                continue;
+            }
+            stripped_hash.split_whitespace().next().unwrap_or("")
+        } else {
+            trimmed.split_whitespace().next().unwrap_or("")
+        };
+
+        // Check if this line matches our host:port
+        let matches = if host_pattern.contains(':') {
+            // Pattern already includes port like "[host]:port"
+            let expected = if port == 22 {
+                format!("[{}]:{}", host, port)
+            } else {
+                format!("[{}]:{}", host, port)
+            };
+            host_pattern == expected
+        } else {
+            // Pattern is just hostname or "[hostname]"
+            let clean_pattern = host_pattern.trim_start_matches('[').trim_end_matches(']');
+            let expected = if port == 22 {
+                host.to_string()
+            } else {
+                format!("[{}]:{}", host, port)
+            };
+            clean_pattern == host || host_pattern == &expected
+        };
+
+        if matches {
+            removed_count += 1;
+        } else {
+            lines.push(line);
+        }
+    }
+
+    if removed_count == 0 {
+        return Err("No matching host key found in known_hosts".to_string());
+    }
+
+    // Write back the filtered lines
+    let mut file = File::create(&known_hosts_path)
+        .map_err(|e| format!("Failed to open known_hosts for writing: {}", e))?;
+
+    for line in lines {
+        writeln!(file, "{}", line)
+            .map_err(|e| format!("Failed to write to known_hosts: {}", e))?;
+    }
+
+    Ok(removed_count)
 }

@@ -239,6 +239,10 @@ pub struct AddHostDialog {
     pub startup_commands: String,
     pub test_conn_state: TestConnState,
     pub test_conn_result: Option<Arc<Mutex<Option<Result<String, String>>>>>,
+    /// Show "Remove old key" button when host key verification fails
+    pub show_remove_key_button: bool,
+    /// Message to display after removing a key
+    pub remove_key_message: String,
 }
 
 /// Key source choice for SSH key authentication
@@ -273,6 +277,8 @@ impl Default for AddHostDialog {
             startup_commands: String::new(),
             test_conn_state: TestConnState::Idle,
             test_conn_result: None,
+            show_remove_key_button: false,
+            remove_key_message: String::new(),
         }
     }
 }

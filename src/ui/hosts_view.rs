@@ -665,8 +665,17 @@ impl PortalApp {
             .and_then(|arc| arc.lock().ok()?.take());
         if let Some(result) = polled_result {
             self.add_host_dialog.test_conn_state = match result {
-                Ok(msg) => TestConnState::Success(msg),
-                Err(msg) => TestConnState::Failed(msg),
+                Ok(msg) => {
+                    self.add_host_dialog.show_remove_key_button = false;
+                    TestConnState::Success(msg)
+                }
+                Err(msg) => {
+                    // Check if this is a host key verification error
+                    let is_key_error = msg.contains("Host key verification failed") ||
+                                      msg.contains("MITM attack");
+                    self.add_host_dialog.show_remove_key_button = is_key_error;
+                    TestConnState::Failed(msg)
+                }
             };
             self.add_host_dialog.test_conn_result = None;
         }
@@ -976,6 +985,37 @@ impl PortalApp {
                             }
                             TestConnState::Failed(msg) => {
                                 ui.label(egui::RichText::new(format!("✗ {}", msg)).color(theme.red).size(12.0));
+                                // Show "Remove old key" button for host key verification failures
+                                if self.add_host_dialog.show_remove_key_button {
+                                    ui.add_space(8.0);
+                                    if ui.add(
+                                        egui::Button::new(egui::RichText::new("Remove old key").color(theme.fg_primary).size(11.0))
+                                            .fill(theme.bg_secondary)
+                                            .rounding(4.0)
+                                            .stroke(egui::Stroke::new(1.0, theme.red))
+                                            .min_size(egui::vec2(0.0, 24.0))
+                                    ).clicked() {
+                                        self.add_host_dialog.show_remove_key_button = false;
+                                        let host = self.add_host_dialog.host.trim().to_owned();
+                                        let port: u16 = self.add_host_dialog.port.trim().parse().unwrap_or(22);
+                                        match crate::ssh::remove_known_hosts_key(&host, port) {
+                                            Ok(count) => {
+                                                self.add_host_dialog.remove_key_message =
+                                                    format!("Removed {} old key(s) from known_hosts. Try again.", count);
+                                            }
+                                            Err(e) => {
+                                                self.add_host_dialog.remove_key_message =
+                                                    format!("Failed to remove key: {}", e);
+                                            }
+                                        }
+                                    }
+                                }
+                                // Show message after key removal attempt
+                                if !self.add_host_dialog.remove_key_message.is_empty() {
+                                    ui.add_space(4.0);
+                                    ui.label(egui::RichText::new(&self.add_host_dialog.remove_key_message)
+                                        .color(theme.accent).size(11.0));
+                                }
                             }
                         }
 
