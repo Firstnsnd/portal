@@ -328,6 +328,8 @@ pub struct TerminalSession {
     pub pending_pty_size: Option<(u16, u16)>,
     /// Deadline for sending debounced PTY resize
     pub pty_resize_deadline: Instant,
+    /// Tracks if we just sent non-ASCII text (for IME punctuation handling)
+    pub last_non_ascii_input: bool,
 }
 
 impl TerminalSession {
@@ -350,6 +352,7 @@ impl TerminalSession {
             created_at: Instant::now(),
             pending_pty_size: None,
             pty_resize_deadline: Instant::now(),
+            last_non_ascii_input: false,
         }
     }
 
@@ -396,6 +399,7 @@ impl TerminalSession {
             created_at: Instant::now(),
             pending_pty_size: None,
             pty_resize_deadline: Instant::now(),
+            last_non_ascii_input: false,
         }
     }
 

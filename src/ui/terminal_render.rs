@@ -267,17 +267,46 @@ pub fn render_terminal_session(
         }
 
         let mut ime_committed = false;
+        let has_ime_events = events.iter().any(|e| matches!(e, egui::Event::Ime(_)));
+
+        // Check if this frame contains non-ASCII text events
+        let has_non_ascii_text = events.iter().any(|e| {
+            if let egui::Event::Text(text) = e {
+                !text.chars().all(|c| c.is_ascii())
+            } else {
+                false
+            }
+        });
+
+        // Chinese IME punctuation mapping - ONLY these actually get converted
+        // All other ASCII punctuation should be passed through normally
+        fn is_chinese_ime_punct(ch: char) -> bool {
+            matches!(ch,
+                '.' | ',' | ';' | ':' |  // Basic punctuation -> 。；：
+                '?' | '!' |              // Question/exclamation -> ？！
+                '(' | ')' |              // Parentheses -> （)
+                '[' | ']' |              // Square brackets -> 【】
+                '<' | '>'                // Angle brackets -> 《》
+            )
+        }
+
+        // First pass: process all IME events
         for event in &events {
             if let egui::Event::Ime(ime_event) = event {
                 match ime_event {
-                    egui::ImeEvent::Enabled => { *ime_composing = true; }
-                    egui::ImeEvent::Preedit(text) => { *ime_preedit = text.clone(); }
+                    egui::ImeEvent::Enabled => {
+                        *ime_composing = true;
+                    }
+                    egui::ImeEvent::Preedit(text) => {
+                        *ime_preedit = text.clone();
+                    }
                     egui::ImeEvent::Commit(text) => {
                         ime_preedit.clear();
                         session.selection.clear();
                         session.write(text);
                         input_bytes.extend_from_slice(text.as_bytes());
                         ime_committed = true;
+                        session.last_non_ascii_input = !text.chars().all(|c| c.is_ascii());
                         *ime_composing = false;
                     }
                     egui::ImeEvent::Disabled => {
@@ -288,8 +317,47 @@ pub fn render_terminal_session(
             }
         }
 
+        // Second pass: process other events
         for event in &events {
             match event {
+                egui::Event::Text(text) => {
+                    // If we had any IME events in this frame, skip ALL Text events
+                    // This prevents duplicate characters when IME sends both Commit and Text
+                    if has_ime_events {
+                        continue;
+                    }
+
+                    // When IME is composing, skip ALL Text events since IME handles everything
+                    if *ime_composing {
+                        continue;
+                    }
+
+                    // If last input was non-ASCII (Chinese punctuation), skip single ASCII punctuation
+                    // This catches the case where IME sends ASCII punct in a separate frame
+                    if session.last_non_ascii_input {
+                        let is_single_ascii_punct = text.len() == 1 &&
+                            text.chars().next().map(|c| is_chinese_ime_punct(c)).unwrap_or(false);
+                        if is_single_ascii_punct {
+                            // Don't reset flag - keep it true for next punctuation
+                            continue;
+                        }
+                    }
+
+                    // Reset the flag only if we're processing non-punctuation text
+                    let is_punct = text.len() == 1 &&
+                        text.chars().next().map(|c| is_chinese_ime_punct(c)).unwrap_or(false);
+
+                    // Process non-ASCII text (e.g., direct Unicode input)
+                    if !text.chars().all(|c| c.is_ascii()) {
+                        session.selection.clear();
+                        session.write(text);
+                        input_bytes.extend_from_slice(text.as_bytes());
+                        session.last_non_ascii_input = true;
+                    } else if !is_punct {
+                        // Non-punctuation ASCII text - reset flag
+                        session.last_non_ascii_input = false;
+                    }
+                }
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
                     if modifiers.command {
                         if modifiers.shift && *key == egui::Key::I {
@@ -352,10 +420,24 @@ pub fn render_terminal_session(
                             session.selection.clear();
                         } else if !*ime_composing && !ime_committed {
                             if let Some(ch) = key_to_char(key, modifiers.shift) {
-                                session.selection.clear();
-                                let s = ch.to_string();
-                                session.write(&s);
-                                input_bytes.extend_from_slice(s.as_bytes());
+                                // Check if this is a Chinese IME punctuation key
+                                let is_ime_punct = is_chinese_ime_punct(ch);
+
+                                // Skip Chinese IME punctuation if either:
+                                // 1. We just had non-ASCII input (from previous frames), OR
+                                // 2. This frame contains non-ASCII text (IME punctuation in same frame)
+                                if is_ime_punct && (session.last_non_ascii_input || has_non_ascii_text) {
+                                    // Don't reset flag - keep it true for next punctuation
+                                } else {
+                                    // Reset flag only for non-IME-punctuation keys
+                                    if !is_ime_punct {
+                                        session.last_non_ascii_input = false;
+                                    }
+                                    session.selection.clear();
+                                    let s = ch.to_string();
+                                    session.write(&s);
+                                    input_bytes.extend_from_slice(s.as_bytes());
+                                }
                             }
                         }
                     }
@@ -376,13 +458,6 @@ pub fn render_terminal_session(
                     session.selection.clear();
                     session.write(text);
                     input_bytes.extend_from_slice(text.as_bytes());
-                }
-                egui::Event::Text(text) => {
-                    if !*ime_composing && !ime_committed && !text.chars().all(|c| c.is_ascii()) {
-                        session.selection.clear();
-                        session.write(text);
-                        input_bytes.extend_from_slice(text.as_bytes());
-                    }
                 }
                 _ => {}
             }
