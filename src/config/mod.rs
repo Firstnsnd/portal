@@ -1,4 +1,98 @@
-//! Configuration management
+//! # Configuration Management
+//!
+//! This module handles all configuration-related functionality including:
+//! - **Host Management**: SSH host entries with credentials
+//! - **Credential Storage**: Secure system keychain integration (macOS Keychain)
+//! - **Configuration Persistence**: JSON-based host configuration
+//! - **Keychain Operations**: Store/load passwords, keys, and passphrases
+//!
+//! ## Security Architecture
+//!
+//! ### Credential Storage Strategy
+//!
+//! Portal uses a **host-based keychain scheme** for secure credential storage:
+//!
+//! ```text
+//! macOS Keychain Entry:
+//! - Service: "Portal <host-name>" (for passwords)
+//! - Service: "Portal Credential: <credential-id>" (for credentials)
+//! - Account: "password:<host>:22:username" or "credential:<id>:kind"
+//! - Secret: Actual password/passphrase/key (encrypted by system keychain)
+//! ```
+//!
+//! ### Separation of Concerns
+//!
+//! 1. **hosts.json** (~/Library/Application Support/portal/hosts.json):
+//!    - Contains host metadata (name, host, port, group, tags)
+//!    - References credentials by ID (credential_id)
+//!    - **NO secrets** - passwords, keys, passphrases never stored in JSON
+//!
+//! 2. **System Keychain** (macOS Keychain):
+//!    - Stores all secrets (passwords, private keys, passphrases)
+//!    - Encrypted at rest with system-level encryption
+//!    - Requires user/password to access
+//!
+//! ## Migration Path
+//!
+//! The old scheme stored everything inline in hosts.json (LEGACY AuthMethod).
+//! The new scheme separates credentials into reusable Credential entities.
+//!
+//! ## Key Functions
+//!
+//! ### Host Operations
+//! - `load_hosts()` - Load all host entries from JSON
+//! - `save_hosts()` - Persist host entries to JSON
+//! - `delete_host()` - Remove a host and its keychain entries
+//!
+//! ### Credential Operations
+//! - `store_credential_secret()` - Save password/key/passphrase to keychain
+//! - `load_credential_secret()` - Retrieve secret from keychain
+//! - `delete_credential()` - Remove credential and its secrets
+//!
+//! ### Authentication Resolution
+//! - `resolve_auth()` - Convert AuthMethod to ResolvedAuth with actual secrets
+//! - Loads secrets from keychain for SSH/SFTP connections
+//!
+//! ## Data Structures
+//!
+//! ### HostEntry
+//!
+//! Represents a saved SSH host configuration:
+//! ```json
+//! {
+//!   "name": "My Server",
+//!   "host": "example.com",
+//!   "port": 22,
+//!   "username": "user",
+//!   "group": "Production",
+//!   "tags": ["web", "linux"],
+//!   "credential_id": "cred-123",
+//!   "startup_commands": ["tmux attach"]
+//! }
+//! ```
+//!
+//! ### Credential
+//!
+//! Reusable credential stored in keychain:
+//! ```json
+//! {
+//!   "id": "cred-123",
+//!   "name": "My SSH Key",
+//!   "credential_type": "ssh_key",
+//!   "created_at": 1234567890
+//! }
+//! ```
+//!
+//! ### ResolvedAuth
+//!
+//! Transient in-memory authentication data with secrets loaded:
+//! ```rust
+//! ResolvedAuth::Password { password: "secret" }
+//! ResolvedAuth::Key {
+//!   key_content: "-----BEGIN RSA...",
+//!   passphrase: Some("keypassphrase")
+//! }
+//! ```
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
