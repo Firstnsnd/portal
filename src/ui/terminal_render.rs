@@ -386,13 +386,17 @@ pub fn render_terminal_session(
             let job = build_row_layout(cells, &font_id, cells.len().min(grid.cols));
             let galley = ui.fonts(|f| f.layout_job(job.clone()));
 
-            // Use galley's actual width to calculate column
+            // Simple approach: use cell position directly
+            // Each cell in the grid (including continuation) takes avg space
             let x_in_row = (pos.x - rect.min.x).max(0.0);
             let galley_width = galley.rect.width();
-            let n_chars = job.text.chars().count();
+            let n_cells = cells.len();
 
-            let avg_char_width = if n_chars > 0 { galley_width / n_chars as f32 } else { char_width };
-            let col = (x_in_row / avg_char_width).floor() as usize;
+            // Calculate average width per cell (not per visible character)
+            let avg_cell_width = if n_cells > 0 { galley_width / n_cells as f32 } else { char_width };
+
+            // Find which cell contains the click position
+            let col = (x_in_row / avg_cell_width).floor() as usize;
             let col = col.min(cells.len().saturating_sub(1));
 
             (grid_row_idx, col)
@@ -505,26 +509,69 @@ pub fn render_terminal_session(
                 }
 
                 // Use galley for precise character positions
-                let job = build_row_layout(cells, &font_id, col_end);
-                let galley = ui.fonts(|f| f.layout_job(job.clone()));
+                // For accurate positioning, we need to measure each character's actual rendered width
 
-                // Calculate character positions using galley's actual metrics
-                let text_full = job.text.clone();
-                let chars: Vec<char> = text_full.chars().collect();
-                let n_chars = chars.len().min(col_end);
+                let mut start_x = 0.0;
+                let mut end_x = 0.0;
 
-                // Use galley size to get accurate total width
-                let galley_width = galley.rect.width();
-                let avg_char_width = if n_chars > 0 { galley_width / n_chars as f32 } else { char_width };
+                // First pass: calculate each visible character's actual rendered width
+                let mut char_widths: Vec<f32> = Vec::new();
 
-                // Calculate positions based on galley's actual width
-                let start_x = col_start as f32 * avg_char_width;
-                let end_x = col_end as f32 * avg_char_width;
+                for idx in 0..cells.len().min(grid.cols) {
+                    let cell = &cells[idx];
+
+                    if cell.wide_continuation {
+                        // Continuation cells share their parent's width
+                        char_widths.push(0.0);
+                        continue;
+                    }
+
+                    // Create a galley for just this character to get its actual width
+                    let single_char_job = build_row_layout(&cells[idx..idx+1], &font_id, 1);
+                    let single_char_galley = ui.fonts(|f| f.layout_job(single_char_job.clone()));
+                    let actual_width = single_char_galley.rect.width();
+
+                    char_widths.push(actual_width);
+                }
+
+                // Second pass: find selection boundaries
+                let mut found_start = false;
+                let mut x_position = 0.0;
+
+                for idx in 0..col_end.min(cells.len()) {
+                    if cells[idx].wide_continuation {
+                        continue;
+                    }
+
+                    let char_width = char_widths[idx];
+
+                    // Check if this cell starts the selection
+                    if idx == col_start && !found_start {
+                        start_x = x_position;
+                        found_start = true;
+                    }
+
+                    // Update end_x if we're within selection
+                    if idx >= col_start && idx < col_end {
+                        end_x = x_position + char_width;
+                    }
+
+                    x_position += char_width;
+
+                    if idx >= col_end {
+                        break;
+                    }
+                }
+
+                // Get actual rendered height from galley
+                let _job = build_row_layout(cells, &font_id, cells.len().min(grid.cols));
+                let _galley = ui.fonts(|f| f.layout_job(_job.clone()));
+                let char_height = line_height;  // Use line_height directly for consistent spacing
 
                 let row_y = rect.min.y + screen_row as f32 * line_height;
                 let sel_rect = egui::Rect::from_min_max(
                     egui::pos2(rect.min.x + start_x, row_y),
-                    egui::pos2(rect.min.x + end_x, row_y + line_height),
+                    egui::pos2(rect.min.x + end_x, row_y + char_height),
                 );
                 painter.rect_filled(sel_rect, 0.0, sel_color);
             }
@@ -799,20 +846,137 @@ pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usiz
         return (col, col);
     }
     let cells = &grid.cells[row];
-    let ch = cells.get(col).map(|c| c.c).unwrap_or(' ');
-    let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
+    let cell = cells.get(col);
+
+    // Handle wide character continuation - if we're on a continuation cell,
+    // move to the start of the wide character
+    let actual_col = if let Some(c) = cell {
+        if c.wide_continuation && col > 0 {
+            // Find the start of this wide character
+            let mut search = col - 1;
+            while search > 0 && cells[search].wide_continuation {
+                search -= 1;
+            }
+            search
+        } else {
+            col
+        }
+    } else {
+        col
+    };
+
+    let ch = cells.get(actual_col).map(|c| c.c).unwrap_or(' ');
+
+    // Word characters: ASCII alphanumeric, underscore, and CJK ideographs
+    let is_word_char = |c: char| -> bool {
+        // ASCII word characters
+        if c.is_ascii_alphanumeric() || c == '_' {
+            return true;
+        }
+        // CJK Unified Ideographs - treat each as individual word character
+        let cp = c as u32;
+        (0x4E00..=0x9FFF).contains(&cp) || // Common CJK
+        (0x3400..=0x4DBF).contains(&cp) || // CJK Extension A
+        (0x20000..=0x2A6DF).contains(&cp) || // CJK Extension B
+        (0x2A700..=0x2B73F).contains(&cp) || // CJK Extension C
+        (0x2B740..=0x2B81F).contains(&cp) || // CJK Extension D
+        (0x2B820..=0x2CEAF).contains(&cp) || // CJK Extension E
+        (0xF900..=0xFAFF).contains(&cp) || // CJK Compatibility Ideographs
+        (0x2F800..=0x2FA1F).contains(&cp) || // CJK Compatibility Ideographs Supplement
+        false
+    };
+
     if !is_word_char(ch) {
         return (col, col);
     }
-    let mut start = col;
-    while start > 0 && is_word_char(cells[start - 1].c) {
-        start -= 1;
+
+    // For CJK characters, each character is independent - only select the clicked character
+    let cp = ch as u32;
+    let is_cjk = (0x4E00..=0x9FFF).contains(&cp) ||
+                  (0x3400..=0x4DBF).contains(&cp) ||
+                  (0x20000..=0x2A6DF).contains(&cp) ||
+                  (0x2A700..=0x2B73F).contains(&cp) ||
+                  (0x2B740..=0x2B81F).contains(&cp) ||
+                  (0x2B820..=0x2CEAF).contains(&cp) ||
+                  (0xF900..=0xFAFF).contains(&cp) ||
+                  (0x2F800..=0x2FA1F).contains(&cp);
+
+    if is_cjk {
+        // CJK: select only this character (may include its continuation cell)
+        let mut end = actual_col;
+        if end + 1 < cells.len() && cells[end + 1].wide_continuation {
+            end += 1;
+        }
+        return (actual_col, end);
     }
-    let mut end = col;
-    while end + 1 < cells.len().min(grid.cols) && is_word_char(cells[end + 1].c) {
-        end += 1;
+
+    // For ASCII words, find the full word boundary
+    let mut start = actual_col;
+    while start > 0 {
+        let prev_idx = start - 1;
+        let prev_cell = &cells[prev_idx];
+
+        // Skip wide character continuation cells
+        if prev_cell.wide_continuation {
+            start = prev_idx;
+            continue;
+        }
+
+        // Stop at non-word characters or CJK
+        let prev_cp = prev_cell.c as u32;
+        let prev_is_cjk = (0x4E00..=0x9FFF).contains(&prev_cp) ||
+                           (0x3400..=0x4DBF).contains(&prev_cp);
+
+        if !is_word_char(prev_cell.c) || prev_is_cjk {
+            break;
+        }
+
+        start = prev_idx;
     }
+
+    let mut end = actual_col;
+    while end + 1 < cells.len().min(grid.cols) {
+        let next_idx = end + 1;
+        let next_cell = &cells[next_idx];
+
+        // Skip wide character continuation cells
+        if next_cell.wide_continuation {
+            end = next_idx;
+            continue;
+        }
+
+        // Stop at non-word characters or CJK
+        let next_cp = next_cell.c as u32;
+        let next_is_cjk = (0x4E00..=0x9FFF).contains(&next_cp) ||
+                           (0x3400..=0x4DBF).contains(&next_cp);
+
+        if !is_word_char(next_cell.c) || next_is_cjk {
+            break;
+        }
+
+        end = next_idx;
+
+        // If this is a wide character, include its continuation
+        if end + 1 < cells.len() && cells[end + 1].wide_continuation {
+            end += 1;
+        }
+    }
+
     (start, end)
+}
+
+/// Check if a character is typically rendered as wide (CJK, etc.)
+fn is_wide_char(c: char) -> bool {
+    let cp = c as u32;
+    // CJK ranges
+    (0x1100..=0x115F).contains(&cp) || // Hangul Jamo
+    (0x2E80..=0xA4CF).contains(&cp) || // CJK
+    (0xAC00..=0xD7A3).contains(&cp) || // Hangul Syllables
+    (0xF900..=0xFAFF).contains(&cp) || // CJK Compatibility Ideographs
+    (0xFE10..=0xFE19).contains(&cp) || // Vertical forms
+    (0xFE30..=0xFE6F).contains(&cp) || // CJK Compatibility Forms
+    (0xFF00..=0xFF60).contains(&cp) || // Fullwidth Forms
+    (0xFFE0..=0xFFE6).contains(&cp)
 }
 
 /// Build a colored LayoutJob for one terminal row
