@@ -1,3 +1,51 @@
+//! Terminal rendering and text selection system.
+//!
+//! # Text Selection Index System
+//!
+//! The terminal uses a **unified global index system** for text selection that allows seamless
+//! selection across scrollback history and current grid content.
+//!
+//! ## Index Ranges
+//!
+//! - **Scrollback rows**: `[0, scrollback_len)` - historical content that has scrolled off screen
+//! - **Grid rows**: `[scrollback_len, scrollback_len + grid.rows)` - currently visible terminal content
+//!
+//! ## Example
+//!
+//! ```text
+//! scrollback_len = 100, grid.rows = 30
+//!
+//! Global indices:
+//!   0-99:   scrollback rows (history)
+//!   100-129: grid rows (current content)
+//!
+//! User clicks on screen row 5 (grid area):
+//!   → pixel_to_cell returns global index = 100 + 5 = 105
+//!   → selection stores (105, col)
+//!   → renderer knows: 105 >= 100, so it's grid row 5 (105 - 100)
+//! ```
+//!
+//! ## Coordinate Transformations
+//!
+//! ### Click Detection (pixel → global index)
+//! - Calculate `screen_row` from Y position
+//! - If in scrollback area: return scrollback index
+//! - If in grid area: return `scrollback_len + local_grid_row`
+//!
+//! ### Selection Rendering (global index → screen position)
+//! - If `sel_row < scrollback_len`: render scrollback content
+//! - If `sel_row >= scrollback_len`: render grid content at `sel_row - scrollback_len`
+//!
+//! ### Word Boundary Detection (global → local)
+//! - `find_word_boundaries` requires local grid index (access to `grid.cells[]`)
+//! - Convert: `local_row = global_row - scrollback_len` (for grid rows)
+//!
+//! ## Key Functions
+//!
+//! - `pixel_to_cell`: Converts pixel coordinates to global (row, col) index
+//! - `render_terminal_session`: Renders selection highlight using global indices
+//! - `find_word_boundaries`: Finds word boundaries using local grid indices
+
 use eframe::egui;
 
 use crate::ssh::SshConnectionState;
@@ -489,13 +537,31 @@ pub fn render_terminal_session(
         let offset = session.scroll_offset;
 
         // Helper function to convert pixel position to grid coordinates using actual text layout
+        //
+        // # Selection Index System
+        //
+        // Terminal selection uses a **global index system** that combines scrollback and grid rows:
+        // - Scrollback rows: indices [0, scrollback_len)
+        // - Grid rows: indices [scrollback_len, scrollback_len + grid.rows)
+        //
+        // This unified indexing allows selection to span seamlessly across scrollback and current grid content.
+        //
+        // ## Conversion Rules
+        //
+        // When clicking on a row:
+        // - If `screen_row < offset` (scrollback visible area): return scrollback global index
+        // - If `screen_row >= offset` (grid area): return `scrollback_len + local_grid_row`
+        //
+        // The returned `grid_row_idx` is a **global index** that can be directly stored in `selection.start/end`.
         let pixel_to_cell = |pos: egui::Pos2| -> (usize, usize) {
             // Calculate screen row from Y position
             let screen_row = ((pos.y - rect.min.y) / line_height).max(0.0) as usize;
             let screen_row = screen_row.min(new_rows.saturating_sub(1));
 
             // Get the cells for this row to calculate accurate column position
+            // Return: (cells reference, global_row_index)
             let (cells, grid_row_idx) = if offset > 0 && screen_row < offset {
+                // Scrollback row: return scrollback global index directly
                 let sb_idx = scrollback_len.saturating_sub(offset) + screen_row;
                 if let Some(row) = grid.get_scrollback_row(sb_idx) {
                     (row, sb_idx)
@@ -503,11 +569,12 @@ pub fn render_terminal_session(
                     (&grid.cells[0], screen_row)
                 }
             } else {
+                // Grid row: convert to global index by adding scrollback_len
                 let grid_row = screen_row.saturating_sub(offset);
                 if grid_row < grid.rows {
-                    (&grid.cells[grid_row], grid_row)
+                    (&grid.cells[grid_row], scrollback_len + grid_row)
                 } else {
-                    (&grid.cells[0], 0)
+                    (&grid.cells[0], scrollback_len)
                 }
             };
 
@@ -551,7 +618,25 @@ pub fn render_terminal_session(
         }
         if let Some(pos) = double_click_pos {
             let (grid_row, grid_col) = pixel_to_cell(pos);
-            let (word_start, word_end) = find_word_boundaries(&grid, grid_row, grid_col);
+
+            // Convert global index to local index for find_word_boundaries
+            //
+            // `find_word_boundaries` expects a **local grid index** (0 to grid.rows-1) because
+            // it only has access to `grid.cells[]`. However, `pixel_to_cell` returns a global index.
+            //
+            // Conversion:
+            // - If grid_row < scrollback_len: it's already a scrollback index (but scrollback words
+            //   can't be selected due to access limitations - see find_word_boundaries)
+            // - If grid_row >= scrollback_len: subtract scrollback_len to get local grid index
+            let local_row = if grid_row < scrollback_len {
+                grid_row
+            } else {
+                grid_row.saturating_sub(scrollback_len)
+            };
+
+            let (word_start, word_end) = find_word_boundaries(&grid, local_row, grid_col);
+
+            // Store selection with global indices
             session.selection.start = (grid_row, word_start);
             session.selection.end = (grid_row, word_end);
         }
@@ -587,15 +672,24 @@ pub fn render_terminal_session(
             let sel_color = theme.accent_alpha(60);
 
             // Render selection for each row in range
+            //
+            // Selection stores **global indices**, so we need to determine:
+            // 1. Is this a scrollback row or a grid row? (sel_row < scrollback_len check)
+            // 2. What's the screen position for this row? (considering offset)
+            //
+            // The global index system enables seamless selection across scrollback and grid.
             for sel_row in sr..=er {
-                // Determine if this is a scrollback or grid row
+                // Determine if this is a scrollback or grid row based on global index
                 let (grid_row_idx, is_scrollback) = if offset > 0 && sel_row < scrollback_len {
+                    // Scrollback row: global index = local scrollback index
                     (sel_row, true)
                 } else {
+                    // Grid row: convert global index to local grid index
                     (sel_row.saturating_sub(scrollback_len), false)
                 };
 
                 // Calculate screen row position
+                // Screen row is where this row appears visually (0 = top of visible area)
                 let screen_row = if is_scrollback {
                     if sel_row >= scrollback_len {
                         continue;
