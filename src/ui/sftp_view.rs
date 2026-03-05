@@ -1244,8 +1244,9 @@ impl PortalApp {
         }
         if remote_delete_request {
             if let Some(ref browser) = self.sftp_browser {
+                let filtered = browser.filtered_entries();
                 let names: Vec<String> = browser.selection.selected.iter()
-                    .filter_map(|&i| browser.entries.get(i).map(|e| e.name.clone()))
+                    .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                     .collect();
                 if !names.is_empty() {
                     self.sftp_confirm_delete = Some(SftpConfirmDelete {
@@ -1257,8 +1258,9 @@ impl PortalApp {
         }
         if left_remote_delete_request {
             if let Some(ref browser) = self.sftp_browser_left {
+                let filtered = browser.filtered_entries();
                 let names: Vec<String> = browser.selection.selected.iter()
-                    .filter_map(|&i| browser.entries.get(i).map(|e| e.name.clone()))
+                    .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                     .collect();
                 if !names.is_empty() {
                     self.sftp_confirm_delete = Some(SftpConfirmDelete {
@@ -1283,14 +1285,15 @@ impl PortalApp {
             } else {
                 vec![]
             };
+            let filtered = self.local_browser_left.filtered_entries();
             let names: Vec<String> = indices.iter()
-                .filter_map(|&i| self.local_browser_left.entries.get(i).map(|e| e.name.clone()))
+                .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                 .collect();
             let all_dirs = !indices.is_empty() && indices.iter().all(|&i| {
-                self.local_browser_left.entries.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
+                filtered.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
             });
             let any_dirs = indices.iter().any(|&i| {
-                self.local_browser_left.entries.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
+                filtered.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
             });
             self.sftp_context_menu = Some(SftpContextMenu {
                 pos,
@@ -1313,14 +1316,15 @@ impl PortalApp {
             } else {
                 vec![]
             };
+            let filtered = self.local_browser_right.filtered_entries();
             let names: Vec<String> = indices.iter()
-                .filter_map(|&i| self.local_browser_right.entries.get(i).map(|e| e.name.clone()))
+                .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                 .collect();
             let all_dirs = !indices.is_empty() && indices.iter().all(|&i| {
-                self.local_browser_right.entries.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
+                filtered.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
             });
             let any_dirs = indices.iter().any(|&i| {
-                self.local_browser_right.entries.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
+                filtered.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
             });
             self.sftp_context_menu = Some(SftpContextMenu {
                 pos,
@@ -1343,14 +1347,15 @@ impl PortalApp {
                 } else {
                     vec![]
                 };
+                let filtered = browser.filtered_entries();
                 let names: Vec<String> = indices.iter()
-                    .filter_map(|&i| browser.entries.get(i).map(|e| e.name.clone()))
+                    .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                     .collect();
                 let all_dirs = !indices.is_empty() && indices.iter().all(|&i| {
-                    browser.entries.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
+                    filtered.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
                 });
                 let any_dirs = indices.iter().any(|&i| {
-                    browser.entries.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
+                    filtered.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
                 });
                 self.sftp_context_menu = Some(SftpContextMenu {
                     pos,
@@ -1374,14 +1379,15 @@ impl PortalApp {
                 } else {
                     vec![]
                 };
+                let filtered = browser.filtered_entries();
                 let names: Vec<String> = indices.iter()
-                    .filter_map(|&i| browser.entries.get(i).map(|e| e.name.clone()))
+                    .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                     .collect();
                 let all_dirs = !indices.is_empty() && indices.iter().all(|&i| {
-                    browser.entries.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
+                    filtered.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
                 });
                 let any_dirs = indices.iter().any(|&i| {
-                    browser.entries.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
+                    filtered.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
                 });
                 self.sftp_context_menu = Some(SftpContextMenu {
                     pos,
@@ -2053,30 +2059,38 @@ impl PortalApp {
 
         // ── Handle double-click open file requests ──
         if let Some(idx) = local_left_open_file_req {
-            let entry = &self.local_browser_left.entries[idx];
-            if entry.kind != SftpEntryKind::Directory {
-                self.open_file_for_editing(true, &entry.name.clone());
+            let filtered = self.local_browser_left.filtered_entries();
+            if let Some(entry) = filtered.get(idx) {
+                if entry.kind != SftpEntryKind::Directory {
+                    self.open_file_for_editing(true, &entry.name.clone());
+                }
             }
         }
         if let Some(idx) = local_right_open_file_req {
-            let entry = &self.local_browser_right.entries[idx];
-            if entry.kind != SftpEntryKind::Directory {
-                self.open_file_for_editing(true, &entry.name.clone());
+            let filtered = self.local_browser_right.filtered_entries();
+            if let Some(entry) = filtered.get(idx) {
+                if entry.kind != SftpEntryKind::Directory {
+                    self.open_file_for_editing(true, &entry.name.clone());
+                }
             }
         }
         if let Some(idx) = remote_open_file_req {
             if let Some(ref browser) = self.sftp_browser {
-                let entry = &browser.entries[idx];
-                if entry.kind != SftpEntryKind::Directory {
-                    self.open_file_for_editing(false, &entry.name.clone());
+                let filtered = browser.filtered_entries();
+                if let Some(entry) = filtered.get(idx) {
+                    if entry.kind != SftpEntryKind::Directory {
+                        self.open_file_for_editing(false, &entry.name.clone());
+                    }
                 }
             }
         }
         if let Some(idx) = left_remote_open_file_req {
             if let Some(ref browser) = self.sftp_browser_left {
-                let entry = &browser.entries[idx];
-                if entry.kind != SftpEntryKind::Directory {
-                    self.open_file_for_editing(false, &entry.name.clone());
+                let filtered = browser.filtered_entries();
+                if let Some(entry) = filtered.get(idx) {
+                    if entry.kind != SftpEntryKind::Directory {
+                        self.open_file_for_editing(false, &entry.name.clone());
+                    }
                 }
             }
         }
