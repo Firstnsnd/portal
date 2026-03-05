@@ -171,7 +171,11 @@ pub fn render_terminal_session(
                 let col_start = if row == sr { sc } else { 0 };
                 let col_end = (if row == er { ec + 1 } else { grid.cols }).min(grid.cols);
                 for col in col_start..col_end {
-                    text.push(grid.cells[row][col].c);
+                    let cell = &grid.cells[row][col];
+                    // Skip wide character continuation cells to avoid duplicate/extra spaces
+                    if !cell.wide_continuation {
+                        text.push(cell.c);
+                    }
                 }
                 if row != er {
                     let trimmed = text.trim_end().len();
