@@ -379,7 +379,15 @@ pub fn render_terminal_session(
     // IME for focused pane
     if is_focused && response.has_focus() {
         if let Ok(grid) = session.grid.lock() {
-            let cursor_x = rect.min.x + grid.cursor_col as f32 * char_width;
+            // Calculate IME cursor position based on actual rendered text width
+            // This ensures the IME composition window appears at the correct position
+            let grid_row = grid.cursor_row.min(grid.rows.saturating_sub(1));
+
+            // Build layout for current row up to cursor to get accurate position
+            let cursor_row_job = build_row_layout(&grid.cells[grid_row][..grid.cursor_col.min(grid.cols)], &font_id, grid.cursor_col.min(grid.cols));
+            let cursor_row_galley = ui.fonts(|f| f.layout_job(cursor_row_job));
+
+            let cursor_x = rect.min.x + cursor_row_galley.rect.width();
             let cursor_y = rect.min.y + grid.cursor_row as f32 * line_height;
             let cursor_rect = egui::Rect::from_min_size(
                 egui::pos2(cursor_x, cursor_y),
@@ -987,7 +995,22 @@ pub fn render_terminal_session(
         let ssh_not_connected = matches!(&session.session, Some(SessionBackend::Ssh(ssh))
             if !matches!(ssh.connection_state(), SshConnectionState::Connected));
         if !ssh_not_connected && offset == 0 && grid.cursor_visible && grid.cursor_col < grid.cols && grid.cursor_row < grid.rows {
-            let cursor_x = rect.min.x + grid.cursor_col as f32 * char_width;
+            // IMPORTANT: Calculate cursor position based on actual rendered text width
+            // rather than grid cell position, to handle wide characters (CJK) correctly.
+            //
+            // Problem: Using `cursor_col * char_width` causes misalignment because:
+            // - Wide chars occupy 2 grid cells but their actual width ≠ 2 * char_width
+            // - Small differences accumulate: 10 chars × 0.25px = 2.5px gap
+            //
+            // Solution: Build layout for current row up to cursor position and use actual width
+
+            let grid_row = grid.cursor_row.min(grid.rows.saturating_sub(1));
+
+            // Build layout for this row up to cursor column to get accurate cursor position
+            let cursor_row_job = build_row_layout(&grid.cells[grid_row][..grid.cursor_col.min(grid.cols)], &font_id, grid.cursor_col.min(grid.cols));
+            let cursor_row_galley = ui.fonts(|f| f.layout_job(cursor_row_job));
+            let cursor_x = rect.min.x + cursor_row_galley.rect.width();
+
             let cursor_y = rect.min.y + grid.cursor_row as f32 * line_height + vertical_offset;
             let cursor_height = sample_galley.rect.height();
             let cursor_rect = egui::Rect::from_min_size(
@@ -1015,12 +1038,24 @@ pub fn render_terminal_session(
                 .collect();
 
             if !safe_preedit.is_empty() {
-                let px = rect.min.x + grid.cursor_col as f32 * char_width;
+                // Position IME preedit at the same location as the cursor
+                // Use the same calculation method as the cursor for consistency
+                let grid_row = grid.cursor_row.min(grid.rows.saturating_sub(1));
+
+                // Build layout for current row up to cursor to get actual position
+                let cursor_row_job = build_row_layout(&grid.cells[grid_row][..grid.cursor_col.min(grid.cols)], &font_id, grid.cursor_col.min(grid.cols));
+                let cursor_row_galley = ui.fonts(|f| f.layout_job(cursor_row_job));
+                let base_x = rect.min.x + cursor_row_galley.rect.width();
+
                 let py = rect.min.y + grid.cursor_row as f32 * line_height + vertical_offset;
+
+                // Build layout for IME preedit text
                 let galley = ui.fonts(|f| f.layout_no_wrap(safe_preedit, font_id.clone(), theme.accent));
-                let bg_rect = egui::Rect::from_min_size(egui::pos2(px, py), galley.size() + egui::vec2(4.0, 0.0));
+
+                // Position IME preedit at the cursor location
+                let bg_rect = egui::Rect::from_min_size(egui::pos2(base_x, py), galley.size() + egui::vec2(4.0, 0.0));
                 painter.rect_filled(bg_rect, 2.0, theme.bg_elevated);
-                painter.galley(egui::pos2(px + 2.0, py), galley, egui::Color32::TRANSPARENT);
+                painter.galley(egui::pos2(base_x + 2.0, py), galley, egui::Color32::TRANSPARENT);
             }
         }
 
