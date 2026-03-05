@@ -69,44 +69,29 @@ pub fn render_terminal_session(
     }
 
     let painter = ui.painter_at(pane_rect);
-    let pos_to_cell = |pos: egui::Pos2| -> (usize, usize) {
-        let col = ((pos.x - rect.min.x) / char_width).max(0.0) as usize;
-        let row = ((pos.y - rect.min.y) / line_height).max(0.0) as usize;
-        (row.min(new_rows.saturating_sub(1)), col.min(new_cols.saturating_sub(1)))
-    };
 
-    // Mouse selection (will be processed after grid is available)
-    let mut drag_start: Option<(usize, usize)> = None;
-    let mut drag_end: Option<(usize, usize)> = None;
+    // Mouse selection - record pixel positions first, will convert to grid coords later
+    let mut drag_start_pos: Option<egui::Pos2> = None;
+    let mut drag_end_pos: Option<egui::Pos2> = None;
     let mut is_dragging = false;
-    let mut triple_click_pos: Option<(usize, usize)> = None;
-    let mut double_click_pos: Option<(usize, usize)> = None;
+    let mut triple_click_pos: Option<egui::Pos2> = None;
+    let mut double_click_pos: Option<egui::Pos2> = None;
 
     if response.drag_started() {
-        if let Some(pos) = response.interact_pointer_pos() {
-            drag_start = Some(pos_to_cell(pos));
-            drag_end = drag_start;
-            is_dragging = true;
-        }
+        drag_start_pos = response.interact_pointer_pos();
+        drag_end_pos = drag_start_pos;
+        is_dragging = true;
     }
     if response.dragged() && is_dragging {
-        if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-            drag_end = Some(pos_to_cell(pos));
-        }
+        drag_end_pos = ctx.input(|i| i.pointer.hover_pos());
     }
     if response.drag_stopped() {
         is_dragging = false;
     }
     if response.triple_clicked() {
-        if let Some(pos) = response.interact_pointer_pos() {
-            let cell = pos_to_cell(pos);
-            triple_click_pos = Some(cell);
-        }
+        triple_click_pos = response.interact_pointer_pos();
     } else if response.double_clicked() {
-        if let Some(pos) = response.interact_pointer_pos() {
-            let cell = pos_to_cell(pos);
-            double_click_pos = Some(cell);
-        }
+        double_click_pos = response.interact_pointer_pos();
     } else if response.clicked() {
         if session.selection.has_selection() {
             session.selection.clear();
@@ -374,38 +359,69 @@ pub fn render_terminal_session(
         let scrollback_len = grid.scrollback_len();
         let offset = session.scroll_offset;
 
-        // Process mouse events now that we have grid access
-        let screen_to_grid = |screen_row: usize| -> usize {
-            if offset > 0 && screen_row < offset {
-                scrollback_len.saturating_sub(offset) + screen_row
+        // Helper function to convert pixel position to grid coordinates using actual text layout
+        let pixel_to_cell = |pos: egui::Pos2| -> (usize, usize) {
+            // Calculate screen row from Y position
+            let screen_row = ((pos.y - rect.min.y) / line_height).max(0.0) as usize;
+            let screen_row = screen_row.min(new_rows.saturating_sub(1));
+
+            // Get the cells for this row to calculate accurate column position
+            let (cells, grid_row_idx) = if offset > 0 && screen_row < offset {
+                let sb_idx = scrollback_len.saturating_sub(offset) + screen_row;
+                if let Some(row) = grid.get_scrollback_row(sb_idx) {
+                    (row, sb_idx)
+                } else {
+                    (&grid.cells[0], screen_row)
+                }
             } else {
-                screen_row.saturating_sub(offset)
-            }
+                let grid_row = screen_row.saturating_sub(offset);
+                if grid_row < grid.rows {
+                    (&grid.cells[grid_row], grid_row)
+                } else {
+                    (&grid.cells[0], 0)
+                }
+            };
+
+            // Build layout for accurate character width calculation
+            let job = build_row_layout(cells, &font_id, cells.len().min(grid.cols));
+            let galley = ui.fonts(|f| f.layout_job(job.clone()));
+
+            // Use galley's actual width to calculate column
+            let x_in_row = (pos.x - rect.min.x).max(0.0);
+            let galley_width = galley.rect.width();
+            let n_chars = job.text.chars().count();
+
+            let avg_char_width = if n_chars > 0 { galley_width / n_chars as f32 } else { char_width };
+            let col = (x_in_row / avg_char_width).floor() as usize;
+            let col = col.min(cells.len().saturating_sub(1));
+
+            (grid_row_idx, col)
         };
 
-        if let Some((screen_row, screen_col)) = drag_start {
-            let grid_row = screen_to_grid(screen_row);
-            session.selection.start = (grid_row, screen_col);
-            session.selection.end = (grid_row, screen_col);
+        // Process mouse events using actual text layout
+        if let Some(pos) = drag_start_pos {
+            let (grid_row, grid_col) = pixel_to_cell(pos);
+            session.selection.start = (grid_row, grid_col);
+            session.selection.end = (grid_row, grid_col);
             session.selection.active = true;
         }
         if is_dragging {
-            if let Some((screen_row, screen_col)) = drag_end {
-                let grid_row = screen_to_grid(screen_row);
-                session.selection.end = (grid_row, screen_col);
+            if let Some(pos) = drag_end_pos {
+                let (grid_row, grid_col) = pixel_to_cell(pos);
+                session.selection.end = (grid_row, grid_col);
             }
         }
         if response.drag_stopped() {
             session.selection.active = false;
         }
-        if let Some((screen_row, _)) = triple_click_pos {
-            let grid_row = screen_to_grid(screen_row);
+        if let Some(pos) = triple_click_pos {
+            let (grid_row, _) = pixel_to_cell(pos);
             session.selection.start = (grid_row, 0);
             session.selection.end = (grid_row, new_cols.saturating_sub(1));
         }
-        if let Some((screen_row, screen_col)) = double_click_pos {
-            let grid_row = screen_to_grid(screen_row);
-            let (word_start, word_end) = find_word_boundaries(&grid, grid_row, screen_col);
+        if let Some(pos) = double_click_pos {
+            let (grid_row, grid_col) = pixel_to_cell(pos);
+            let (word_start, word_end) = find_word_boundaries(&grid, grid_row, grid_col);
             session.selection.start = (grid_row, word_start);
             session.selection.end = (grid_row, word_end);
         }
