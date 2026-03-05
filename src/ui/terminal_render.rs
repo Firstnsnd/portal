@@ -407,22 +407,47 @@ pub fn render_terminal_session(
         }
     }
 
-    // Extract selected text
+    // Extract selected text for copy operations
+    //
+    // IMPORTANT: selection stores global indices that combine scrollback and grid:
+    // - Scrollback: [0, scrollback_len)
+    // - Grid: [scrollback_len, scrollback_len + grid.rows)
+    //
+    // This function must correctly map global indices back to actual cell data.
     let selected_text: Option<String> = if session.selection.has_selection() {
         if let Ok(grid) = session.grid.lock() {
+            let scrollback_len = grid.scrollback_len();
             let ((sr, sc), (er, ec)) = session.selection.ordered();
             let mut text = String::new();
+
             for row in sr..=er {
-                if row >= grid.rows { break; }
+                // Determine if this is a scrollback or grid row based on global index
+                let cells = if row < scrollback_len {
+                    // Scrollback row
+                    match grid.get_scrollback_row(row) {
+                        Some(c) => c,
+                        None => break,
+                    }
+                } else {
+                    // Grid row: convert global index to local grid index
+                    let grid_row = row.saturating_sub(scrollback_len);
+                    if grid_row >= grid.rows {
+                        break;
+                    }
+                    &grid.cells[grid_row]
+                };
+
                 let col_start = if row == sr { sc } else { 0 };
                 let col_end = (if row == er { ec + 1 } else { grid.cols }).min(grid.cols);
+
                 for col in col_start..col_end {
-                    let cell = &grid.cells[row][col];
+                    let cell = &cells[col];
                     // Skip wide character continuation cells to avoid duplicate/extra spaces
                     if !cell.wide_continuation {
                         text.push(cell.c);
                     }
                 }
+
                 if row != er {
                     let trimmed = text.trim_end().len();
                     text.truncate(trimmed);
