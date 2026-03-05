@@ -75,38 +75,37 @@ pub fn render_terminal_session(
         (row.min(new_rows.saturating_sub(1)), col.min(new_cols.saturating_sub(1)))
     };
 
-    // Mouse selection
+    // Mouse selection (will be processed after grid is available)
+    let mut drag_start: Option<(usize, usize)> = None;
+    let mut drag_end: Option<(usize, usize)> = None;
+    let mut is_dragging = false;
+    let mut triple_click_pos: Option<(usize, usize)> = None;
+    let mut double_click_pos: Option<(usize, usize)> = None;
+
     if response.drag_started() {
         if let Some(pos) = response.interact_pointer_pos() {
-            let cell = pos_to_cell(pos);
-            session.selection.start = cell;
-            session.selection.end = cell;
-            session.selection.active = true;
+            drag_start = Some(pos_to_cell(pos));
+            drag_end = drag_start;
+            is_dragging = true;
         }
     }
-    if session.selection.active && response.dragged() {
+    if response.dragged() && is_dragging {
         if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-            session.selection.end = pos_to_cell(pos);
+            drag_end = Some(pos_to_cell(pos));
         }
     }
     if response.drag_stopped() {
-        session.selection.active = false;
+        is_dragging = false;
     }
     if response.triple_clicked() {
-        // Triple-click: select entire line
         if let Some(pos) = response.interact_pointer_pos() {
             let cell = pos_to_cell(pos);
-            session.selection.start = (cell.0, 0);
-            session.selection.end = (cell.0, new_cols.saturating_sub(1));
+            triple_click_pos = Some(cell);
         }
     } else if response.double_clicked() {
         if let Some(pos) = response.interact_pointer_pos() {
             let cell = pos_to_cell(pos);
-            if let Ok(grid) = session.grid.lock() {
-                let (word_start, word_end) = find_word_boundaries(&grid, cell.0, cell.1);
-                session.selection.start = (cell.0, word_start);
-                session.selection.end = (cell.0, word_end);
-            }
+            double_click_pos = Some(cell);
         }
     } else if response.clicked() {
         if session.selection.has_selection() {
@@ -375,6 +374,42 @@ pub fn render_terminal_session(
         let scrollback_len = grid.scrollback_len();
         let offset = session.scroll_offset;
 
+        // Process mouse events now that we have grid access
+        let screen_to_grid = |screen_row: usize| -> usize {
+            if offset > 0 && screen_row < offset {
+                scrollback_len.saturating_sub(offset) + screen_row
+            } else {
+                screen_row.saturating_sub(offset)
+            }
+        };
+
+        if let Some((screen_row, screen_col)) = drag_start {
+            let grid_row = screen_to_grid(screen_row);
+            session.selection.start = (grid_row, screen_col);
+            session.selection.end = (grid_row, screen_col);
+            session.selection.active = true;
+        }
+        if is_dragging {
+            if let Some((screen_row, screen_col)) = drag_end {
+                let grid_row = screen_to_grid(screen_row);
+                session.selection.end = (grid_row, screen_col);
+            }
+        }
+        if response.drag_stopped() {
+            session.selection.active = false;
+        }
+        if let Some((screen_row, _)) = triple_click_pos {
+            let grid_row = screen_to_grid(screen_row);
+            session.selection.start = (grid_row, 0);
+            session.selection.end = (grid_row, new_cols.saturating_sub(1));
+        }
+        if let Some((screen_row, screen_col)) = double_click_pos {
+            let grid_row = screen_to_grid(screen_row);
+            let (word_start, word_end) = find_word_boundaries(&grid, grid_row, screen_col);
+            session.selection.start = (grid_row, word_start);
+            session.selection.end = (grid_row, word_end);
+        }
+
         for screen_row in 0..grid.rows.min(new_rows) {
             let row_y = rect.min.y + screen_row as f32 * line_height;
             if offset > 0 && screen_row < offset {
@@ -398,13 +433,82 @@ pub fn render_terminal_session(
         if session.selection.has_selection() {
             let ((sr, sc), (er, ec)) = session.selection.ordered();
             let sel_color = theme.accent_alpha(60);
-            for row in sr..=er {
-                if row >= grid.rows { break; }
-                let col_start = if row == sr { sc } else { 0 };
-                let col_end = (if row == er { ec + 1 } else { grid.cols }).min(grid.cols);
+
+            // Render selection for each row in range
+            for sel_row in sr..=er {
+                // Determine if this is a scrollback or grid row
+                let (grid_row_idx, is_scrollback) = if offset > 0 && sel_row < scrollback_len {
+                    (sel_row, true)
+                } else {
+                    (sel_row.saturating_sub(scrollback_len), false)
+                };
+
+                // Calculate screen row position
+                let screen_row = if is_scrollback {
+                    if sel_row >= scrollback_len {
+                        continue;
+                    }
+                    let sb_display_idx = scrollback_len.saturating_sub(offset) + sel_row;
+                    if sb_display_idx >= offset + scrollback_len {
+                        continue;
+                    }
+                    sb_display_idx
+                } else {
+                    if grid_row_idx >= grid.rows {
+                        break;
+                    }
+                    grid_row_idx + offset
+                };
+
+                if screen_row >= new_rows {
+                    if is_scrollback {
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+
+                // Get the cells for this row
+                let cells = if is_scrollback {
+                    grid.get_scrollback_row(sel_row)
+                } else {
+                    Some(&grid.cells[grid_row_idx])
+                };
+
+                let cells = match cells {
+                    Some(c) => c,
+                    None => continue,
+                };
+
+                let row_cols = cells.len().min(grid.cols);
+                let col_start = if sel_row == sr { sc.min(row_cols) } else { 0 };
+                let col_end = if sel_row == er { (ec + 1).min(row_cols) } else { row_cols };
+
+                if col_start >= col_end {
+                    continue;
+                }
+
+                // Use galley for precise character positions
+                let job = build_row_layout(cells, &font_id, col_end);
+                let galley = ui.fonts(|f| f.layout_job(job.clone()));
+
+                // Calculate character positions using galley's actual metrics
+                let text_full = job.text.clone();
+                let chars: Vec<char> = text_full.chars().collect();
+                let n_chars = chars.len().min(col_end);
+
+                // Use galley size to get accurate total width
+                let galley_width = galley.rect.width();
+                let avg_char_width = if n_chars > 0 { galley_width / n_chars as f32 } else { char_width };
+
+                // Calculate positions based on galley's actual width
+                let start_x = col_start as f32 * avg_char_width;
+                let end_x = col_end as f32 * avg_char_width;
+
+                let row_y = rect.min.y + screen_row as f32 * line_height;
                 let sel_rect = egui::Rect::from_min_max(
-                    egui::pos2(rect.min.x + col_start as f32 * char_width, rect.min.y + row as f32 * line_height),
-                    egui::pos2(rect.min.x + col_end as f32 * char_width, rect.min.y + (row + 1) as f32 * line_height),
+                    egui::pos2(rect.min.x + start_x, row_y),
+                    egui::pos2(rect.min.x + end_x, row_y + line_height),
                 );
                 painter.rect_filled(sel_rect, 0.0, sel_color);
             }
