@@ -610,6 +610,7 @@ pub enum AppView {
     Sftp,
     Keychain,
     Settings,
+    #[allow(dead_code)]
     Batch,
 }
 

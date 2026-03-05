@@ -84,10 +84,10 @@ pub fn render_terminal_session(
         i.pointer.hover_pos(),
         i.pointer.is_moving(),
     ));
-    let (primary_pressed, primary_down, primary_released, hover_pos, is_moving) = mouse_state;
+    let (primary_pressed, primary_down, primary_released, hover_pos, _is_moving) = mouse_state;
 
     // Track drag state locally
-    let was_dragging = session.selection.active;
+    let _was_dragging = session.selection.active;
     let is_hovering = response.hovered();
 
     // Start dragging on left button press while hovering
@@ -1078,20 +1078,6 @@ pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usiz
     }
 
     (start, end)
-}
-
-/// Check if a character is typically rendered as wide (CJK, etc.)
-fn is_wide_char(c: char) -> bool {
-    let cp = c as u32;
-    // CJK ranges
-    (0x1100..=0x115F).contains(&cp) || // Hangul Jamo
-    (0x2E80..=0xA4CF).contains(&cp) || // CJK
-    (0xAC00..=0xD7A3).contains(&cp) || // Hangul Syllables
-    (0xF900..=0xFAFF).contains(&cp) || // CJK Compatibility Ideographs
-    (0xFE10..=0xFE19).contains(&cp) || // Vertical forms
-    (0xFE30..=0xFE6F).contains(&cp) || // CJK Compatibility Forms
-    (0xFF00..=0xFF60).contains(&cp) || // Fullwidth Forms
-    (0xFFE0..=0xFFE6).contains(&cp)
 }
 
 /// Build a colored LayoutJob for one terminal row
