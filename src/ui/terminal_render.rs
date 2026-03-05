@@ -430,6 +430,12 @@ pub fn render_terminal_session(
             session.selection.end = (grid_row, word_end);
         }
 
+        // Calculate vertical offset for centering text in rows
+        // Use a sample galley to determine the text height
+        let sample_job = build_row_layout(&grid.cells[0], &font_id, 1);
+        let sample_galley = ui.fonts(|f| f.layout_job(sample_job));
+        let vertical_offset = (line_height - sample_galley.rect.height()) / 2.0;
+
         for screen_row in 0..grid.rows.min(new_rows) {
             let row_y = rect.min.y + screen_row as f32 * line_height;
             if offset > 0 && screen_row < offset {
@@ -437,14 +443,14 @@ pub fn render_terminal_session(
                 if let Some(sb_row) = grid.get_scrollback_row(sb_idx) {
                     let job = build_row_layout(sb_row, &font_id, grid.cols.min(sb_row.len()));
                     let galley = ui.fonts(|f| f.layout_job(job));
-                    painter.galley(egui::pos2(rect.min.x, row_y), galley, egui::Color32::TRANSPARENT);
+                    painter.galley(egui::pos2(rect.min.x, row_y + vertical_offset), galley, egui::Color32::TRANSPARENT);
                 }
             } else {
                 let grid_row = screen_row - offset;
                 if grid_row < grid.rows {
                     let job = build_row_layout(&grid.cells[grid_row], &font_id, grid.cols);
                     let galley = ui.fonts(|f| f.layout_job(job));
-                    painter.galley(egui::pos2(rect.min.x, row_y), galley, egui::Color32::TRANSPARENT);
+                    painter.galley(egui::pos2(rect.min.x, row_y + vertical_offset), galley, egui::Color32::TRANSPARENT);
                 }
             }
         }
@@ -566,12 +572,12 @@ pub fn render_terminal_session(
                 // Get actual rendered height from galley
                 let _job = build_row_layout(cells, &font_id, cells.len().min(grid.cols));
                 let _galley = ui.fonts(|f| f.layout_job(_job.clone()));
-                let char_height = line_height;  // Use line_height directly for consistent spacing
+                let char_height = sample_galley.rect.height();  // Use actual text height for proper alignment
 
                 let row_y = rect.min.y + screen_row as f32 * line_height;
                 let sel_rect = egui::Rect::from_min_max(
-                    egui::pos2(rect.min.x + start_x, row_y),
-                    egui::pos2(rect.min.x + end_x, row_y + char_height),
+                    egui::pos2(rect.min.x + start_x, row_y + vertical_offset),
+                    egui::pos2(rect.min.x + end_x, row_y + vertical_offset + char_height),
                 );
                 painter.rect_filled(sel_rect, 0.0, sel_color);
             }
@@ -582,10 +588,11 @@ pub fn render_terminal_session(
             if !matches!(ssh.connection_state(), SshConnectionState::Connected));
         if !ssh_not_connected && offset == 0 && grid.cursor_visible && grid.cursor_col < grid.cols && grid.cursor_row < grid.rows {
             let cursor_x = rect.min.x + grid.cursor_col as f32 * char_width;
-            let cursor_y = rect.min.y + grid.cursor_row as f32 * line_height;
+            let cursor_y = rect.min.y + grid.cursor_row as f32 * line_height + vertical_offset;
+            let cursor_height = sample_galley.rect.height();
             let cursor_rect = egui::Rect::from_min_size(
                 egui::pos2(cursor_x, cursor_y),
-                egui::vec2(char_width, line_height),
+                egui::vec2(char_width, cursor_height),
             );
             if is_focused && response.has_focus() {
                 let blink_on = (ctx.input(|i| i.time) * 2.0) as u64 % 2 == 0;
@@ -603,7 +610,7 @@ pub fn render_terminal_session(
         // IME preedit overlay
         if is_focused && !ime_preedit.is_empty() && grid.cursor_col < grid.cols && grid.cursor_row < grid.rows {
             let px = rect.min.x + grid.cursor_col as f32 * char_width;
-            let py = rect.min.y + grid.cursor_row as f32 * line_height;
+            let py = rect.min.y + grid.cursor_row as f32 * line_height + vertical_offset;
             let galley = ui.fonts(|f| f.layout_no_wrap(ime_preedit.clone(), font_id.clone(), theme.accent));
             let bg_rect = egui::Rect::from_min_size(egui::pos2(px, py), galley.size() + egui::vec2(4.0, 0.0));
             painter.rect_filled(bg_rect, 2.0, theme.bg_elevated);
