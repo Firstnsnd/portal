@@ -203,6 +203,13 @@ impl SessionBackend {
             SessionBackend::Ssh(s) => matches!(s.connection_state(), SshConnectionState::Connected),
         }
     }
+
+    pub fn get_shell_name(&self) -> Option<String> {
+        match self {
+            SessionBackend::Local(s) => s.get_shell_name(),
+            SessionBackend::Ssh(_) => None,
+        }
+    }
 }
 
 /// Credential mode for the host dialog
@@ -474,7 +481,15 @@ impl TerminalSession {
     pub fn shell_name(&self) -> String {
         match &self.session {
             Some(SessionBackend::Local(_)) => {
-                self.local_shell.rsplit('/').next().unwrap_or("shell").to_string()
+                // Use stored shell path directly (more reliable than process detection)
+                if !self.local_shell.is_empty() {
+                    self.local_shell.rsplit('/').next().unwrap_or("shell").to_string()
+                } else {
+                    // Fallback: try to get actual running shell name
+                    self.session.as_ref()
+                        .and_then(|s| s.get_shell_name())
+                        .unwrap_or_else(|| "shell".to_string())
+                }
             }
             Some(SessionBackend::Ssh(ssh)) => {
                 ssh.get_shell_hint()
@@ -772,22 +787,7 @@ pub enum CredentialTypeChoice {
     SshKey,
 }
 
-/// Load shells from /etc/shells (Unix), filtering to executables.
-pub fn load_available_shells() -> Vec<String> {
-    let mut shells = vec![];
-    if let Ok(content) = std::fs::read_to_string("/etc/shells") {
-        for line in content.lines() {
-            let line = line.trim();
-            if !line.is_empty() && !line.starts_with('#') && std::path::Path::new(line).exists() {
-                shells.push(line.to_string());
-            }
-        }
-    }
-    if shells.is_empty() {
-        shells.push("/bin/bash".to_string());
-    }
-    shells
-}
+
 
 /// Host filter state for the hosts list view
 #[derive(Default, Clone)]

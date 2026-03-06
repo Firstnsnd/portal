@@ -56,12 +56,9 @@ struct PortalApp {
     // Tab drag state
     tab_drag: TabDragState,
     // Status bar pickers
-    available_shells: Vec<String>,
     selected_shell: String,
     selected_encoding: String,
-    show_shell_picker: bool,
-    show_encoding_picker: bool,
-    // Detached tab windows
+// Detached tab windows
     detached_windows: Vec<DetachedWindow>,
     next_viewport_id: u32,
     // Main window hidden (still running for detached windows)
@@ -155,9 +152,8 @@ impl PortalApp {
         // because eframe may override visuals set during new().
 
         let runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-        let available_shells = load_available_shells();
         let selected_shell = std::env::var("SHELL")
-            .unwrap_or_else(|_| available_shells.first().cloned().unwrap_or_else(|| "/bin/bash".to_string()));
+            .unwrap_or_else(|_| "/bin/zsh".to_string());
         let first_tab = Tab {
             title: "Terminal 1".to_owned(),
             sessions: vec![TerminalSession::new_local(0, &selected_shell)],
@@ -211,12 +207,10 @@ impl PortalApp {
             sftp_left_remote_refresh_start: None,
             sftp_active_panel_is_local: true,  // Track which panel has focus
             tab_drag: TabDragState::default(),
-            available_shells,
+
             selected_shell,
             selected_encoding: "UTF-8".to_string(),
-            show_shell_picker: false,
-            show_encoding_picker: false,
-            detached_windows: Vec::new(),
+detached_windows: Vec::new(),
             next_viewport_id: 0,
             main_window_hidden: false,
             broadcast_state: BroadcastState::default(),
@@ -348,9 +342,7 @@ impl PortalApp {
             ime_preedit: String::new(),
             next_id,
             tab_drag: TabDragState::default(),
-            show_shell_picker: false,
-            show_encoding_picker: false,
-            broadcast_state: BroadcastState::default(),
+broadcast_state: BroadcastState::default(),
         });
     }
 
@@ -893,10 +885,7 @@ impl eframe::App for PortalApp {
                     let sep_color = self.theme.border;
                     let conn_color = if conn_type == "Local" { self.theme.green } else { self.theme.accent };
 
-                    let mut shell_btn_rect = egui::Rect::NOTHING;
-                    let mut enc_btn_rect = egui::Rect::NOTHING;
-
-                    let bar_result = egui::TopBottomPanel::bottom(egui::Id::new("detached_status_bar").with(i))
+                    egui::TopBottomPanel::bottom(egui::Id::new("detached_status_bar").with(i))
                         .exact_height(24.0)
                         .frame(egui::Frame {
                             fill: self.theme.bg_secondary,
@@ -905,8 +894,6 @@ impl eframe::App for PortalApp {
                             ..Default::default()
                         })
                         .show(ctx, |ui| {
-                            let mut shell_clicked = false;
-                            let mut enc_clicked = false;
                             ui.horizontal_centered(|ui| {
                                 ui.spacing_mut().item_spacing.x = 0.0;
                                 let status_btn = |ui: &mut egui::Ui, text: &str, color: egui::Color32| {
@@ -925,15 +912,17 @@ impl eframe::App for PortalApp {
                                 ui.add_space(12.0);
                                 ui.label(egui::RichText::new("|").color(sep_color).size(12.0));
                                 ui.add_space(12.0);
-                                let sr = status_btn(ui, &shell_label, if is_local_session { self.theme.fg_primary } else { self.theme.fg_dim });
-                                if is_local_session && sr.clicked() { shell_clicked = true; }
-                                shell_btn_rect = sr.rect;
+                                // Shell display (non-interactive)
+                                ui.label(egui::RichText::new(&shell_label)
+                                    .color(if is_local_session { self.theme.fg_primary } else { self.theme.fg_dim })
+                                    .size(12.0));
                                 ui.add_space(12.0);
                                 ui.label(egui::RichText::new("|").color(sep_color).size(12.0));
                                 ui.add_space(12.0);
-                                let er = status_btn(ui, &encoding_label, self.theme.fg_primary);
-                                if er.clicked() { enc_clicked = true; }
-                                enc_btn_rect = er.rect;
+                                // Encoding display (non-interactive)
+                                ui.label(egui::RichText::new(&encoding_label)
+                                    .color(self.theme.fg_dim)
+                                    .size(12.0));
                                 if !uptime_label.is_empty() {
                                     ui.add_space(12.0);
                                     ui.label(egui::RichText::new("|").color(sep_color).size(12.0));
@@ -941,77 +930,7 @@ impl eframe::App for PortalApp {
                                     ui.label(egui::RichText::new(&uptime_label).color(self.theme.fg_dim).size(12.0));
                                 }
                             });
-                            (shell_clicked, enc_clicked)
                         });
-
-                    let (shell_clicked, enc_clicked) = bar_result.inner;
-                    let dw = &mut self.detached_windows[i];
-                    if shell_clicked { dw.show_shell_picker = !dw.show_shell_picker; dw.show_encoding_picker = false; }
-                    if enc_clicked   { dw.show_encoding_picker = !dw.show_encoding_picker; dw.show_shell_picker = false; }
-
-                    let popup_frame = egui::Frame::popup(&ctx.style())
-                        .inner_margin(egui::Margin::same(4.0));
-
-                    if dw.show_shell_picker && is_local_session {
-                        let shells = self.available_shells.clone();
-                        let item_h = 22.0;
-                        let h = shells.len() as f32 * item_h + 10.0;
-                        let pos = egui::pos2(shell_btn_rect.min.x, shell_btn_rect.min.y - h - 4.0);
-                        let area_resp = egui::Area::new(egui::Id::new("detached_shell_picker").with(i))
-                            .order(egui::Order::Foreground)
-                            .fixed_pos(pos)
-                            .show(ctx, |ui| {
-                                popup_frame.show(ui, |ui| {
-                                    ui.set_min_width(160.0);
-                                    for shell_path in &shells {
-                                        let name = shell_path.rsplit('/').next().unwrap_or(shell_path.as_str());
-                                        let selected = *shell_path == self.selected_shell;
-                                        if ui.selectable_label(selected, name).clicked() {
-                                            self.selected_shell = shell_path.clone();
-                                            self.detached_windows[i].show_shell_picker = false;
-                                        }
-                                    }
-                                });
-                            });
-                        if ctx.input(|i| i.pointer.any_click()) {
-                            let popup_rect = area_resp.response.rect;
-                            if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
-                                if !popup_rect.contains(pos) && !shell_btn_rect.contains(pos) {
-                                    self.detached_windows[i].show_shell_picker = false;
-                                }
-                            }
-                        }
-                    }
-
-                    let dw = &mut self.detached_windows[i];
-                    if dw.show_encoding_picker {
-                        let encodings = ["UTF-8", "GBK", "GB2312", "ISO-8859-1", "UTF-16"];
-                        let item_h = 22.0;
-                        let h = encodings.len() as f32 * item_h + 10.0;
-                        let pos = egui::pos2(enc_btn_rect.min.x, enc_btn_rect.min.y - h - 4.0);
-                        let area_resp = egui::Area::new(egui::Id::new("detached_encoding_picker").with(i))
-                            .order(egui::Order::Foreground)
-                            .fixed_pos(pos)
-                            .show(ctx, |ui| {
-                                popup_frame.show(ui, |ui| {
-                                    ui.set_min_width(120.0);
-                                    for &enc in &encodings {
-                                        if ui.selectable_label(enc == self.selected_encoding, enc).clicked() {
-                                            self.selected_encoding = enc.to_string();
-                                            self.detached_windows[i].show_encoding_picker = false;
-                                        }
-                                    }
-                                });
-                            });
-                        if ctx.input(|inp| inp.pointer.any_click()) {
-                            let popup_rect = area_resp.response.rect;
-                            if let Some(pos) = ctx.input(|inp| inp.pointer.interact_pos()) {
-                                if !popup_rect.contains(pos) && !enc_btn_rect.contains(pos) {
-                                    self.detached_windows[i].show_encoding_picker = false;
-                                }
-                            }
-                        }
-                    }
                 }
 
                 // ── Add/Edit Host Drawer & Delete Dialog (Hosts view, before CentralPanel) ──
@@ -1205,9 +1124,7 @@ impl eframe::App for PortalApp {
                         ime_preedit: String::new(),
                         next_id,
                         tab_drag: TabDragState::default(),
-                        show_shell_picker: false,
-                        show_encoding_picker: false,
-                        broadcast_state: BroadcastState::default(),
+            broadcast_state: BroadcastState::default(),
                     });
                 }
             }
@@ -1688,10 +1605,7 @@ impl eframe::App for PortalApp {
             let sep_color = self.theme.border;
             let conn_color = if conn_type == "Local" { self.theme.green } else { self.theme.accent };
 
-            let mut shell_btn_rect = egui::Rect::NOTHING;
-            let mut enc_btn_rect = egui::Rect::NOTHING;
-
-            let bar_result = egui::TopBottomPanel::bottom("status_bar")
+            egui::TopBottomPanel::bottom("status_bar")
                 .exact_height(24.0)
                 .frame(egui::Frame {
                     fill: self.theme.bg_secondary,
@@ -1700,8 +1614,6 @@ impl eframe::App for PortalApp {
                     ..Default::default()
                 })
                 .show(ctx, |ui| {
-                    let mut shell_clicked = false;
-                    let mut enc_clicked = false;
                     ui.horizontal_centered(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
 
@@ -1729,17 +1641,19 @@ impl eframe::App for PortalApp {
                         ui.add_space(12.0);
                         ui.label(egui::RichText::new("|").color(sep_color).size(12.0));
                         ui.add_space(12.0);
-                        let sr = status_btn(ui, &shell_label, if is_local_session { self.theme.fg_primary } else { self.theme.fg_dim });
-                        if is_local_session && sr.clicked() { shell_clicked = true; }
-                        shell_btn_rect = sr.rect;
+                        // Shell display (non-interactive)
+                        ui.label(egui::RichText::new(&shell_label)
+                            .color(if is_local_session { self.theme.fg_primary } else { self.theme.fg_dim })
+                            .size(12.0));
 
                         // Encoding
                         ui.add_space(12.0);
                         ui.label(egui::RichText::new("|").color(sep_color).size(12.0));
                         ui.add_space(12.0);
-                        let er = status_btn(ui, &encoding_label, self.theme.fg_primary);
-                        if er.clicked() { enc_clicked = true; }
-                        enc_btn_rect = er.rect;
+                        // Encoding display (non-interactive)
+                        ui.label(egui::RichText::new(&encoding_label)
+                            .color(self.theme.fg_dim)
+                            .size(12.0));
 
                         // Uptime
                         if !uptime_label.is_empty() {
@@ -1758,79 +1672,8 @@ impl eframe::App for PortalApp {
                             ui.label(egui::RichText::new(format!("Detached: {}", n))
                                 .color(self.theme.green).size(12.0));
                         }
-                    });
-                    (shell_clicked, enc_clicked)
                 });
-
-            let (shell_clicked, enc_clicked) = bar_result.inner;
-            if shell_clicked { self.show_shell_picker = !self.show_shell_picker; self.show_encoding_picker = false; }
-            if enc_clicked   { self.show_encoding_picker = !self.show_encoding_picker; self.show_shell_picker = false; }
-
-            let popup_frame = egui::Frame::popup(&ctx.style())
-                .inner_margin(egui::Margin::same(4.0));
-
-            // Shell picker popup
-            if self.show_shell_picker && is_local_session {
-                let item_h = 22.0;
-                let h = self.available_shells.len() as f32 * item_h + 10.0;
-                let pos = egui::pos2(shell_btn_rect.min.x, shell_btn_rect.min.y - h - 4.0);
-                let area_resp = egui::Area::new(egui::Id::new("shell_picker_area"))
-                    .order(egui::Order::Foreground)
-                    .fixed_pos(pos)
-                    .show(ctx, |ui| {
-                        popup_frame.show(ui, |ui| {
-                            ui.set_min_width(160.0);
-                            let shells = self.available_shells.clone();
-                            for shell_path in &shells {
-                                let name = shell_path.rsplit('/').next().unwrap_or(shell_path.as_str());
-                                let selected = *shell_path == self.selected_shell;
-                                if ui.selectable_label(selected, name).clicked() {
-                                    self.selected_shell = shell_path.clone();
-                                    self.show_shell_picker = false;
-                                }
-                            }
-                        });
-                    });
-                // Close if click landed outside the popup and outside the trigger button
-                if ctx.input(|i| i.pointer.any_click()) {
-                    let popup_rect = area_resp.response.rect;
-                    if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
-                        if !popup_rect.contains(pos) && !shell_btn_rect.contains(pos) {
-                            self.show_shell_picker = false;
-                        }
-                    }
-                }
-            }
-
-            // Encoding picker popup
-            if self.show_encoding_picker {
-                let encodings = ["UTF-8", "GBK", "GB2312", "ISO-8859-1", "UTF-16"];
-                let item_h = 22.0;
-                let h = encodings.len() as f32 * item_h + 10.0;
-                let pos = egui::pos2(enc_btn_rect.min.x, enc_btn_rect.min.y - h - 4.0);
-                let area_resp = egui::Area::new(egui::Id::new("encoding_picker_area"))
-                    .order(egui::Order::Foreground)
-                    .fixed_pos(pos)
-                    .show(ctx, |ui| {
-                        popup_frame.show(ui, |ui| {
-                            ui.set_min_width(120.0);
-                            for &enc in &encodings {
-                                if ui.selectable_label(enc == self.selected_encoding, enc).clicked() {
-                                    self.selected_encoding = enc.to_string();
-                                    self.show_encoding_picker = false;
-                                }
-                            }
-                        });
-                    });
-                if ctx.input(|i| i.pointer.any_click()) {
-                    let popup_rect = area_resp.response.rect;
-                    if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
-                        if !popup_rect.contains(pos) && !enc_btn_rect.contains(pos) {
-                            self.show_encoding_picker = false;
-                        }
-                    }
-                }
-            }
+                });
         }
 
         // ── Poll SFTP browser ──────────────────────────────────────────────

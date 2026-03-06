@@ -225,8 +225,6 @@ pub struct DetachedWindow {
     pub ime_preedit: String,
     pub next_id: usize,
     pub tab_drag: TabDragState,
-    pub show_shell_picker: bool,
-    pub show_encoding_picker: bool,
-    #[allow(dead_code)]
+#[allow(dead_code)]
     pub broadcast_state: BroadcastState,
 }

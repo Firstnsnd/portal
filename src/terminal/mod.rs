@@ -84,6 +84,12 @@ pub trait Pty {
 
     /// Kill the child process
     fn kill(&mut self) -> Result<()>;
+
+    /// Get the current shell process name (e.g., "bash", "zsh", "fish")
+    /// Returns None if unable to determine the shell name
+    fn get_shell_name(&self) -> Option<String> {
+        None
+    }
 }
 
 // Export platform-specific PTY implementation

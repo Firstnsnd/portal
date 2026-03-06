@@ -185,6 +185,48 @@ impl Pty for UnixPty {
         self.alive.store(false, Ordering::Relaxed);
         Ok(())
     }
+
+    fn get_shell_name(&self) -> Option<String> {
+        if !self.alive.load(Ordering::Relaxed) {
+            return None;
+        }
+
+        use std::process::Command;
+
+        // Use `ps -p PID -o comm=` to get process name more reliably
+        let output = Command::new("ps")
+            .args(["-p", &self.child_pid.to_string(), "-o", "comm="])
+            .output()
+            .ok()?;
+
+        if output.status.success() {
+            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+
+        // Fallback to proc_pidpath
+        use std::path::PathBuf;
+        unsafe {
+            let mut path: Vec<u8> = vec![0; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+            if libc::proc_pidpath(
+                self.child_pid,
+                path.as_mut_ptr() as *mut libc::c_void,
+                path.len() as u32,
+            ) > 0 {
+                let null_pos = path.iter().position(|&b| b == 0).unwrap_or(path.len());
+                let path_str = std::str::from_utf8(&path[..null_pos]).ok()?;
+                
+                PathBuf::from(path_str)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|s| s.to_string())
+            } else {
+                None
+            }
+        }
+    }
 }
 
 impl Drop for UnixPty {

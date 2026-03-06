@@ -1026,6 +1026,8 @@ pub struct RealPtySession {
     pub grid: Arc<Mutex<TerminalGrid>>,
     alive: Arc<std::sync::atomic::AtomicBool>,
     _reader_thread: Option<std::thread::JoinHandle<()>>,
+    cached_shell_name: Arc<Mutex<Option<String>>>,
+    last_shell_check: Arc<Mutex<std::time::Instant>>,
 }
 
 impl RealPtySession {
@@ -1104,6 +1106,8 @@ impl RealPtySession {
             grid,
             alive,
             _reader_thread: Some(reader_thread),
+            cached_shell_name: Arc::new(Mutex::new(None)),
+            last_shell_check: Arc::new(Mutex::new(std::time::Instant::now())),
         })
     }
 
@@ -1136,6 +1140,39 @@ impl RealPtySession {
             grid.resize(cols as usize, rows as usize);
         }
         Ok(())
+    }
+
+    pub fn get_shell_name(&self) -> Option<String> {
+        // Check cache - only update every 1 second
+        let now = std::time::Instant::now();
+        let mut last_check = self.last_shell_check.lock().ok()?;
+        let mut cached = self.cached_shell_name.lock().ok()?;
+        
+        if now.duration_since(*last_check).as_secs() < 1 {
+            // Return cached value
+            return cached.clone();
+        }
+        
+        // Update cache
+        *last_check = now;
+        
+        #[cfg(unix)]
+        if let Some(ref pty) = self.pty {
+            if let Some(name) = pty.get_shell_name() {
+                *cached = Some(name.clone());
+                return Some(name);
+            }
+        }
+        #[cfg(windows)]
+        if let Some(ref pty) = self.pty {
+            if let Some(name) = pty.get_shell_name() {
+                *cached = Some(name.clone());
+                return Some(name);
+            }
+        }
+        
+        // Keep old cache if detection fails
+        cached.clone()
     }
 }
 
