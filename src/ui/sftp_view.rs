@@ -197,6 +197,7 @@ impl PortalApp {
                     self.sftp_active_panel_is_local,
                     &self.language,
                     "local_left_scroll",
+                    self.sftp_editor_dialog.is_some(),
                 );
             } else {
                 // ── LEFT PANEL: Remote (independent connection) ──
@@ -479,6 +480,7 @@ impl PortalApp {
                                     self.sftp_active_panel_is_local,
                                     &self.language,
                                     "left_remote_scroll",
+                                    self.sftp_editor_dialog.is_some(),
                                 );
                             }
                             SftpConnectionState::Disconnected => {
@@ -610,6 +612,7 @@ impl PortalApp {
                     !self.sftp_active_panel_is_local,
                     &self.language,
                     "local_right_scroll",
+                    self.sftp_editor_dialog.is_some(),
                 );
             } else {
                 // ── RIGHT PANEL: Remote (host list or remote browser) ──
@@ -894,6 +897,7 @@ impl PortalApp {
                                 !self.sftp_active_panel_is_local,
                                 &self.language,
                                 "right_remote_scroll",
+                                self.sftp_editor_dialog.is_some(),
                             );
                         }
                         SftpConnectionState::Disconnected => {
@@ -2272,22 +2276,19 @@ impl PortalApp {
 
         if let Some(ref mut dialog) = self.sftp_editor_dialog {
             let has_unsaved = dialog.content != dialog.original_content;
-            let title = if dialog.is_new_file && dialog.file_path.is_empty() {
-                format!("{}", self.language.t("new_file"))
-            } else if has_unsaved {
-                format!("{} *", dialog.file_name)
-            } else {
-                dialog.file_name.clone()
-            };
 
             let mut open = true;
-            egui::Window::new(&title)
+            // Use fixed title and ID to prevent window flickering when title changes (e.g. adding "*" for unsaved)
+            egui::Window::new("sftp_editor")
+                .id(egui::Id::new("sftp_editor_window"))
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(true)
                 .min_size(egui::vec2(400.0, 200.0))
                 .default_width(680.0)
+                .default_height(500.0)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .pivot(egui::Align2::CENTER_CENTER)
                 .title_bar(false)
                 .frame(egui::Frame {
                     fill: self.theme.bg_primary,
@@ -2432,22 +2433,21 @@ impl PortalApp {
                             inner_margin: egui::Margin { left: 4.0, right: 4.0, top: 4.0, bottom: 4.0 },
                             ..Default::default()
                         };
-                        let content_lines = dialog.content.lines().count().max(1);
-                        let desired = content_lines.clamp(16, 24);
                         let max_editor_h = 500.0_f32;
                         editor_frame.show(ui, |ui| {
                             egui::ScrollArea::both()
                                 .max_height(max_editor_h)
-                                .auto_shrink([false, true])
                                 .show(ui, |ui| {
-                                    ui.add(
+                                    let response = ui.add(
                                         egui::TextEdit::multiline(&mut dialog.content)
+                                            .id(egui::Id::new("sftp_editor_content"))
                                             .desired_width(f32::INFINITY)
-                                            .desired_rows(desired)
+                                            .desired_rows(20)
                                             .font(egui::FontId::monospace(self.font_size))
                                             .code_editor()
                                             .lock_focus(true)
                                     );
+                                    let _ = response; // response unused, just for focus
                                 });
                         });
                     }
@@ -2647,6 +2647,7 @@ pub fn render_file_panel(
     is_active_panel: bool,
     language: &Language,
     panel_id: &str,
+    editor_is_open: bool,
 ) {
     let row_height = 26.0;
     let status_bar_height = 24.0;
@@ -2662,8 +2663,8 @@ pub fn render_file_panel(
         available.max,
     );
 
-    // Keyboard handling (only for active panel)
-    if is_active_panel && !entries.is_empty() {
+    // Keyboard handling (only for active panel and no other UI wants keyboard input and editor is not open)
+    if is_active_panel && !entries.is_empty() && !ui.ctx().wants_keyboard_input() && !editor_is_open {
         let modifiers = ui.ctx().input(|i| i.modifiers);
         let cmd = modifiers.command; // Cmd on macOS, Ctrl on others
         let shift = modifiers.shift;
