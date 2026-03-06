@@ -394,7 +394,7 @@ pub fn render_terminal_session(
                 egui::vec2(char_width, line_height),
             );
             ctx.output_mut(|o| {
-                o.ime = Some(egui::output::IMEOutput { rect, cursor_rect });
+                o.ime = Some(egui::output::IMEOutput { rect: cursor_rect, cursor_rect });
             });
         }
     }
