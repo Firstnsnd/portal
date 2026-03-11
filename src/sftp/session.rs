@@ -905,6 +905,7 @@ async fn remove_dir_recursive(
 }
 
 /// Download a remote file to local disk with progress reporting.
+/// Supports resume: if local file exists, continues from where it left off.
 async fn download_file(
     sftp: &russh_sftp::client::SftpSession,
     remote_path: &str,
@@ -912,6 +913,8 @@ async fn download_file(
     resp_tx: &mpsc::UnboundedSender<SftpResponse>,
     cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+
     let filename = remote_path
         .rsplit('/')
         .next()
@@ -929,12 +932,45 @@ async fn download_file(
         .await
         .map_err(|e| format!("Cannot open remote file: {}", e))?;
 
-    let mut local_file = tokio::fs::File::create(local_path)
-        .await
-        .map_err(|e| format!("Cannot create local file: {}", e))?;
+    // Check if local file exists for resume support
+    let (mut local_file, start_offset) = match tokio::fs::File::open(local_path).await {
+        Ok(existing_file) => {
+            // File exists, check its size for resume
+            let existing_meta = existing_file.metadata().await
+                .map_err(|e| format!("Cannot stat local file: {}", e))?;
+            let existing_size = existing_meta.len();
+
+            // Only resume if local file is smaller than remote file
+            if existing_size > 0 && existing_size < total_bytes {
+                // Seek to end of local file for appending
+                let mut file = existing_file;
+                file.seek(std::io::SeekFrom::Start(existing_size)).await
+                    .map_err(|e| format!("Cannot seek local file: {}", e))?;
+
+                // Seek remote file to same position
+                remote_file.seek(std::io::SeekFrom::Start(existing_size)).await
+                    .map_err(|e| format!("Cannot seek remote file: {}", e))?;
+
+                (file, existing_size)
+            } else {
+                // Local file is same size or larger - start fresh
+                let file = tokio::fs::File::create(local_path)
+                    .await
+                    .map_err(|e| format!("Cannot create local file: {}", e))?;
+                (file, 0)
+            }
+        }
+        Err(_) => {
+            // File doesn't exist, create new
+            let file = tokio::fs::File::create(local_path)
+                .await
+                .map_err(|e| format!("Cannot create local file: {}", e))?;
+            (file, 0)
+        }
+    };
 
     let started_at = std::time::Instant::now();
-    let mut bytes_transferred: u64 = 0;
+    let mut bytes_transferred: u64 = start_offset;
     let chunk_size = 32768;
     let mut buf = vec![0u8; chunk_size];
 
@@ -1308,6 +1344,8 @@ async fn write_file_content(
 }
 
 /// Upload a local file to a remote path with progress reporting.
+/// Supports resume: if remote file exists and is smaller than local file,
+/// continues from where it left off.
 async fn upload_file(
     sftp: &russh_sftp::client::SftpSession,
     local_path: &str,
@@ -1315,6 +1353,8 @@ async fn upload_file(
     resp_tx: &mpsc::UnboundedSender<SftpResponse>,
     cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+
     let filename = std::path::Path::new(local_path)
         .file_name()
         .and_then(|n| n.to_str())
@@ -1330,13 +1370,49 @@ async fn upload_file(
         .await
         .map_err(|e| format!("Cannot open local file: {}", e))?;
 
-    let mut remote_file = sftp
-        .create(remote_path)
-        .await
-        .map_err(|e| format!("Cannot create remote file: {}", e))?;
+    // Check if remote file exists for resume support
+    let (mut remote_file, start_offset) = match sftp.metadata(remote_path).await {
+        Ok(remote_meta) => {
+            let remote_size = remote_meta.size.unwrap_or(0);
+            // Only resume if remote file is smaller than local file
+            if remote_size > 0 && remote_size < total_bytes {
+                // Open remote file for appending (WRITE | CREATE | APPEND, no TRUNCATE)
+                let remote_file = sftp
+                    .open_with_flags(
+                        remote_path,
+                        russh_sftp::protocol::OpenFlags::WRITE
+                            | russh_sftp::protocol::OpenFlags::CREATE
+                            | russh_sftp::protocol::OpenFlags::APPEND,
+                    )
+                    .await
+                    .map_err(|e| format!("Cannot open remote file for append: {}", e))?;
+
+                // Seek local file to same position as remote file size
+                local_file.seek(std::io::SeekFrom::Start(remote_size)).await
+                    .map_err(|e| format!("Cannot seek local file: {}", e))?;
+
+                (remote_file, remote_size)
+            } else {
+                // Remote file is same size or larger, or doesn't exist properly - start fresh
+                let remote_file = sftp
+                    .create(remote_path)
+                    .await
+                    .map_err(|e| format!("Cannot create remote file: {}", e))?;
+                (remote_file, 0)
+            }
+        }
+        Err(_) => {
+            // Remote file doesn't exist, start from beginning
+            let remote_file = sftp
+                .create(remote_path)
+                .await
+                .map_err(|e| format!("Cannot create remote file: {}", e))?;
+            (remote_file, 0)
+        }
+    };
 
     let started_at = std::time::Instant::now();
-    let mut bytes_transferred: u64 = 0;
+    let mut bytes_transferred: u64 = start_offset;
     let chunk_size = 32768;
     let mut buf = vec![0u8; chunk_size];
 
