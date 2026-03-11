@@ -45,16 +45,38 @@ impl Pty for UnixPty {
             }
             Fork::Child(ref _slave) => {
                 // Child process - exec the command
-                let shell = std::path::PathBuf::from(command);
-                let _result = std::process::Command::new(&shell)
-                    .args(args)
-                    .env("TERM", "xterm-256color")
-                    .env("LANG", "en_US.UTF-8")
-                    .env("LC_ALL", "en_US.UTF-8")
-                    .status();
+                // IMPORTANT: After fork(), only async-signal-safe functions can be called
+                // before exec(). Using std::process::exit() would trigger destructors
+                // and library cleanup (like CoreSpotlight/PowerLog on macOS) which
+                // causes crashes because dispatch queues are broken after fork.
 
-                // If exec fails, exit
-                std::process::exit(1);
+                // Set environment variables using libc (async-signal-safe)
+                unsafe {
+                    libc::setenv(b"TERM\0".as_ptr() as *const i8, b"xterm-256color\0".as_ptr() as *const i8, 1);
+                    libc::setenv(b"LANG\0".as_ptr() as *const i8, b"en_US.UTF-8\0".as_ptr() as *const i8, 1);
+                    libc::setenv(b"LC_ALL\0".as_ptr() as *const i8, b"en_US.UTF-8\0".as_ptr() as *const i8, 1);
+                }
+
+                // Build args for execvp (command + args + null terminator)
+                let mut exec_args: Vec<*const i8> = Vec::with_capacity(args.len() + 2);
+                let command_cstring = std::ffi::CString::new(command).unwrap_or_default();
+                exec_args.push(command_cstring.as_ptr());
+
+                let arg_cstrings: Vec<std::ffi::CString> = args
+                    .iter()
+                    .filter_map(|a| std::ffi::CString::new(*a).ok())
+                    .collect();
+                for arg in &arg_cstrings {
+                    exec_args.push(arg.as_ptr());
+                }
+                exec_args.push(std::ptr::null());
+
+                // Execute the command - this replaces the current process
+                unsafe {
+                    libc::execvp(command_cstring.as_ptr(), exec_args.as_ptr());
+                    // If execvp returns, it failed - use _exit() which is async-signal-safe
+                    libc::_exit(1);
+                }
             }
         }
     }

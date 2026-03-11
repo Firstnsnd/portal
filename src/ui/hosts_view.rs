@@ -88,13 +88,22 @@ impl PortalApp {
                     self.current_view = AppView::Keychain;
                 }
 
-                // Settings button at bottom
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.add_space(8.0);
-                    if nav_btn(ui, "⚙", language.t("settings"), self.current_view == AppView::Settings) {
-                        self.current_view = AppView::Settings;
-                    }
-                });
+                // Settings button at bottom - fill remaining space to reach window bottom
+                let available_size = ui.available_size();
+                egui::Frame::none()
+                    .fill(theme.bg_secondary)
+                    .show(ui, |ui| {
+                        ui.allocate_ui_with_layout(
+                            available_size,
+                            egui::Layout::bottom_up(egui::Align::LEFT),
+                            |ui| {
+                                ui.add_space(8.0);
+                                if nav_btn(ui, "⚙", language.t("settings"), self.current_view == AppView::Settings) {
+                                    self.current_view = AppView::Settings;
+                                }
+                            },
+                        );
+                    });
             });
     }
 
