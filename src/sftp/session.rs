@@ -577,6 +577,18 @@ async fn sftp_task(
     // Helper: check if the user cancelled
     let cancelled = || cancel_flag.load(std::sync::atomic::Ordering::Relaxed);
 
+    // Helper: check if error indicates connection loss
+    let is_disconnect_error = |e: &str| {
+        let err_lower = e.to_lowercase();
+        err_lower.contains("connection")
+            || err_lower.contains("closed")
+            || err_lower.contains("eof")
+            || err_lower.contains("broken pipe")
+            || err_lower.contains("reset by peer")
+            || err_lower.contains("timed out")
+            || err_lower.contains("no route")
+    };
+
     // 1. Connect + authenticate (with timeout)
     let handle = match tokio::time::timeout(
         CONNECT_TIMEOUT,
@@ -642,9 +654,18 @@ async fn sftp_task(
     // 5. Command loop
     loop {
         match cmd_rx.recv().await {
+            None => {
+                // Command channel closed - connection dropped
+                let _ = resp_tx.send(SftpResponse::Disconnected);
+                break;
+            }
             Some(SftpCommand::ListDir(path)) => {
                 let canonical = sftp.canonicalize(&path).await.unwrap_or(path);
                 if let Err(e) = list_dir(&sftp, &canonical, &resp_tx).await {
+                    if is_disconnect_error(&e) {
+                        let _ = resp_tx.send(SftpResponse::Disconnected);
+                        break;
+                    }
                     let _ = resp_tx.send(SftpResponse::Error(e));
                 }
             }
@@ -652,6 +673,10 @@ async fn sftp_task(
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
                 if let Err(e) = download_file(&sftp, &remote, &local, &resp_tx, &cancel_flag).await {
                     if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        if is_disconnect_error(&e) {
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
                         let _ = resp_tx.send(SftpResponse::Error(e));
                     }
                 }
@@ -664,6 +689,10 @@ async fn sftp_task(
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
                 if let Err(e) = upload_file(&sftp, &local, &remote, &resp_tx, &cancel_flag).await {
                     if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        if is_disconnect_error(&e) {
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
                         let _ = resp_tx.send(SftpResponse::Error(e));
                     }
                 }
@@ -676,6 +705,10 @@ async fn sftp_task(
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
                 if let Err(e) = upload_dir(&sftp, &local_dir, &remote_dir, &resp_tx, &cancel_flag).await {
                     if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        if is_disconnect_error(&e) {
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
                         let _ = resp_tx.send(SftpResponse::Error(e));
                     }
                 }
@@ -688,6 +721,10 @@ async fn sftp_task(
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
                 if let Err(e) = download_dir(&sftp, &remote_dir, &local_dir, &resp_tx, &cancel_flag).await {
                     if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        if is_disconnect_error(&e) {
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
                         let _ = resp_tx.send(SftpResponse::Error(e));
                     }
                 }
@@ -699,7 +736,14 @@ async fn sftp_task(
             Some(SftpCommand::Rename { from, to }) => {
                 match sftp.rename(&from, &to).await {
                     Ok(_) => { let _ = resp_tx.send(SftpResponse::OperationComplete); }
-                    Err(e) => { let _ = resp_tx.send(SftpResponse::Error(format!("Rename failed: {}", e))); }
+                    Err(e) => {
+                        let err_msg = format!("Rename failed: {}", e);
+                        if is_disconnect_error(&err_msg) {
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
+                        let _ = resp_tx.send(SftpResponse::Error(err_msg));
+                    }
                 }
             }
             Some(SftpCommand::Delete(path)) => {
@@ -713,16 +757,36 @@ async fn sftp_task(
                         };
                         match result {
                             Ok(_) => { let _ = resp_tx.send(SftpResponse::OperationComplete); }
-                            Err(e) => { let _ = resp_tx.send(SftpResponse::Error(e)); }
+                            Err(e) => {
+                                if is_disconnect_error(&e) {
+                                    let _ = resp_tx.send(SftpResponse::Disconnected);
+                                    break;
+                                }
+                                let _ = resp_tx.send(SftpResponse::Error(e));
+                            }
                         }
                     }
-                    Err(e) => { let _ = resp_tx.send(SftpResponse::Error(format!("Cannot stat: {}", e))); }
+                    Err(e) => {
+                        let err_msg = format!("Cannot stat: {}", e);
+                        if is_disconnect_error(&err_msg) {
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
+                        let _ = resp_tx.send(SftpResponse::Error(err_msg));
+                    }
                 }
             }
             Some(SftpCommand::CreateDir(path)) => {
                 match sftp.create_dir(&path).await {
                     Ok(_) => { let _ = resp_tx.send(SftpResponse::OperationComplete); }
-                    Err(e) => { let _ = resp_tx.send(SftpResponse::Error(format!("Create dir failed: {}", e))); }
+                    Err(e) => {
+                        let err_msg = format!("Create dir failed: {}", e);
+                        if is_disconnect_error(&err_msg) {
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
+                        let _ = resp_tx.send(SftpResponse::Error(err_msg));
+                    }
                 }
             }
             Some(SftpCommand::ReadFile { path }) => {
@@ -732,16 +796,28 @@ async fn sftp_task(
                         let size: u64 = e.trim_start_matches("TOO_LARGE:").parse().unwrap_or(0);
                         let _ = resp_tx.send(SftpResponse::FileTooLarge { path, size });
                     }
-                    Err(e) => { let _ = resp_tx.send(SftpResponse::Error(e)); }
+                    Err(e) => {
+                        if is_disconnect_error(&e) {
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
+                        let _ = resp_tx.send(SftpResponse::Error(e));
+                    }
                 }
             }
             Some(SftpCommand::WriteFile { path, data }) => {
                 match write_file_content(&sftp, &path, &data).await {
                     Ok(_) => { let _ = resp_tx.send(SftpResponse::OperationComplete); }
-                    Err(e) => { let _ = resp_tx.send(SftpResponse::Error(e)); }
+                    Err(e) => {
+                        if is_disconnect_error(&e) {
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
+                        let _ = resp_tx.send(SftpResponse::Error(e));
+                    }
                 }
             }
-            Some(SftpCommand::Disconnect) | None => {
+            Some(SftpCommand::Disconnect) => {
                 let _ = sftp.close().await;
                 let _ = resp_tx.send(SftpResponse::Disconnected);
                 break;
