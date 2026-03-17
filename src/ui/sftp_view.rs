@@ -1191,8 +1191,9 @@ impl PortalApp {
                     self.theme.fg_primary,
                 );
 
-                // Info text (right-aligned, left of stop button)
-                let info_text = format!("{:.0}%   {}   {}", pct * 100.0, speed_str, size_str);
+                // Info text (right-aligned, left of stop button): %  speed  size  elapsed
+                let elapsed_str = progress.elapsed_string();
+                let info_text = format!("{:.0}%   {}   {}   {}", pct * 100.0, speed_str, size_str, elapsed_str);
                 let info_galley = ui.painter().layout_no_wrap(
                     info_text,
                     egui::FontId::proportional(11.0),

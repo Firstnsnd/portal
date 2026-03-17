@@ -304,6 +304,19 @@ impl TransferProgress {
             0.0
         }
     }
+
+    /// Elapsed time as a formatted string (e.g., "1:23" or "12:34:56").
+    pub fn elapsed_string(&self) -> String {
+        let secs = self.started_at.elapsed().as_secs();
+        let hours = secs / 3600;
+        let mins = (secs % 3600) / 60;
+        let s = secs % 60;
+        if hours > 0 {
+            format!("{}:{:02}:{:02}", hours, mins, s)
+        } else {
+            format!("{}:{:02}", mins, s)
+        }
+    }
 }
 
 /// Commands sent from the GUI thread to the async SFTP task
