@@ -276,16 +276,17 @@ pub fn render_terminal_session(
 ) -> (Option<PaneAction>, Vec<u8>) {
     let font_id = egui::FontId::monospace(font_size);
     let pad_x = 8.0_f32;
-    let pad_y = 6.0_f32;
+    let pad_y_top = 6.0_f32;
+    let pad_y_bottom = 8.0_f32; // Extra bottom padding to prevent input line being hidden behind status bar
     let mut input_bytes: Vec<u8> = Vec::new();
     let char_width = ui.fonts(|f| f.glyph_width(&font_id, 'M'));
     let line_height = ui.fonts(|f| f.row_height(&font_id)).ceil();
     let new_cols = (((pane_rect.width() - pad_x * 2.0) / char_width) as usize).max(10);
-    let new_rows = (((pane_rect.height() - pad_y * 2.0) / line_height) as usize).max(3);
+    let new_rows = (((pane_rect.height() - pad_y_top - pad_y_bottom) / line_height) as usize).max(3);
     session.resize(new_cols, new_rows);
 
     let rect = egui::Rect::from_min_size(
-        egui::pos2(pane_rect.min.x + pad_x, pane_rect.min.y + pad_y),
+        egui::pos2(pane_rect.min.x + pad_x, pane_rect.min.y + pad_y_top),
         egui::vec2(char_width * new_cols as f32, line_height * new_rows as f32),
     );
 
@@ -352,10 +353,27 @@ pub fn render_terminal_session(
         if let Some(pos) = hover_pos {
             // Only update if we're within or near the terminal rect
             if pos.x >= rect.min.x - 10.0 && pos.x <= rect.max.x + 10.0 &&
-               pos.y >= rect.min.y - 10.0 && pos.y <= rect.max.y + 10.0 {
+               pos.y >= rect.min.y - 50.0 && pos.y <= rect.max.y + 50.0 {
                 let clamped_x = pos.x.clamp(rect.min.x, rect.max.x);
                 let clamped_y = pos.y.clamp(rect.min.y, rect.max.y);
                 drag_end_pos = Some(egui::pos2(clamped_x, clamped_y));
+
+                // Auto-scroll when dragging near edges
+                // The closer to the edge, the faster we scroll
+                let edge_margin = line_height * 3.0;
+                if pos.y < rect.min.y + edge_margin && pos.y >= rect.min.y - 50.0 {
+                    // Near top edge - scroll up (towards older scrollback)
+                    // Speed: 1-3 lines per frame based on distance
+                    let distance = (rect.min.y + edge_margin - pos.y) / edge_margin;
+                    let scroll_speed = (distance * 3.0).ceil() as usize;
+                    let max_offset = session.grid.lock().map(|g| g.scrollback_len()).unwrap_or(0);
+                    session.scroll_offset = (session.scroll_offset + scroll_speed).min(max_offset);
+                } else if pos.y > rect.max.y - edge_margin && pos.y <= rect.max.y + 50.0 {
+                    // Near bottom edge - scroll down (towards newer content)
+                    let distance = (pos.y - (rect.max.y - edge_margin)) / edge_margin;
+                    let scroll_speed = (distance * 3.0).ceil() as usize;
+                    session.scroll_offset = session.scroll_offset.saturating_sub(scroll_speed);
+                }
             }
         }
     }
