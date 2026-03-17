@@ -355,6 +355,12 @@ pub struct SftpBrowser {
     cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub pending_file_content: Option<(String, Vec<u8>)>,
     pub pending_file_too_large: Option<(String, u64)>,
+    // Connection params stored for auto-reconnect
+    runtime: tokio::runtime::Handle,
+    conn_host: String,
+    conn_port: u16,
+    conn_username: String,
+    conn_auth: ResolvedAuth,
 }
 
 impl SftpBrowser {
@@ -372,7 +378,7 @@ impl SftpBrowser {
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let cancel_clone = cancel_flag.clone();
-        runtime.spawn(sftp_task(host, port, username, auth, cmd_rx, resp_tx, cancel_clone));
+        runtime.spawn(sftp_task(host.clone(), port, username.clone(), auth.clone(), cmd_rx, resp_tx, cancel_clone));
 
         Self {
             cmd_tx,
@@ -381,13 +387,18 @@ impl SftpBrowser {
             current_path: String::new(),
             entries: Vec::new(),
             transfer: None,
-            host_name,
+            host_name: host_name.clone(),
             selection: FileSelection::default(),
             path_input: String::new(),
             show_hidden_files: false,
             cancel_flag,
             pending_file_content: None,
             pending_file_too_large: None,
+            runtime: runtime.handle().clone(),
+            conn_host: host,
+            conn_port: port,
+            conn_username: username,
+            conn_auth: auth,
         }
     }
 
@@ -430,10 +441,47 @@ impl SftpBrowser {
                     }
                 }
                 SftpResponse::Disconnected => {
-                    self.state = SftpConnectionState::Disconnected;
+                    if matches!(self.state, SftpConnectionState::Connected) {
+                        // Connection lost while previously connected — auto-reconnect
+                        log::info!("SFTP connection lost, auto-reconnecting to {}", self.host_name);
+                        self.auto_reconnect();
+                    } else {
+                        self.state = SftpConnectionState::Disconnected;
+                    }
                 }
             }
         }
+    }
+
+    /// Re-establish the connection using stored params, then navigate back to the current path.
+    fn auto_reconnect(&mut self) {
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let (resp_tx, resp_rx) = mpsc::unbounded_channel();
+        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let reconnect_path = if self.current_path.is_empty() {
+            None
+        } else {
+            Some(self.current_path.clone())
+        };
+
+        let cancel_clone = cancel_flag.clone();
+        self.runtime.spawn(sftp_task_with_initial_path(
+            self.conn_host.clone(),
+            self.conn_port,
+            self.conn_username.clone(),
+            self.conn_auth.clone(),
+            cmd_rx,
+            resp_tx,
+            cancel_clone,
+            reconnect_path,
+        ));
+
+        self.cmd_tx = cmd_tx;
+        self.resp_rx = resp_rx;
+        self.cancel_flag = cancel_flag;
+        self.transfer = None;
+        self.state = SftpConnectionState::Connecting;
     }
 
     /// Navigate to a directory path.
@@ -562,8 +610,35 @@ impl Drop for SftpBrowser {
     }
 }
 
+/// Variant of sftp_task that navigates to a specific path after connecting (used for auto-reconnect).
+async fn sftp_task_with_initial_path(
+    host: String,
+    port: u16,
+    username: String,
+    auth: ResolvedAuth,
+    cmd_rx: mpsc::UnboundedReceiver<SftpCommand>,
+    resp_tx: mpsc::UnboundedSender<SftpResponse>,
+    cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    initial_path: Option<String>,
+) {
+    sftp_task_inner(host, port, username, auth, cmd_rx, resp_tx, cancel_flag, initial_path).await
+}
+
 /// The async SFTP task running on tokio.
 async fn sftp_task(
+    host: String,
+    port: u16,
+    username: String,
+    auth: ResolvedAuth,
+    cmd_rx: mpsc::UnboundedReceiver<SftpCommand>,
+    resp_tx: mpsc::UnboundedSender<SftpResponse>,
+    cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    sftp_task_inner(host, port, username, auth, cmd_rx, resp_tx, cancel_flag, None).await
+}
+
+/// Inner implementation shared by sftp_task and sftp_task_with_initial_path.
+async fn sftp_task_inner(
     host: String,
     port: u16,
     username: String,
@@ -571,6 +646,7 @@ async fn sftp_task(
     mut cmd_rx: mpsc::UnboundedReceiver<SftpCommand>,
     resp_tx: mpsc::UnboundedSender<SftpResponse>,
     cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    initial_path: Option<String>,
 ) {
     const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
@@ -642,11 +718,19 @@ async fn sftp_task(
     };
     if cancelled() { return; }
 
-    // 4. Resolve home directory as initial path
-    let home = sftp.canonicalize(".").await.unwrap_or_else(|_| "/".into());
+    // 4. Resolve initial path (reconnect path or home directory)
+    let start_path = if let Some(ref path) = initial_path {
+        // Reconnecting: try the previous path, fall back to home
+        match sftp.canonicalize(path).await {
+            Ok(p) => p,
+            Err(_) => sftp.canonicalize(".").await.unwrap_or_else(|_| "/".into()),
+        }
+    } else {
+        sftp.canonicalize(".").await.unwrap_or_else(|_| "/".into())
+    };
 
     // List the initial directory
-    if let Err(e) = list_dir(&sftp, &home, &resp_tx).await {
+    if let Err(e) = list_dir(&sftp, &start_path, &resp_tx).await {
         if !cancelled() { let _ = resp_tx.send(SftpResponse::Error(e)); }
         return;
     }
@@ -660,13 +744,29 @@ async fn sftp_task(
                 break;
             }
             Some(SftpCommand::ListDir(path)) => {
-                let canonical = sftp.canonicalize(&path).await.unwrap_or(path);
-                if let Err(e) = list_dir(&sftp, &canonical, &resp_tx).await {
-                    if is_disconnect_error(&e) {
+                const OP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+                let canonical = match tokio::time::timeout(OP_TIMEOUT, sftp.canonicalize(&path)).await {
+                    Ok(Ok(p)) => p,
+                    Ok(Err(_)) => path.clone(),
+                    Err(_) => {
+                        // Timeout — connection is likely dead
                         let _ = resp_tx.send(SftpResponse::Disconnected);
                         break;
                     }
-                    let _ = resp_tx.send(SftpResponse::Error(e));
+                };
+                match tokio::time::timeout(OP_TIMEOUT, list_dir(&sftp, &canonical, &resp_tx)).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        if is_disconnect_error(&e) {
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
+                        let _ = resp_tx.send(SftpResponse::Error(e));
+                    }
+                    Err(_) => {
+                        let _ = resp_tx.send(SftpResponse::Disconnected);
+                        break;
+                    }
                 }
             }
             Some(SftpCommand::Download { remote, local }) => {

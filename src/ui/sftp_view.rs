@@ -2767,18 +2767,33 @@ pub fn render_file_panel(
                     theme.fg_dim,
                 );
 
-                // Name
+                // Name (truncated to not overlap with permissions/size)
                 let name_color = if is_dir { theme.accent } else { theme.fg_primary };
                 let display_name = if is_dir {
                     format!("{}/", entry.name)
                 } else {
                     entry.name.clone()
                 };
-                ui.painter().text(
-                    egui::pos2(rect.min.x + 28.0, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    &display_name,
+                let name_x = rect.min.x + 28.0;
+                // Permissions are right-aligned at rect.max.x - 75.0, text extends left
+                // "drwxrwxrwx" is ~60px wide, so permissions end around rect.max.x - 135.0
+                // Leave some padding, name should not extend past rect.max.x - 145.0
+                let name_max_x = (rect.max.x - 145.0).max(name_x + 20.0);
+                let max_name_width = name_max_x - name_x;
+
+                // Create a layout job that doesn't wrap but truncates with ellipsis
+                let mut job = egui::text::LayoutJob::simple_singleline(
+                    display_name.clone(),
                     egui::FontId::proportional(12.0),
+                    name_color,
+                );
+                job.wrap = egui::text::TextWrapping::truncate_at_width(max_name_width);
+
+                let galley = ui.fonts(|f| f.layout_job(job));
+
+                ui.painter().galley(
+                    egui::pos2(name_x, rect.center().y - galley.size().y * 0.5),
+                    galley,
                     name_color,
                 );
 
