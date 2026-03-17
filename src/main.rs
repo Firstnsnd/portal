@@ -580,188 +580,206 @@ impl eframe::App for PortalApp {
                         })
                         .show(ctx, |ui| {
                             ui.horizontal(|ui| {
-                                ui.add_space(4.0);
-                                let mut tab_to_activate: Option<usize> = None;
-                                let mut tab_to_close: Option<usize> = None;
-                                let mut tab_to_detach: Option<usize> = None;
-                                let mut tab_rects: Vec<egui::Rect> = Vec::with_capacity(dw.tabs.len());
-                                let tab_bar_rect = ui.max_rect(); // Track tab bar area for drag-out detection
-
-                                for (ti, tab) in dw.tabs.iter().enumerate() {
-                                    let is_active = ti == dw.active_tab;
-                                    let is_drag_target = dw.tab_drag.source_index.is_some() && dw.tab_drag.target_index == Some(ti);
-                                    let tab_fill = if is_active { self.theme.bg_elevated } else { egui::Color32::TRANSPARENT };
-
-                                    let mut close_btn_rect: Option<egui::Rect> = None;
-                                    let tab_resp = egui::Frame {
-                                        fill: tab_fill,
-                                        rounding: egui::Rounding::same(8.0),
-                                        inner_margin: egui::Margin::symmetric(12.0, 4.0),
-                                        ..Default::default()
-                                    }
+                                // Scrollable tab area (no scrollbar)
+                                egui::ScrollArea::horizontal()
+                                    .id_salt("detached_tab_scroll")
+                                    .auto_shrink([false, false])
+                                    .scroll_bar_visibility(egui::containers::scroll_area::ScrollBarVisibility::AlwaysHidden)
                                     .show(ui, |ui| {
                                         ui.horizontal(|ui| {
-                                            ui.spacing_mut().item_spacing.x = 6.0;
-                                            let dot_color = tab.sessions
-                                                .get(tab.focused_session)
-                                                .map(|s| match &s.session {
-                                                    Some(sb) if sb.is_connected() => self.theme.green,
-                                                    Some(SessionBackend::Ssh(ssh)) => match ssh.connection_state() {
-                                                        SshConnectionState::Connecting | SshConnectionState::Authenticating => self.theme.accent,
-                                                        _ => self.theme.red,
-                                                    },
-                                                    _ => self.theme.red,
-                                                })
-                                                .unwrap_or(self.theme.fg_dim);
-                                            ui.label(egui::RichText::new("●").color(dot_color).size(8.0));
-                                            if tab.broadcast_enabled {
-                                                ui.label(egui::RichText::new("◉").color(self.theme.accent).size(11.0));
+                                            ui.add_space(4.0);
+                                            let mut tab_to_activate: Option<usize> = None;
+                                            let mut tab_to_close: Option<usize> = None;
+                                            let mut tab_to_detach: Option<usize> = None;
+                                            let mut tab_rects: Vec<egui::Rect> = Vec::with_capacity(dw.tabs.len());
+                                            let tab_bar_rect = ui.max_rect(); // Track tab bar area for drag-out detection
+
+                                            for (ti, tab) in dw.tabs.iter().enumerate() {
+                                                let is_active = ti == dw.active_tab;
+                                                let is_drag_target = dw.tab_drag.source_index.is_some() && dw.tab_drag.target_index == Some(ti);
+                                                let tab_fill = if is_active { self.theme.bg_elevated } else { egui::Color32::TRANSPARENT };
+
+                                                let mut close_btn_rect: Option<egui::Rect> = None;
+                                                let tab_resp = egui::Frame {
+                                                    fill: tab_fill,
+                                                    rounding: egui::Rounding::same(8.0),
+                                                    inner_margin: egui::Margin::symmetric(12.0, 4.0),
+                                                    ..Default::default()
+                                                }
+                                                .show(ui, |ui| {
+                                                    ui.horizontal(|ui| {
+                                                        ui.spacing_mut().item_spacing.x = 6.0;
+                                                        let dot_color = tab.sessions
+                                                            .get(tab.focused_session)
+                                                            .map(|s| match &s.session {
+                                                                Some(sb) if sb.is_connected() => self.theme.green,
+                                                                Some(SessionBackend::Ssh(ssh)) => match ssh.connection_state() {
+                                                                    SshConnectionState::Connecting | SshConnectionState::Authenticating => self.theme.accent,
+                                                                    _ => self.theme.red,
+                                                                },
+                                                                _ => self.theme.red,
+                                                            })
+                                                            .unwrap_or(self.theme.fg_dim);
+                                                        ui.label(egui::RichText::new("●").color(dot_color).size(8.0));
+                                                        if tab.broadcast_enabled {
+                                                            ui.label(egui::RichText::new("◉").color(self.theme.accent).size(11.0));
+                                                        }
+                                                        // Tab title - show focused pane's cwd folder name
+                                                        let title_color = if is_active { self.theme.fg_primary } else { self.theme.fg_dim };
+                                                        let display_title = tab.sessions
+                                                            .get(tab.focused_session)
+                                                            .and_then(|s| s.cwd.as_ref())
+                                                            .and_then(|cwd| {
+                                                                std::path::Path::new(cwd)
+                                                                    .file_name()
+                                                                    .map(|n| n.to_string_lossy().to_string())
+                                                            })
+                                                            .unwrap_or_else(|| tab.title.clone());
+                                                        ui.label(egui::RichText::new(&display_title).color(title_color).size(13.0));
+                                                        if dw.tabs.len() > 1 {
+                                                            let close_resp = ui.add(
+                                                                egui::Button::new(egui::RichText::new("×").color(self.theme.fg_dim).size(14.0))
+                                                                    .frame(false)
+                                                            );
+                                                            close_btn_rect = Some(close_resp.rect);
+                                                        }
+                                                    });
+                                                });
+
+                                                let tab_rect = tab_resp.response.rect;
+                                                tab_rects.push(tab_rect);
+
+                                                if is_drag_target {
+                                                    ui.painter().rect_stroke(tab_rect, 8.0, egui::Stroke::new(2.0, self.theme.accent));
+                                                }
+
+                                                let sense_resp = ui.interact(tab_rect, egui::Id::new(("detached_tab_drag", i, ti)), egui::Sense::click_and_drag());
+                                                if sense_resp.clicked() {
+                                                    let click_pos = ui.ctx().input(|inp| inp.pointer.interact_pos());
+                                                    let on_close = close_btn_rect.map_or(false, |r| click_pos.map_or(false, |p| r.contains(p)));
+                                                    if on_close {
+                                                        tab_to_close = Some(ti);
+                                                    } else {
+                                                        tab_to_activate = Some(ti);
+                                                    }
+                                                }
+                                                if sense_resp.drag_started() {
+                                                    dw.tab_drag.source_index = Some(ti);
+                                                    dw.tab_drag.ghost_title = tab.title.clone();
+                                                    dw.tab_drag.ghost_size = tab_rect.size();
+                                                }
+                                                // Context menu for detached window tabs (only close tab, drag to detach)
+                                                let tab_count = dw.tabs.len();
+                                                sense_resp.context_menu(|ui| {
+                                                    if ui.add_enabled(tab_count > 1, egui::Button::new(self.language.t("close_tab"))).clicked() {
+                                                        tab_to_close = Some(ti);
+                                                        ui.close_menu();
+                                                    }
+                                                });
                                             }
-                                            let title_color = if is_active { self.theme.fg_primary } else { self.theme.fg_dim };
-                                            ui.label(egui::RichText::new(&tab.title).color(title_color).size(13.0));
-                                            if dw.tabs.len() > 1 {
-                                                let close_resp = ui.add(
-                                                    egui::Button::new(egui::RichText::new("×").color(self.theme.fg_dim).size(14.0))
-                                                        .frame(false)
-                                                );
-                                                close_btn_rect = Some(close_resp.rect);
+
+                                            // Draw drag ghost and handle reorder
+                                            if let Some(src) = dw.tab_drag.source_index {
+                                                if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                                                    dw.tab_drag.target_index = None;
+                                                    for (ti, rect) in tab_rects.iter().enumerate() {
+                                                        if rect.contains(pos) && Some(ti) != dw.tab_drag.source_index {
+                                                            dw.tab_drag.target_index = Some(ti);
+                                                            break;
+                                                        }
+                                                    }
+
+                                                    // Draw ghost tab at cursor position
+                                                    let ghost_rect = egui::Rect::from_center_size(
+                                                        pos,
+                                                        dw.tab_drag.ghost_size
+                                                    );
+                                                    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("tab_ghost")));
+                                                    painter.rect_filled(
+                                                        ghost_rect,
+                                                        egui::Rounding::same(8.0),
+                                                        egui::Color32::from_rgba_unmultiplied(40, 40, 50, 200)
+                                                    );
+                                                    painter.rect_stroke(
+                                                        ghost_rect,
+                                                        egui::Rounding::same(8.0),
+                                                        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(150, 150, 170, 150))
+                                                    );
+
+                                                    // Draw ghost text
+                                                    let text_pos = egui::pos2(
+                                                        ghost_rect.min.x + 12.0,
+                                                        ghost_rect.center().y - 7.0
+                                                    );
+                                                    painter.text(
+                                                        text_pos,
+                                                        egui::Align2::LEFT_CENTER,
+                                                        &dw.tab_drag.ghost_title,
+                                                        egui::FontId::new(13.0, egui::FontFamily::Monospace),
+                                                        egui::Color32::from_rgba_unmultiplied(220, 228, 255, 180)
+                                                    );
+                                                }
+
+                                                if ctx.input(|i| i.pointer.any_released()) {
+                                                    if let Some(dst) = dw.tab_drag.target_index {
+                                                        // Dropping on another tab → merge
+                                                        if src != dst && src < dw.tabs.len() && dst < dw.tabs.len() {
+                                                            let mut src_tab = dw.tabs.remove(src);
+                                                            let dst = if src < dst { dst - 1 } else { dst };
+                                                            let dst_tab = &mut dw.tabs[dst];
+                                                            let offset = dst_tab.sessions.len();
+                                                            src_tab.layout.offset_indices(offset);
+                                                            dst_tab.sessions.extend(src_tab.sessions);
+                                                            let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
+                                                            dst_tab.layout = PaneNode::Split {
+                                                                direction: SplitDirection::Horizontal,
+                                                                ratio: 0.5,
+                                                                first: Box::new(old_layout),
+                                                                second: Box::new(src_tab.layout),
+                                                            };
+                                                            // Update active_tab
+                                                            if dw.active_tab == src {
+                                                                dw.active_tab = dst;
+                                                            } else if dw.active_tab > src && dw.active_tab > 0 {
+                                                                dw.active_tab -= 1;
+                                                            }
+                                                            if dw.active_tab >= dw.tabs.len() {
+                                                                dw.active_tab = dw.tabs.len().saturating_sub(1);
+                                                            }
+                                                        }
+                                                    } else {
+                                                        // Dropped outside tab area → detach to new window
+                                                        if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                                                            if !tab_bar_rect.contains(pos) && src < dw.tabs.len() {
+                                                                tab_to_detach = Some(src);
+                                                            }
+                                                        }
+                                                    }
+                                                    dw.tab_drag.source_index = None;
+                                                    dw.tab_drag.target_index = None;
+                                                }
+                                            }
+
+                                            if let Some(ti) = tab_to_activate { dw.active_tab = ti; }
+                                            if let Some(ti) = tab_to_detach {
+                                                if dw.tabs.len() > 1 {
+                                                    pending_detach.push((i, ti));
+                                                }
+                                            }
+                                            if let Some(ti) = tab_to_close {
+                                                if dw.tabs.len() > 1 {
+                                                    dw.tabs.remove(ti);
+                                                    if dw.active_tab >= dw.tabs.len() {
+                                                        dw.active_tab = dw.tabs.len() - 1;
+                                                    } else if dw.active_tab > ti {
+                                                        dw.active_tab -= 1;
+                                                    }
+                                                }
                                             }
                                         });
                                     });
 
-                                    let tab_rect = tab_resp.response.rect;
-                                    tab_rects.push(tab_rect);
-
-                                    if is_drag_target {
-                                        ui.painter().rect_stroke(tab_rect, 8.0, egui::Stroke::new(2.0, self.theme.accent));
-                                    }
-
-                                    let sense_resp = ui.interact(tab_rect, egui::Id::new(("detached_tab_drag", i, ti)), egui::Sense::click_and_drag());
-                                    if sense_resp.clicked() {
-                                        let click_pos = ui.ctx().input(|inp| inp.pointer.interact_pos());
-                                        let on_close = close_btn_rect.map_or(false, |r| click_pos.map_or(false, |p| r.contains(p)));
-                                        if on_close {
-                                            tab_to_close = Some(ti);
-                                        } else {
-                                            tab_to_activate = Some(ti);
-                                        }
-                                    }
-                                    if sense_resp.drag_started() {
-                                        dw.tab_drag.source_index = Some(ti);
-                                        dw.tab_drag.ghost_title = tab.title.clone();
-                                        dw.tab_drag.ghost_size = tab_rect.size();
-                                    }
-                                    // Context menu for detached window tabs (only close tab, drag to detach)
-                                    let tab_count = dw.tabs.len();
-                                    sense_resp.context_menu(|ui| {
-                                        if ui.add_enabled(tab_count > 1, egui::Button::new(self.language.t("close_tab"))).clicked() {
-                                            tab_to_close = Some(ti);
-                                            ui.close_menu();
-                                        }
-                                    });
-                                }
-
-                                // Draw drag ghost and handle reorder
-                                if let Some(src) = dw.tab_drag.source_index {
-                                    if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                                        dw.tab_drag.target_index = None;
-                                        for (ti, rect) in tab_rects.iter().enumerate() {
-                                            if rect.contains(pos) && Some(ti) != dw.tab_drag.source_index {
-                                                dw.tab_drag.target_index = Some(ti);
-                                                break;
-                                            }
-                                        }
-
-                                        // Draw ghost tab at cursor position
-                                        let ghost_rect = egui::Rect::from_center_size(
-                                            pos,
-                                            dw.tab_drag.ghost_size
-                                        );
-                                        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("tab_ghost")));
-                                        painter.rect_filled(
-                                            ghost_rect,
-                                            egui::Rounding::same(8.0),
-                                            egui::Color32::from_rgba_unmultiplied(40, 40, 50, 200)
-                                        );
-                                        painter.rect_stroke(
-                                            ghost_rect,
-                                            egui::Rounding::same(8.0),
-                                            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(150, 150, 170, 150))
-                                        );
-
-                                        // Draw ghost text
-                                        let text_pos = egui::pos2(
-                                            ghost_rect.min.x + 12.0,
-                                            ghost_rect.center().y - 7.0
-                                        );
-                                        painter.text(
-                                            text_pos,
-                                            egui::Align2::LEFT_CENTER,
-                                            &dw.tab_drag.ghost_title,
-                                            egui::FontId::new(13.0, egui::FontFamily::Monospace),
-                                            egui::Color32::from_rgba_unmultiplied(220, 228, 255, 180)
-                                        );
-                                    }
-
-                                    if ctx.input(|i| i.pointer.any_released()) {
-                                        if let Some(dst) = dw.tab_drag.target_index {
-                                            // Dropping on another tab → merge
-                                            if src != dst && src < dw.tabs.len() && dst < dw.tabs.len() {
-                                                let mut src_tab = dw.tabs.remove(src);
-                                                let dst = if src < dst { dst - 1 } else { dst };
-                                                let dst_tab = &mut dw.tabs[dst];
-                                                let offset = dst_tab.sessions.len();
-                                                src_tab.layout.offset_indices(offset);
-                                                dst_tab.sessions.extend(src_tab.sessions);
-                                                let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
-                                                dst_tab.layout = PaneNode::Split {
-                                                    direction: SplitDirection::Horizontal,
-                                                    ratio: 0.5,
-                                                    first: Box::new(old_layout),
-                                                    second: Box::new(src_tab.layout),
-                                                };
-                                                // Update active_tab
-                                                if dw.active_tab == src {
-                                                    dw.active_tab = dst;
-                                                } else if dw.active_tab > src && dw.active_tab > 0 {
-                                                    dw.active_tab -= 1;
-                                                }
-                                                if dw.active_tab >= dw.tabs.len() {
-                                                    dw.active_tab = dw.tabs.len().saturating_sub(1);
-                                                }
-                                            }
-                                        } else {
-                                            // Dropped outside tab area → detach to new window
-                                            if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                                                if !tab_bar_rect.contains(pos) && src < dw.tabs.len() {
-                                                    tab_to_detach = Some(src);
-                                                }
-                                            }
-                                        }
-                                        dw.tab_drag.source_index = None;
-                                        dw.tab_drag.target_index = None;
-                                    }
-                                }
-
-                                if let Some(ti) = tab_to_activate { dw.active_tab = ti; }
-                                if let Some(ti) = tab_to_detach {
-                                    if dw.tabs.len() > 1 {
-                                        pending_detach.push((i, ti));
-                                    }
-                                }
-                                if let Some(ti) = tab_to_close {
-                                    if dw.tabs.len() > 1 {
-                                        dw.tabs.remove(ti);
-                                        if dw.active_tab >= dw.tabs.len() {
-                                            dw.active_tab = dw.tabs.len() - 1;
-                                        } else if dw.active_tab > ti {
-                                            dw.active_tab -= 1;
-                                        }
-                                    }
-                                }
-
-                                ui.add_space(4.0);
-                                // New tab button
+                                // New tab button (outside scroll area)
                                 if ui.add(
                                     egui::Button::new(egui::RichText::new("+").color(self.theme.fg_dim).size(16.0)).frame(false)
                                 ).clicked() {
@@ -1175,243 +1193,266 @@ impl eframe::App for PortalApp {
                 ..Default::default()
             })
             .show(ctx, |ui| {
+                // Reserve space for + and ⋯ buttons on the right
+                let buttons_width = 60.0;
+                let available_width = ui.available_width();
+
                 ui.horizontal(|ui| {
                     ui.add_space(4.0);
 
-                    // Tab buttons — one per workspace (with drag-to-reorder)
-                    let mut tab_to_activate: Option<usize> = None;
-                    let mut tab_to_close: Option<usize> = None;
-                    let mut tab_to_reconnect: Option<usize> = None;
-                    let mut tab_to_detach: Option<usize> = None;
-                    let mut tab_rects: Vec<egui::Rect> = Vec::with_capacity(self.tabs.len());
-                    let tab_bar_rect = ui.max_rect(); // Track tab bar area for drag-out detection
+                    // Scrollable tab area - max_width ensures buttons won't be overlapped
+                    let tab_area_width = (available_width - buttons_width).max(100.0);
 
-                    for (i, tab) in self.tabs.iter().enumerate() {
-                        let is_active = i == self.active_tab;
-                        let is_drag_target = self.tab_drag.source_index.is_some() && self.tab_drag.target_index == Some(i);
-                        let is_broadcasting = tab.broadcast_enabled;
-
-                        let tab_fill = if is_active {
-                            self.theme.bg_elevated
-                        } else if is_broadcasting {
-                            // Broadcast mode: highlight with a distinct color
-                            egui::Color32::from_rgba_unmultiplied(60, 40, 100, 255)
-                        } else {
-                            egui::Color32::TRANSPARENT
-                        };
-
-                        let mut close_btn_rect: Option<egui::Rect> = None;
-                        let tab_resp = egui::Frame {
-                            fill: tab_fill,
-                            rounding: egui::Rounding::same(8.0),
-                            inner_margin: egui::Margin::symmetric(12.0, 4.0),
-                            ..Default::default()
-                        }
+                    egui::ScrollArea::horizontal()
+                        .id_salt("tab_scroll")
+                        .auto_shrink([false, false])
+                        .max_width(tab_area_width)
+                        .scroll_bar_visibility(egui::containers::scroll_area::ScrollBarVisibility::AlwaysHidden)
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 6.0;
+                                // Tab buttons — one per workspace (with drag-to-reorder)
+                                let mut tab_to_activate: Option<usize> = None;
+                                let mut tab_to_close: Option<usize> = None;
+                                let mut tab_to_reconnect: Option<usize> = None;
+                                let mut tab_to_detach: Option<usize> = None;
+                                let mut tab_rects: Vec<egui::Rect> = Vec::with_capacity(self.tabs.len());
+                                let tab_bar_rect = ui.max_rect(); // Track tab bar area for drag-out detection
 
-                                // Status dot based on focused session in this workspace
-                                let dot_color = tab.sessions
-                                    .get(tab.focused_session)
-                                    .map(|s| match &s.session {
-                                        Some(sb) if sb.is_connected() => self.theme.green,
-                                        Some(SessionBackend::Ssh(ssh)) => match ssh.connection_state() {
-                                            SshConnectionState::Connecting | SshConnectionState::Authenticating => self.theme.accent,
-                                            _ => self.theme.red,
-                                        },
-                                        _ => self.theme.red,
-                                    })
-                                    .unwrap_or(self.theme.fg_dim);
-                                ui.label(egui::RichText::new("●").color(dot_color).size(8.0));
+                                for (i, tab) in self.tabs.iter().enumerate() {
+                                    let is_active = i == self.active_tab;
+                                    let is_drag_target = self.tab_drag.source_index.is_some() && self.tab_drag.target_index == Some(i);
+                                    let is_broadcasting = tab.broadcast_enabled;
 
-                                // Broadcast indicator
-                                if is_broadcasting {
-                                    ui.label(egui::RichText::new("◉").color(self.theme.accent).size(11.0));
+                                    let tab_fill = if is_active {
+                                        self.theme.bg_elevated
+                                    } else if is_broadcasting {
+                                        // Broadcast mode: highlight with a distinct color
+                                        egui::Color32::from_rgba_unmultiplied(60, 40, 100, 255)
+                                    } else {
+                                        egui::Color32::TRANSPARENT
+                                    };
+
+                                    let mut close_btn_rect: Option<egui::Rect> = None;
+                                    let tab_resp = egui::Frame {
+                                        fill: tab_fill,
+                                        rounding: egui::Rounding::same(8.0),
+                                        inner_margin: egui::Margin::symmetric(12.0, 4.0),
+                                        ..Default::default()
+                                    }
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.spacing_mut().item_spacing.x = 6.0;
+
+                                            // Status dot based on focused session in this workspace
+                                            let dot_color = tab.sessions
+                                                .get(tab.focused_session)
+                                                .map(|s| match &s.session {
+                                                    Some(sb) if sb.is_connected() => self.theme.green,
+                                                    Some(SessionBackend::Ssh(ssh)) => match ssh.connection_state() {
+                                                        SshConnectionState::Connecting | SshConnectionState::Authenticating => self.theme.accent,
+                                                        _ => self.theme.red,
+                                                    },
+                                                    _ => self.theme.red,
+                                                })
+                                                .unwrap_or(self.theme.fg_dim);
+                                            ui.label(egui::RichText::new("●").color(dot_color).size(8.0));
+
+                                            // Broadcast indicator
+                                            if is_broadcasting {
+                                                ui.label(egui::RichText::new("◉").color(self.theme.accent).size(11.0));
+                                            }
+
+                                            // Tab title - show focused pane's cwd folder name
+                                            let title_color = if is_active { self.theme.fg_primary } else { self.theme.fg_dim };
+                                            let display_title = tab.sessions
+                                                .get(tab.focused_session)
+                                                .and_then(|s| s.cwd.as_ref())
+                                                .and_then(|cwd| {
+                                                    // Extract just the folder name from the path
+                                                    std::path::Path::new(cwd)
+                                                        .file_name()
+                                                        .map(|n| n.to_string_lossy().to_string())
+                                                })
+                                                .unwrap_or_else(|| tab.title.clone());
+                                            ui.label(egui::RichText::new(&display_title).color(title_color).size(13.0));
+
+                                            // Close button (only when more than one tab)
+                                            if self.tabs.len() > 1 {
+                                                let close_resp = ui.add(
+                                                    egui::Button::new(
+                                                        egui::RichText::new("×").color(self.theme.fg_dim).size(14.0)
+                                                    )
+                                                    .frame(false)
+                                                );
+                                                close_btn_rect = Some(close_resp.rect);
+                                            }
+                                        });
+                                    });
+
+                                    let tab_rect = tab_resp.response.rect;
+                                    tab_rects.push(tab_rect);
+
+                                    // Draw merge indicator (highlight target tab)
+                                    if is_drag_target {
+                                        ui.painter().rect_stroke(
+                                            tab_rect,
+                                            8.0,
+                                            egui::Stroke::new(2.0, self.theme.accent),
+                                        );
+                                    }
+
+                                    // Interact for click and drag
+                                    let sense_resp = ui.interact(tab_rect, egui::Id::new(("tab_drag", i)), egui::Sense::click_and_drag());
+                                    if sense_resp.clicked() {
+                                        let click_pos = ui.ctx().input(|inp| inp.pointer.interact_pos());
+                                        let on_close = close_btn_rect.map_or(false, |r| click_pos.map_or(false, |p| r.contains(p)));
+                                        if on_close {
+                                            tab_to_close = Some(i);
+                                        } else {
+                                            tab_to_activate = Some(i);
+                                            if tab.sessions
+                                                .get(tab.focused_session)
+                                                .map(|s| s.needs_reconnect())
+                                                .unwrap_or(false)
+                                            {
+                                                tab_to_reconnect = Some(i);
+                                            }
+                                        }
+                                    }
+                                    if sense_resp.drag_started() {
+                                        self.tab_drag.source_index = Some(i);
+                                        self.tab_drag.ghost_title = tab.title.clone();
+                                        self.tab_drag.ghost_size = tab_rect.size();
+                                    }
+                                    // Tab context menu (close tab only)
+                                    let tab_count = self.tabs.len();
+                                    let tab_idx = i;
+                                    sense_resp.context_menu(|ui| {
+                                        if ui.add_enabled(tab_count > 1, egui::Button::new(self.language.t("close_tab"))).clicked() {
+                                            tab_to_close = Some(tab_idx);
+                                            ui.close_menu();
+                                        }
+                                    });
                                 }
 
-                                // Tab title
-                                let title_color = if is_active { self.theme.fg_primary } else { self.theme.fg_dim };
-                                ui.label(egui::RichText::new(&tab.title).color(title_color).size(13.0));
+                                // Draw drag ghost and handle reorder
+                                if let Some(src) = self.tab_drag.source_index {
+                                    if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                                        self.tab_drag.target_index = None;
+                                        for (i, rect) in tab_rects.iter().enumerate() {
+                                            if rect.contains(pos) && Some(i) != self.tab_drag.source_index {
+                                                self.tab_drag.target_index = Some(i);
+                                                break;
+                                            }
+                                        }
 
-                                // Close button (only when more than one tab)
-                                if self.tabs.len() > 1 {
-                                    let close_resp = ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new("×").color(self.theme.fg_dim).size(14.0)
-                                        )
+                                        // Draw ghost tab at cursor position
+                                        let ghost_rect = egui::Rect::from_center_size(
+                                            pos,
+                                            self.tab_drag.ghost_size
+                                        );
+                                        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("tab_ghost")));
+                                        painter.rect_filled(
+                                            ghost_rect,
+                                            egui::Rounding::same(8.0),
+                                            egui::Color32::from_rgba_unmultiplied(40, 40, 50, 200)
+                                        );
+                                        painter.rect_stroke(
+                                            ghost_rect,
+                                            egui::Rounding::same(8.0),
+                                            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(150, 150, 170, 150))
+                                        );
+
+                                        // Draw ghost text
+                                        let text_pos = egui::pos2(
+                                            ghost_rect.min.x + 12.0,
+                                            ghost_rect.center().y - 7.0
+                                        );
+                                        painter.text(
+                                            text_pos,
+                                            egui::Align2::LEFT_CENTER,
+                                            &self.tab_drag.ghost_title,
+                                            egui::FontId::new(13.0, egui::FontFamily::Monospace),
+                                            egui::Color32::from_rgba_unmultiplied(220, 228, 255, 180)
+                                        );
+                                    }
+
+                                    // Handle drop → merge source tab into target tab, or detach to new window
+                                    if ctx.input(|i| i.pointer.any_released()) {
+                                        if let Some(dst) = self.tab_drag.target_index {
+                                            // Dropping on another tab → merge
+                                            if src != dst && src < self.tabs.len() && dst < self.tabs.len() {
+                                                let mut src_tab = self.tabs.remove(src);
+                                                // Adjust dst index after removal
+                                                let dst = if src < dst { dst - 1 } else { dst };
+                                                let dst_tab = &mut self.tabs[dst];
+                                                let offset = dst_tab.sessions.len();
+                                                src_tab.layout.offset_indices(offset);
+                                                dst_tab.sessions.extend(src_tab.sessions);
+                                                let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
+                                                dst_tab.layout = PaneNode::Split {
+                                                    direction: SplitDirection::Horizontal,
+                                                    ratio: 0.5,
+                                                    first: Box::new(old_layout),
+                                                    second: Box::new(src_tab.layout),
+                                                };
+                                                // Update active_tab
+                                                if self.active_tab == src {
+                                                    self.active_tab = dst;
+                                                } else if self.active_tab > src && self.active_tab > 0 {
+                                                    self.active_tab -= 1;
+                                                }
+                                                if self.active_tab >= self.tabs.len() {
+                                                    self.active_tab = self.tabs.len().saturating_sub(1);
+                                                }
+                                            }
+                                        } else {
+                                            // Dropped outside tab area → detach to new window
+                                            if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                                                if !tab_bar_rect.contains(pos) && src < self.tabs.len() {
+                                                    tab_to_detach = Some(src);
+                                                }
+                                            }
+                                        }
+                                        self.tab_drag.source_index = None;
+                                        self.tab_drag.target_index = None;
+                                    }
+                                }
+
+                                // Apply deferred tab actions
+                                if let Some(i) = tab_to_activate {
+                                    self.active_tab = i;
+                                }
+                                if let Some(i) = tab_to_reconnect {
+                                    let si = self.tabs[i].focused_session;
+                                    self.tabs[i].sessions[si].reconnect_ssh(&self.runtime);
+                                }
+                                if let Some(i) = tab_to_detach {
+                                    self.detach_tab(i);
+                                }
+                                if let Some(i) = tab_to_close {
+                                    if self.tabs.len() > 1 {
+                                        self.tabs.remove(i);
+                                        if self.active_tab >= self.tabs.len() {
+                                            self.active_tab = self.tabs.len() - 1;
+                                        } else if self.active_tab > i {
+                                            self.active_tab -= 1;
+                                        }
+                                    }
+                                }
+
+                                // New tab button (+) - right after last tab, inside scroll area
+                                ui.add_space(4.0);
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new("+").color(self.theme.fg_dim).size(16.0))
                                         .frame(false)
-                                    );
-                                    close_btn_rect = Some(close_resp.rect);
+                                ).clicked() {
+                                    self.add_tab_local();
                                 }
                             });
                         });
 
-                        let tab_rect = tab_resp.response.rect;
-                        tab_rects.push(tab_rect);
-
-                        // Draw merge indicator (highlight target tab)
-                        if is_drag_target {
-                            ui.painter().rect_stroke(
-                                tab_rect,
-                                8.0,
-                                egui::Stroke::new(2.0, self.theme.accent),
-                            );
-                        }
-
-                        // Interact for click and drag
-                        let sense_resp = ui.interact(tab_rect, egui::Id::new(("tab_drag", i)), egui::Sense::click_and_drag());
-                        if sense_resp.clicked() {
-                            let click_pos = ui.ctx().input(|inp| inp.pointer.interact_pos());
-                            let on_close = close_btn_rect.map_or(false, |r| click_pos.map_or(false, |p| r.contains(p)));
-                            if on_close {
-                                tab_to_close = Some(i);
-                            } else {
-                                tab_to_activate = Some(i);
-                                if tab.sessions
-                                    .get(tab.focused_session)
-                                    .map(|s| s.needs_reconnect())
-                                    .unwrap_or(false)
-                                {
-                                    tab_to_reconnect = Some(i);
-                                }
-                            }
-                        }
-                        if sense_resp.drag_started() {
-                            self.tab_drag.source_index = Some(i);
-                            self.tab_drag.ghost_title = tab.title.clone();
-                            self.tab_drag.ghost_size = tab_rect.size();
-                        }
-                        // Tab context menu (close tab only)
-                        let tab_count = self.tabs.len();
-                        let tab_idx = i;
-                        sense_resp.context_menu(|ui| {
-                            if ui.add_enabled(tab_count > 1, egui::Button::new(self.language.t("close_tab"))).clicked() {
-                                tab_to_close = Some(tab_idx);
-                                ui.close_menu();
-                            }
-                        });
-                    }
-
-                    // Draw drag ghost and handle reorder
-                    if let Some(src) = self.tab_drag.source_index {
-                        if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                            self.tab_drag.target_index = None;
-                            for (i, rect) in tab_rects.iter().enumerate() {
-                                if rect.contains(pos) && Some(i) != self.tab_drag.source_index {
-                                    self.tab_drag.target_index = Some(i);
-                                    break;
-                                }
-                            }
-
-                            // Draw ghost tab at cursor position
-                            let ghost_rect = egui::Rect::from_center_size(
-                                pos,
-                                self.tab_drag.ghost_size
-                            );
-                            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("tab_ghost")));
-                            painter.rect_filled(
-                                ghost_rect,
-                                egui::Rounding::same(8.0),
-                                egui::Color32::from_rgba_unmultiplied(40, 40, 50, 200)
-                            );
-                            painter.rect_stroke(
-                                ghost_rect,
-                                egui::Rounding::same(8.0),
-                                egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(150, 150, 170, 150))
-                            );
-
-                            // Draw ghost text
-                            let text_pos = egui::pos2(
-                                ghost_rect.min.x + 12.0,
-                                ghost_rect.center().y - 7.0
-                            );
-                            painter.text(
-                                text_pos,
-                                egui::Align2::LEFT_CENTER,
-                                &self.tab_drag.ghost_title,
-                                egui::FontId::new(13.0, egui::FontFamily::Monospace),
-                                egui::Color32::from_rgba_unmultiplied(220, 228, 255, 180)
-                            );
-                        }
-
-                        // Handle drop → merge source tab into target tab, or detach to new window
-                        if ctx.input(|i| i.pointer.any_released()) {
-                            if let Some(dst) = self.tab_drag.target_index {
-                                // Dropping on another tab → merge
-                                if src != dst && src < self.tabs.len() && dst < self.tabs.len() {
-                                    let mut src_tab = self.tabs.remove(src);
-                                    // Adjust dst index after removal
-                                    let dst = if src < dst { dst - 1 } else { dst };
-                                    let dst_tab = &mut self.tabs[dst];
-                                    let offset = dst_tab.sessions.len();
-                                    src_tab.layout.offset_indices(offset);
-                                    dst_tab.sessions.extend(src_tab.sessions);
-                                    let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
-                                    dst_tab.layout = PaneNode::Split {
-                                        direction: SplitDirection::Horizontal,
-                                        ratio: 0.5,
-                                        first: Box::new(old_layout),
-                                        second: Box::new(src_tab.layout),
-                                    };
-                                    // Update active_tab
-                                    if self.active_tab == src {
-                                        self.active_tab = dst;
-                                    } else if self.active_tab > src && self.active_tab > 0 {
-                                        self.active_tab -= 1;
-                                    }
-                                    if self.active_tab >= self.tabs.len() {
-                                        self.active_tab = self.tabs.len().saturating_sub(1);
-                                    }
-                                }
-                            } else {
-                                // Dropped outside tab area → detach to new window
-                                if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                                    if !tab_bar_rect.contains(pos) && src < self.tabs.len() {
-                                        tab_to_detach = Some(src);
-                                    }
-                                }
-                            }
-                            self.tab_drag.source_index = None;
-                            self.tab_drag.target_index = None;
-                        }
-                    }
-
-                    // Apply deferred tab actions
-                    if let Some(i) = tab_to_activate {
-                        self.active_tab = i;
-                    }
-                    if let Some(i) = tab_to_reconnect {
-                        let si = self.tabs[i].focused_session;
-                        self.tabs[i].sessions[si].reconnect_ssh(&self.runtime);
-                    }
-                    if let Some(i) = tab_to_detach {
-                        self.detach_tab(i);
-                    }
-                    if let Some(i) = tab_to_close {
-                        if self.tabs.len() > 1 {
-                            self.tabs.remove(i);
-                            if self.active_tab >= self.tabs.len() {
-                                self.active_tab = self.tabs.len() - 1;
-                            } else if self.active_tab > i {
-                                self.active_tab -= 1;
-                            }
-                        }
-                    }
-
-                    ui.add_space(4.0);
-
-                    // New tab button
-                    if ui.add(
-                        egui::Button::new(
-                            egui::RichText::new("+").color(self.theme.fg_dim).size(16.0)
-                        )
-                        .frame(false)
-                    ).clicked() {
-                        self.add_tab_local();
-                    }
-
-                    // ── More menu (⋯) at far right of tab bar ──
+                    // ── More menu (⋯) at far right ──
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let more_menu_id = egui::Id::new("tab_bar_more_menu");
                         let show_menu = ctx.data_mut(|d| *d.get_temp_mut_or_default::<bool>(more_menu_id));
@@ -1439,8 +1480,6 @@ impl eframe::App for PortalApp {
                                     }
                                     .show(ui, |ui| {
                                         ui.set_min_width(200.0);
-
-                                        // Broadcast toggle
                                         ui.separator();
                                         ui.add_space(4.0);
                                         let current_tab_broadcast = if let Some(tab) = self.tabs.get(self.active_tab) {
@@ -1469,7 +1508,6 @@ impl eframe::App for PortalApp {
                                     });
                                 });
 
-                            // Close menu if clicked outside
                             if ctx.input(|i| i.pointer.any_pressed()) {
                                 if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
                                     if !area_resp.response.rect.contains(pos) && !more_resp.rect.contains(pos) {
@@ -1479,7 +1517,6 @@ impl eframe::App for PortalApp {
                             }
                         }
                     });
-
                 });
             });
         } // end if Terminal tab bar

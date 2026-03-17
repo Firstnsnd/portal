@@ -404,6 +404,8 @@ pub struct TerminalSession {
     pub pty_resize_deadline: Instant,
     /// Tracks if we just sent non-ASCII text (for IME punctuation handling)
     pub last_non_ascii_input: bool,
+    /// Current working directory (updated via OSC 7 or initial cwd)
+    pub cwd: Option<String>,
 }
 
 impl TerminalSession {
@@ -412,6 +414,9 @@ impl TerminalSession {
         let grid = session.as_ref().map(|s| s.get_grid()).unwrap_or_else(|| {
             Arc::new(Mutex::new(TerminalGrid::new(80, 24)))
         });
+
+        // Get initial cwd
+        let cwd = std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string());
 
         Self {
             session,
@@ -427,6 +432,7 @@ impl TerminalSession {
             pending_pty_size: None,
             pty_resize_deadline: Instant::now(),
             last_non_ascii_input: false,
+            cwd,
         }
     }
 
@@ -474,6 +480,7 @@ impl TerminalSession {
             pending_pty_size: None,
             pty_resize_deadline: Instant::now(),
             last_non_ascii_input: false,
+            cwd: None, // SSH sessions start without known cwd
         }
     }
 

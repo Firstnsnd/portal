@@ -146,11 +146,15 @@ pub struct TerminalGrid {
     pub line_wrapped: Vec<bool>,
     /// Per-scrollback-row wrapped flag
     pub scrollback_wrapped: VecDeque<bool>,
+    /// Current working directory (updated via OSC 7 sequence)
+    pub cwd: Option<String>,
 }
 
 impl TerminalGrid {
     pub fn new(cols: usize, rows: usize) -> Self {
         let cells = vec![vec![TerminalCell::default(); cols]; rows];
+        // Get initial cwd
+        let cwd = std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string());
         Self {
             cols,
             rows,
@@ -167,6 +171,7 @@ impl TerminalGrid {
             max_scrollback: 10000,
             line_wrapped: vec![false; rows],
             scrollback_wrapped: VecDeque::new(),
+            cwd,
         }
     }
 
@@ -728,6 +733,26 @@ impl<'a> VteHandler<'a> {
     }
 }
 
+/// URL decode a percent-encoded string
+fn urlencoding_decode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let hex: String = chars.by_ref().take(2).collect();
+            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                result.push(byte as char);
+            } else {
+                result.push('%');
+                result.push_str(&hex);
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 impl<'a> Perform for VteHandler<'a> {
     fn print(&mut self, c: char) {
         self.grid.write_char_with_attrs(c, self.attrs);
@@ -994,8 +1019,27 @@ impl<'a> Perform for VteHandler<'a> {
         }
     }
 
-    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {
-        // OSC sequences (window title, etc.) — ignore for now
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        // Parse OSC sequences
+        // OSC 7: file://hostname/path - current directory (used by shell integration)
+        if params.len() >= 2 {
+            let cmd = params[0];
+            if cmd == b"7" || cmd == b"7;" {
+                // OSC 7: set current directory
+                if let Ok(url) = std::str::from_utf8(params[1]) {
+                    // Parse file://hostname/path
+                    if let Some(path) = url.strip_prefix("file://") {
+                        // Skip hostname part
+                        if let Some(slash_pos) = path.find('/') {
+                            let path = &path[slash_pos..];
+                            // URL decode the path
+                            let decoded = urlencoding_decode(path);
+                            self.grid.cwd = Some(decoded);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
