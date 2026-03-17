@@ -277,10 +277,9 @@ pub fn render_terminal_session(
     let font_id = egui::FontId::monospace(font_size);
     let pad_x = 8.0_f32;
     let pad_y = 6.0_f32;
-    let line_padding = 2.0_f32; // Vertical padding inside each line (top + bottom)
     let mut input_bytes: Vec<u8> = Vec::new();
     let char_width = ui.fonts(|f| f.glyph_width(&font_id, 'M'));
-    let line_height = ui.fonts(|f| f.row_height(&font_id)).ceil() + line_padding * 2.0;
+    let line_height = ui.fonts(|f| f.row_height(&font_id)).ceil();
     let new_cols = (((pane_rect.width() - pad_x * 2.0) / char_width) as usize).max(10);
     let new_rows = (((pane_rect.height() - pad_y * 2.0) / line_height) as usize).max(3);
     session.resize(new_cols, new_rows);
