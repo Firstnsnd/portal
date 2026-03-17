@@ -305,12 +305,6 @@ impl TransferProgress {
         }
     }
 
-    /// Elapsed time as a formatted string (e.g., "1:23" or "12:34:56").
-    pub fn elapsed_string(&self) -> String {
-        let secs = self.started_at.elapsed().as_secs();
-        format_duration(secs)
-    }
-
     /// Estimated time remaining as a formatted string, or None if unknown.
     pub fn eta_string(&self) -> Option<String> {
         if self.total_bytes == 0 || self.bytes_transferred == 0 {

@@ -1191,10 +1191,9 @@ impl PortalApp {
                     self.theme.fg_primary,
                 );
 
-                // Info text (right-aligned, left of stop button): %  speed  size  elapsed  ETA
-                let elapsed_str = progress.elapsed_string();
+                // Info text (right-aligned, left of stop button): %  speed  size  ETA
                 let eta_str = progress.eta_string().unwrap_or_else(|| "--:--".to_string());
-                let info_text = format!("{:.0}%   {}   {}   {} / {}", pct * 100.0, speed_str, size_str, elapsed_str, eta_str);
+                let info_text = format!("{:.0}%   {}   {}   {}", pct * 100.0, speed_str, size_str, eta_str);
                 let info_galley = ui.painter().layout_no_wrap(
                     info_text,
                     egui::FontId::proportional(11.0),
