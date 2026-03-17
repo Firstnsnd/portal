@@ -32,6 +32,12 @@ pub enum SelectionAction {
     DeselectAll,
 }
 
+/// Request to move entries to a target directory (produced by drag-to-folder).
+pub struct MoveToDirRequest {
+    pub source_entries: Vec<DragEntry>,
+    pub target_dir: String,
+}
+
 impl PortalApp {
     /// Render the SFTP view: left = local browser (always), right = host list or remote browser.
     pub fn show_sftp_view(&mut self, ui: &mut egui::Ui) {
@@ -86,6 +92,10 @@ impl PortalApp {
         let mut local_right_delete_request = false;
         let mut remote_delete_request = false;
         let mut left_remote_delete_request = false;
+        let mut local_left_move_to_dir: Option<MoveToDirRequest> = None;
+        let mut local_right_move_to_dir: Option<MoveToDirRequest> = None;
+        let mut remote_move_to_dir: Option<MoveToDirRequest> = None;
+        let mut left_remote_move_to_dir: Option<MoveToDirRequest> = None;
 
         // Detect panel focus from mouse clicks
         if ui.ctx().input(|i| i.pointer.any_pressed()) {
@@ -198,6 +208,7 @@ impl PortalApp {
                     &self.language,
                     "local_left_scroll",
                     self.sftp_editor_dialog.is_some(),
+                    &mut local_left_move_to_dir,
                 );
             } else {
                 // ── LEFT PANEL: Remote (independent connection) ──
@@ -481,6 +492,7 @@ impl PortalApp {
                                     &self.language,
                                     "left_remote_scroll",
                                     self.sftp_editor_dialog.is_some(),
+                                    &mut left_remote_move_to_dir,
                                 );
                             }
                             SftpConnectionState::Disconnected => {
@@ -613,6 +625,7 @@ impl PortalApp {
                     &self.language,
                     "local_right_scroll",
                     self.sftp_editor_dialog.is_some(),
+                    &mut local_right_move_to_dir,
                 );
             } else {
                 // ── RIGHT PANEL: Remote (host list or remote browser) ──
@@ -898,6 +911,7 @@ impl PortalApp {
                                 &self.language,
                                 "right_remote_scroll",
                                 self.sftp_editor_dialog.is_some(),
+                                &mut remote_move_to_dir,
                             );
                         }
                         SftpConnectionState::Disconnected => {
@@ -1271,6 +1285,52 @@ impl PortalApp {
                         panel: SftpPanel::LeftRemote,
                         names,
                     });
+                }
+            }
+        }
+
+        // ── Handle drag-to-folder move requests ──
+        if let Some(req) = local_left_move_to_dir {
+            let current_path = self.local_browser_left.current_path.clone();
+            let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
+            for entry in &req.source_entries {
+                let src = &entry.full_path;
+                let dst = format!("{}/{}", target_path.trim_end_matches('/'), entry.entry_name);
+                if let Err(e) = std::fs::rename(src, &dst) {
+                    log::error!("Failed to move {} to {}: {}", src, dst, e);
+                }
+            }
+            self.local_browser_left.refresh();
+        }
+        if let Some(req) = local_right_move_to_dir {
+            let current_path = self.local_browser_right.current_path.clone();
+            let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
+            for entry in &req.source_entries {
+                let src = &entry.full_path;
+                let dst = format!("{}/{}", target_path.trim_end_matches('/'), entry.entry_name);
+                if let Err(e) = std::fs::rename(src, &dst) {
+                    log::error!("Failed to move {} to {}: {}", src, dst, e);
+                }
+            }
+            self.local_browser_right.refresh();
+        }
+        if let Some(req) = remote_move_to_dir {
+            if let Some(ref browser) = self.sftp_browser {
+                let current_path = browser.current_path.clone();
+                let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
+                for entry in &req.source_entries {
+                    let dst = format!("{}/{}", target_path.trim_end_matches('/'), entry.entry_name);
+                    browser.rename(&entry.full_path, &dst);
+                }
+            }
+        }
+        if let Some(req) = left_remote_move_to_dir {
+            if let Some(ref browser) = self.sftp_browser_left {
+                let current_path = browser.current_path.clone();
+                let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
+                for entry in &req.source_entries {
+                    let dst = format!("{}/{}", target_path.trim_end_matches('/'), entry.entry_name);
+                    browser.rename(&entry.full_path, &dst);
                 }
             }
         }
@@ -2648,6 +2708,7 @@ pub fn render_file_panel(
     language: &Language,
     panel_id: &str,
     editor_is_open: bool,
+    move_to_dir_request: &mut Option<MoveToDirRequest>,
 ) {
     let row_height = 26.0;
     let status_bar_height = 24.0;
@@ -2734,14 +2795,61 @@ pub fn render_file_panel(
                     egui::Sense::click_and_drag(),
                 );
 
-                // Background: selected, focused, or hovered
-                if is_selected || resp.hovered() {
-                    let bg = if is_selected {
+                // Check if dragging over this directory entry (for move-to-folder)
+                let is_drop_target = is_dir && !is_selected && {
+                    let ctx = ui.ctx();
+                    if let Some(payload) = egui::DragAndDrop::payload::<DragPayload>(&ctx) {
+                        if payload.is_local == is_local {
+                            if let Some(hover_pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                                rect.contains(hover_pos)
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                };
+
+                // Handle drop on directory (move files to this folder)
+                if is_drop_target && ui.ctx().input(|i| i.pointer.any_released()) {
+                    let ctx = ui.ctx();
+                    if let Some(payload) = egui::DragAndDrop::take_payload::<DragPayload>(&ctx) {
+                        if payload.is_local == is_local && !payload.entries.is_empty() {
+                            // Don't move if the only item being dragged is this directory itself
+                            let can_move = payload.entries.len() > 1 ||
+                                payload.entries[0].entry_name != entry.name;
+                            if can_move {
+                                *move_to_dir_request = Some(MoveToDirRequest {
+                                    source_entries: payload.entries.clone(),
+                                    target_dir: entry.name.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Background: selected, focused, hovered, or drop target
+                if is_selected || resp.hovered() || is_drop_target {
+                    let bg = if is_drop_target {
+                        theme.accent_alpha(50)
+                    } else if is_selected {
                         theme.accent_alpha(30)
                     } else {
                         theme.hover_bg
                     };
                     ui.painter().rect_filled(rect, 0.0, bg);
+                }
+
+                // Drop target indicator (left border)
+                if is_drop_target {
+                    let indicator_rect = egui::Rect::from_min_size(
+                        rect.min,
+                        egui::vec2(3.0, rect.height()),
+                    );
+                    ui.painter().rect_filled(indicator_rect, 0.0, theme.accent);
                 }
 
                 // Focus indicator (subtle left border)
