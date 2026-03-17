@@ -1814,7 +1814,11 @@ impl eframe::App for PortalApp {
                     AppView::Terminal => {
                         // ── Terminal pane tree ──────────────────────────
                         ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 0.0);
-                        let available = ui.available_rect_before_wrap();
+                        // Get available rect and subtract status bar height (24px)
+                        // On the first frame, egui hasn't processed the status bar yet,
+                        // so available_rect_before_wrap() includes the status bar area
+                        let mut available = ui.available_rect_before_wrap();
+                        available.max.y -= 24.0;
                         let active = self.active_tab;
                         let focused = self.tabs[active].focused_session;
                         let can_close = self.tabs.len() > 1 || self.tabs[active].sessions.len() > 1;
