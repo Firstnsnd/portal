@@ -308,14 +308,33 @@ impl TransferProgress {
     /// Elapsed time as a formatted string (e.g., "1:23" or "12:34:56").
     pub fn elapsed_string(&self) -> String {
         let secs = self.started_at.elapsed().as_secs();
-        let hours = secs / 3600;
-        let mins = (secs % 3600) / 60;
-        let s = secs % 60;
-        if hours > 0 {
-            format!("{}:{:02}:{:02}", hours, mins, s)
-        } else {
-            format!("{}:{:02}", mins, s)
+        format_duration(secs)
+    }
+
+    /// Estimated time remaining as a formatted string, or None if unknown.
+    pub fn eta_string(&self) -> Option<String> {
+        if self.total_bytes == 0 || self.bytes_transferred == 0 {
+            return None;
         }
+        let speed = self.speed_bps();
+        if speed < 1.0 {
+            return None;
+        }
+        let remaining_bytes = self.total_bytes.saturating_sub(self.bytes_transferred);
+        let remaining_secs = (remaining_bytes as f64 / speed) as u64;
+        Some(format_duration(remaining_secs))
+    }
+}
+
+/// Format a duration in seconds to MM:SS or HH:MM:SS.
+fn format_duration(secs: u64) -> String {
+    let hours = secs / 3600;
+    let mins = (secs % 3600) / 60;
+    let s = secs % 60;
+    if hours > 0 {
+        format!("{}:{:02}:{:02}", hours, mins, s)
+    } else {
+        format!("{}:{:02}", mins, s)
     }
 }
 
