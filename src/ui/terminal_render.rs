@@ -682,17 +682,7 @@ pub fn render_terminal_session(
                         }
                         // Cmd+D / Cmd+Shift+D are consumed by split shortcuts — not forwarded to PTY
                     } else if modifiers.ctrl {
-                        // Ctrl+Arrow for word navigation
-                        let ctrl_arrow = match key {
-                            egui::Key::ArrowLeft  => { session.write("\x1b[1;5D"); input_bytes.extend_from_slice(b"\x1b[1;5D"); true }
-                            egui::Key::ArrowRight => { session.write("\x1b[1;5C"); input_bytes.extend_from_slice(b"\x1b[1;5C"); true }
-                            egui::Key::ArrowUp    => { session.write("\x1b[1;5A"); input_bytes.extend_from_slice(b"\x1b[1;5A"); true }
-                            egui::Key::ArrowDown  => { session.write("\x1b[1;5B"); input_bytes.extend_from_slice(b"\x1b[1;5B"); true }
-                            _ => false,
-                        };
-                        if ctrl_arrow {
-                            session.selection.clear();
-                        } else if let Some(byte) = key_to_ctrl_byte(key) {
+                        if let Some(byte) = key_to_ctrl_byte(key) {
                             session.selection.clear();
                             session.write_bytes(&[byte]);
                             input_bytes.push(byte);
