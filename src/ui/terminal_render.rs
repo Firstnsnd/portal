@@ -653,7 +653,15 @@ pub fn render_terminal_session(
                 }
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
                     if modifiers.command {
-                        if modifiers.shift && *key == egui::Key::I {
+                        // Cmd+Arrow for line navigation (macOS style)
+                        let cmd_arrow = match key {
+                            egui::Key::ArrowLeft  => { session.write("\x1b[H"); input_bytes.extend_from_slice(b"\x1b[H"); true }  // Home
+                            egui::Key::ArrowRight => { session.write("\x1b[F"); input_bytes.extend_from_slice(b"\x1b[F"); true }  // End
+                            _ => false,
+                        };
+                        if cmd_arrow {
+                            session.selection.clear();
+                        } else if modifiers.shift && *key == egui::Key::I {
                             // Cmd+Shift+I: toggle broadcast mode
                             action = Some(PaneAction::ToggleBroadcast);
                         } else if *key == egui::Key::C {
