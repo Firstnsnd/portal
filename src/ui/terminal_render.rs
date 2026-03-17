@@ -655,8 +655,8 @@ pub fn render_terminal_session(
                     if modifiers.command {
                         // Cmd+Arrow for line navigation (macOS style)
                         let cmd_arrow = match key {
-                            egui::Key::ArrowLeft  => { session.write("\x1b[H"); input_bytes.extend_from_slice(b"\x1b[H"); true }  // Home
-                            egui::Key::ArrowRight => { session.write("\x1b[F"); input_bytes.extend_from_slice(b"\x1b[F"); true }  // End
+                            egui::Key::ArrowLeft  => { session.write("\x01"); input_bytes.push(0x01); true }  // Ctrl+A = line start
+                            egui::Key::ArrowRight => { session.write("\x05"); input_bytes.push(0x05); true }  // Ctrl+E = line end
                             _ => false,
                         };
                         if cmd_arrow {
