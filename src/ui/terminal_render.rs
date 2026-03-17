@@ -277,7 +277,7 @@ pub fn render_terminal_session(
     let font_id = egui::FontId::monospace(font_size);
     let pad_x = 8.0_f32;
     let pad_y_top = 6.0_f32;
-    let pad_y_bottom = 8.0_f32; // Extra bottom padding to prevent input line being hidden behind status bar
+    let pad_y_bottom = 28.0_f32; // Extra bottom padding for status bar (24px) + safety margin
     let mut input_bytes: Vec<u8> = Vec::new();
     let char_width = ui.fonts(|f| f.glyph_width(&font_id, 'M'));
     let line_height = ui.fonts(|f| f.row_height(&font_id)).ceil();
