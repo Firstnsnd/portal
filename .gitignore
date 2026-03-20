@@ -24,3 +24,8 @@ target
 .DS_Store
 .AppleDouble
 .LSOverride
+
+# Linux packaging
+*.deb
+*.rpm
+*.AppImage

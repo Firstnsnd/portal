@@ -59,6 +59,39 @@ short_description = "A modern terminal emulator with GUI"
 osx_minimum_system_version = "12.0"
 icon = ["assets/portal.icns"]
 
+# Linux .deb package metadata
+[package.metadata.deb]
+maintainer = "Firstnsnd <you@example.com>"
+copyright = "2024, Firstnsnd"
+depends = "$auto, libvulkan1, mesa-vulkan-drivers | vulkan-drivers, libxkbcommon0, fontconfig"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/portal", "usr/bin/", "755"],
+    ["assets/portal.desktop", "usr/share/applications/", "644"],
+    ["assets/portal-icon-16.png", "usr/share/icons/hicolor/16x16/apps/com.portal.Portal.png", "644"],
+    ["assets/portal-icon-32.png", "usr/share/icons/hicolor/32x32/apps/com.portal.Portal.png", "644"],
+    ["assets/portal-icon-64.png", "usr/share/icons/hicolor/64x64/apps/com.portal.Portal.png", "644"],
+    ["assets/portal-icon-128.png", "usr/share/icons/hicolor/128x128/apps/com.portal.Portal.png", "644"],
+    ["assets/portal-icon-256.png", "usr/share/icons/hicolor/256x256/apps/com.portal.Portal.png", "644"],
+    ["assets/portal-icon-512.png", "usr/share/icons/hicolor/512x512/apps/com.portal.Portal.png", "644"],
+    ["assets/portal-icon-1024.png", "usr/share/icons/hicolor/1024x1024/apps/com.portal.Portal.png", "644"],
+]
+
+# Linux .rpm package metadata
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/portal", dest = "/usr/bin/portal", mode = "0755" },
+    { source = "assets/portal.desktop", dest = "/usr/share/applications/portal.desktop", mode = "0644" },
+    { source = "assets/portal-icon-16.png", dest = "/usr/share/icons/hicolor/16x16/apps/portal.png", mode = "0644" },
+    { source = "assets/portal-icon-32.png", dest = "/usr/share/icons/hicolor/32x32/apps/portal.png", mode = "0644" },
+    { source = "assets/portal-icon-64.png", dest = "/usr/share/icons/hicolor/64x64/apps/portal.png", mode = "0644" },
+    { source = "assets/portal-icon-128.png", dest = "/usr/share/icons/hicolor/128x128/apps/portal.png", mode = "0644" },
+    { source = "assets/portal-icon-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/portal.png", mode = "0644" },
+    { source = "assets/portal-icon-512.png", dest = "/usr/share/icons/hicolor/512x512/apps/portal.png", mode = "0644" },
+    { source = "assets/portal-icon-1024.png", dest = "/usr/share/icons/hicolor/1024x1024/apps/portal.png", mode = "0644" },
+]
+
 [[bin]]
 name = "portal"
 path = "src/main.rs"

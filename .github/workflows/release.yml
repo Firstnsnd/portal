@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Install cargo-generate-rpm
+        run: cargo install cargo-generate-rpm
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Build .deb package
+        run: |
+          cargo deb --no-build
+          DEB_FILE=$(ls target/debian/portal_*.deb | head -1)
+          cp "$DEB_FILE" "portal-linux-deb.deb"
+
+      - name: Build .rpm package
+        run: |
+          cargo generate-rpm --no-build
+          RPM_FILE=$(ls target/generate-rpm/portal-*.rpm | head -1)
+          cp "$RPM_FILE" "portal-linux-rpm.rpm"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            portal-linux-deb.deb
+            portal-linux-rpm.rpm

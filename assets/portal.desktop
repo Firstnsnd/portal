@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Portal
+Comment=A modern terminal emulator with GUI
+Exec=portal %F
+Icon=com.portal.Portal
+Terminal=false
+Categories=System;TerminalEmulator;Utility;
+Keywords=terminal;emulator;ssh;console;
+StartupNotify=true
+StartupWMClass=portal

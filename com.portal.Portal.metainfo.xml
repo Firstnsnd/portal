@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.portal.Portal</id>
+  <name>Portal</name>
+  <summary>A modern terminal emulator with GUI</summary>
+  <description>
+    <p>Portal is a modern GUI terminal emulator built with Rust and egui.</p>
+  </description>
+  <categories>
+    <category>System</category>
+    <category>TerminalEmulator</category>
+  </categories>
+  <launchable type="desktop-id">portal.desktop</launchable>
+  <url type="homepage">https://github.com/Firstnsnd/portal</url>
+  <url type="bugtracker">https://github.com/Firstnsnd/portal/issues</url>
+  <project_license>MIT</project_license>
+  <developer_name>Portal Team</developer_name>
+  <releases>
+    <release version="0.10.4" date="2024-03-20"/>
+  </releases>
+</component>
