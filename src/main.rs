@@ -11,6 +11,13 @@ use eframe::egui;
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
+use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
+#[cfg(target_os = "macos")]
+use objc::{msg_send, sel, sel_impl};
+#[cfg(target_os = "macos")]
+use cocoa::base::id;
+
 use config::{HostEntry, Credential};
 use sftp::{LocalBrowser, SftpBrowser};
 use ssh::SshConnectionState;
@@ -83,6 +90,20 @@ struct PortalApp {
 
 impl PortalApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // On macOS, ensure windows appear in Dock menu
+        #[cfg(target_os = "macos")]
+        {
+            use cocoa::appkit::NSApp;
+            use cocoa::base::id;
+            use objc::runtime::Object;
+
+            unsafe {
+                let app = NSApp();
+                // Force the app to be active and show in Dock
+                let _: id = msg_send![app, activateIgnoringOtherApps: cocoa::base::YES];
+            }
+        }
+
         // Load settings
         let settings = config::load_settings();
         let language = Language::from_id(&settings.language);
@@ -1934,7 +1955,6 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport,
-        // Ensure window is properly registered with NSApplication
         centered: true,
         ..Default::default()
     };
