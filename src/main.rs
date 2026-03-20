@@ -1909,6 +1909,18 @@ fn load_app_icon() -> Option<egui::IconData> {
 fn main() -> eframe::Result<()> {
     env_logger::init();
 
+    // Set macOS activation policy to Regular so the app appears in Dock
+    // and shows in the window list when right-clicking the Dock icon
+    #[cfg(target_os = "macos")]
+    {
+        use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
+
+        unsafe {
+            let app = NSApp();
+            app.setActivationPolicy_(NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular);
+        }
+    }
+
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1400.0, 900.0])
         .with_min_inner_size([800.0, 600.0])
