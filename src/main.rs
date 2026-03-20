@@ -12,11 +12,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[cfg(target_os = "macos")]
-use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
+use cocoa::appkit::{NSApp, NSApplicationActivationPolicy};
+#[cfg(target_os = "macos")]
+use cocoa::base::{id, YES};
 #[cfg(target_os = "macos")]
 use objc::{msg_send, sel, sel_impl};
-#[cfg(target_os = "macos")]
-use cocoa::base::id;
 
 use config::{HostEntry, Credential};
 use sftp::{LocalBrowser, SftpBrowser};
@@ -95,12 +95,11 @@ impl PortalApp {
         {
             use cocoa::appkit::NSApp;
             use cocoa::base::id;
-            use objc::runtime::Object;
 
             unsafe {
-                let app = NSApp();
+                let app: id = NSApp();
                 // Force the app to be active and show in Dock
-                let _: id = msg_send![app, activateIgnoringOtherApps: cocoa::base::YES];
+                let _: id = msg_send![app, activateIgnoringOtherApps: YES];
             }
         }
 
@@ -1937,10 +1936,10 @@ fn main() -> eframe::Result<()> {
         use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
 
         unsafe {
-            let app = NSApp();
+            let app: id = NSApp();
             app.setActivationPolicy_(NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular);
             // Also activate the app to bring it to front
-            app.activateIgnoringOtherApps_(cocoa::base::YES);
+            app.activateIgnoringOtherApps_(YES);
         }
     }
 
