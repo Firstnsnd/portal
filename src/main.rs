@@ -1918,6 +1918,8 @@ fn main() -> eframe::Result<()> {
         unsafe {
             let app = NSApp();
             app.setActivationPolicy_(NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular);
+            // Also activate the app to bring it to front
+            app.activateIgnoringOtherApps_(cocoa::base::YES);
         }
     }
 
@@ -1932,6 +1934,8 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport,
+        // Ensure window is properly registered with NSApplication
+        centered: true,
         ..Default::default()
     };
 
