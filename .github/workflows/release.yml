@@ -38,9 +38,75 @@ jobs:
           RPM_FILE=$(ls target/generate-rpm/portal-*.rpm | head -1)
           cp "$RPM_FILE" "portal-linux-rpm.rpm"
 
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            portal-linux-deb.deb
+            portal-linux-rpm.rpm
+
+  build-macos:
+    needs: build-linux
+    strategy:
+      matrix:
+        include:
+          - name: x86_64
+            runner: macos-13
+            target: x86_64-apple-darwin
+          - name: arm64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build DMG
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          ./scripts/build-dmg.sh
+          DMG_FILE=$(ls target/release/Portal-*.dmg | head -1)
+          cp "$DMG_FILE" "Portal-macos-${{ matrix.name }}.dmg"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.name }}-dmg
+          path: Portal-macos-${{ matrix.name }}.dmg
+
+  release:
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: ./artifacts
+
+      - name: Download macOS x86_64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-x86_64-dmg
+          path: ./artifacts
+
+      - name: Download macOS arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64-dmg
+          path: ./artifacts
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            portal-linux-deb.deb
-            portal-linux-rpm.rpm
+          files: ./artifacts/*
