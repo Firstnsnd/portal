@@ -566,6 +566,14 @@ impl TerminalSession {
         }
 
         if cols == self.last_cols && rows == self.last_rows {
+            // Even if dimensions haven't changed, clamp cursor position
+            // This handles the case where cursor was set to an invalid position
+            // before the status bar was properly accounted for
+            if let Ok(mut grid) = self.grid.lock() {
+                if grid.cursor_row >= grid.rows {
+                    grid.cursor_row = grid.rows.saturating_sub(1);
+                }
+            }
             return;
         }
 

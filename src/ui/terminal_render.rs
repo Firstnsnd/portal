@@ -283,6 +283,7 @@ pub fn render_terminal_session(
     let line_height = ui.fonts(|f| f.row_height(&font_id)).ceil();
     let new_cols = (((pane_rect.width() - pad_x * 2.0) / char_width) as usize).max(10);
     let new_rows = (((pane_rect.height() - pad_y_top - pad_y_bottom) / line_height) as usize).max(3);
+    eprintln!("DEBUG render: pane_rect.min.y={}, max.y={}, height={}, line_height={}, new_rows={}, last_rows={}", pane_rect.min.y, pane_rect.max.y, pane_rect.height(), line_height, new_rows, session.last_rows);
     session.resize(new_cols, new_rows);
 
     let rect = egui::Rect::from_min_size(

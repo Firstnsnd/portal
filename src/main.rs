@@ -1815,7 +1815,7 @@ impl eframe::App for PortalApp {
                         // ── Terminal pane tree ──────────────────────────
                         ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 0.0);
                         // Get available rect and subtract status bar height (24px)
-                        // On the first frame, egui hasn't processed the status bar yet,
+                        // Note: egui processes TopBottomPanel::bottom AFTER CentralPanel,
                         // so available_rect_before_wrap() includes the status bar area
                         let mut available = ui.available_rect_before_wrap();
                         available.max.y -= 24.0;
