@@ -12,11 +12,18 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[cfg(target_os = "macos")]
-use cocoa::appkit::{NSApp, NSApplicationActivationPolicy};
+use cocoa::appkit::NSApplicationActivationPolicy;
 #[cfg(target_os = "macos")]
+#[cfg(target_os = "macos")]
+use cocoa::base::nil;
+#[cfg(target_os = "macos")]
+
+
 use cocoa::base::{id, YES};
 #[cfg(target_os = "macos")]
-use objc::{msg_send, sel, sel_impl};
+use cocoa::appkit::NSApp;
+#[cfg(target_os = "macos")]
+use objc::{msg_send, sel, sel_impl, class};
 
 use config::{HostEntry, Credential};
 use sftp::{LocalBrowser, SftpBrowser};
@@ -1930,7 +1937,6 @@ fn main() -> eframe::Result<()> {
     env_logger::init();
 
     // Set macOS activation policy to Regular so the app appears in Dock
-    // and shows in the window list when right-clicking the Dock icon
     #[cfg(target_os = "macos")]
     {
         use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
@@ -1938,7 +1944,6 @@ fn main() -> eframe::Result<()> {
         unsafe {
             let app: id = NSApp();
             app.setActivationPolicy_(NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular);
-            // Also activate the app to bring it to front
             app.activateIgnoringOtherApps_(YES);
         }
     }
