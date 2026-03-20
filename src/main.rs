@@ -23,7 +23,7 @@ use cocoa::base::{id, YES};
 #[cfg(target_os = "macos")]
 use cocoa::appkit::NSApp;
 #[cfg(target_os = "macos")]
-use objc::{msg_send, sel, sel_impl, class};
+use objc::{msg_send, sel, sel_impl};
 
 use config::{HostEntry, Credential};
 use sftp::{LocalBrowser, SftpBrowser};
