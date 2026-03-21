@@ -66,7 +66,10 @@ cargo build --release
 
 ```
 src/
-├── main.rs              # GUI application (egui)
+├── main.rs              # Entry point, eframe::App update logic
+├── app/
+│   ├── mod.rs           # PortalApp struct and initialization
+│   └── tab_management.rs # Tab operations (add, split, close, detach)
 ├── ui/
 │   ├── hosts_view.rs    # Host list page, nav panel
 │   ├── settings_view.rs # Settings page

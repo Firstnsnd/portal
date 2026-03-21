@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use crate::PortalApp;
+use crate::app::PortalApp;
 use crate::ui::theme::ThemePreset;
 use crate::ui::theme::{darker, brighter};
 use crate::ui::i18n::Language;

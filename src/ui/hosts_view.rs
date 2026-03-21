@@ -2,7 +2,7 @@ use eframe::egui;
 use egui::Widget;
 use std::sync::{Arc, Mutex};
 
-use crate::PortalApp;
+use crate::app::PortalApp;
 use crate::config::HostEntry;
 use crate::ssh::test_connection;
 use crate::ui::types::{AuthMethodChoice, TestConnState, AppView, KeySourceChoice, BatchTarget, BatchStatus, BatchResult, BatchUpdate};

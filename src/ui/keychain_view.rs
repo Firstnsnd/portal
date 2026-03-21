@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use crate::PortalApp;
+use crate::app::PortalApp;
 use crate::config::{self, Credential, CredentialType};
 use crate::ui::types::{KeychainDeleteRequest, CredentialTypeChoice, KeySourceChoice};
 use crate::ui::theme::brighter;

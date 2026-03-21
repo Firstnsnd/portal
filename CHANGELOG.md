@@ -2,6 +2,15 @@
 
 All notable changes to Portal will be documented in this file.
 
+## [0.10.5] - 2026-03-21
+
+### Fixed
+- **Detached Window Layout** - Fixed + button position in detached window tab bar (now inside scroll area like main window)
+- **Tab Drag to Detach** - Ensured broadcast and new tab features work consistently in detached windows
+
+### Improved
+- **Code Organization** - Refactored main.rs into app module (app/mod.rs, app/tab_management.rs) for better maintainability
+
 ## [0.10.0] - 2026-03-03
 
 ### Added

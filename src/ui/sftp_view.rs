@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use crate::PortalApp;
+use crate::app::PortalApp;
 use crate::sftp::{FileSelection, SftpConnectionState, SftpEntry, SftpEntryKind};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;

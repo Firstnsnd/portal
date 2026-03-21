@@ -1,386 +1,18 @@
 //! Portal - Modern Terminal Emulator with egui
 //! Termius-inspired UI with native terminal input
 
+mod app;
 mod config;
 mod sftp;
 mod ssh;
 mod terminal;
 mod ui;
 
-use eframe::egui;
-use std::path::PathBuf;
+use app::PortalApp;
 use std::time::Duration;
 
-#[cfg(target_os = "macos")]
-use cocoa::appkit::NSApplicationActivationPolicy;
-#[cfg(target_os = "macos")]
-#[cfg(target_os = "macos")]
-use cocoa::base::nil;
-#[cfg(target_os = "macos")]
-
-
-use cocoa::base::{id, YES};
-#[cfg(target_os = "macos")]
-use cocoa::appkit::NSApp;
-#[cfg(target_os = "macos")]
-use objc::{msg_send, sel, sel_impl};
-
-use config::{HostEntry, Credential};
-use sftp::{LocalBrowser, SftpBrowser};
-use ssh::SshConnectionState;
-
 use ui::*;
-use ui::types::{BatchExecutionState, HostFilter, CredentialDialog};
-
-struct PortalApp {
-    tabs: Vec<Tab>,
-    active_tab: usize,
-    current_view: AppView,
-    hosts: Vec<HostEntry>,
-    hosts_file: PathBuf,
-    credentials: Vec<Credential>,
-    credentials_file: PathBuf,
-    next_id: usize,
-    add_host_dialog: AddHostDialog,
-    host_filter: HostFilter,
-    host_to_delete: Option<usize>,
-    confirm_delete_host: Option<usize>,
-    ime_composing: bool,
-    ime_preedit: String,
-    runtime: tokio::runtime::Runtime,
-    // SFTP browser
-    sftp_browser_left: Option<SftpBrowser>,  // Left panel SFTP connection
-    sftp_browser: Option<SftpBrowser>,       // Right panel SFTP connection
-    local_browser_left: LocalBrowser,        // Left panel local browser
-    local_browser_right: LocalBrowser,       // Right panel local browser
-    left_panel_is_local: bool,               // true = local, false = remote (left panel)
-    right_panel_is_local: bool,              // true = local, false = remote (right panel)
-    sftp_context_menu: Option<SftpContextMenu>,
-    sftp_rename_dialog: Option<SftpRenameDialog>,
-    sftp_new_folder_dialog: Option<SftpNewFolderDialog>,
-    sftp_new_file_dialog: Option<SftpNewFileDialog>,
-    sftp_confirm_delete: Option<SftpConfirmDelete>,
-    sftp_editor_dialog: Option<SftpEditorDialog>,
-    sftp_error_dialog: Option<SftpErrorDialog>,
-    sftp_local_left_refresh_start: Option<std::time::Instant>,
-    sftp_local_right_refresh_start: Option<std::time::Instant>,
-    sftp_remote_refresh_start: Option<std::time::Instant>,
-    sftp_left_remote_refresh_start: Option<std::time::Instant>,
-    sftp_active_panel_is_local: bool,
-    // Tab drag state
-    tab_drag: TabDragState,
-    // Status bar pickers
-    selected_shell: String,
-    selected_encoding: String,
-// Detached tab windows
-    detached_windows: Vec<DetachedWindow>,
-    next_viewport_id: u32,
-    // Main window hidden (still running for detached windows)
-    main_window_hidden: bool,
-    // Broadcast state
-    #[allow(dead_code)]
-    broadcast_state: BroadcastState,
-    // Batch execution state
-    batch_execution: BatchExecutionState,
-    // Keychain
-    keychain_confirm_delete: Option<KeychainDeleteRequest>,
-    credential_dialog: CredentialDialog,
-    // Settings
-    theme: ThemeColors,
-    theme_preset: ThemePreset, // For UI selection only, not persisted
-    language: Language,
-    font_size: f32,
-    custom_font_path: String,
-    fonts_dirty: bool,
-    visuals_dirty: bool,
-}
-
-impl PortalApp {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // On macOS, ensure windows appear in Dock menu
-        #[cfg(target_os = "macos")]
-        {
-            use cocoa::appkit::NSApp;
-            use cocoa::base::id;
-
-            unsafe {
-                let app: id = NSApp();
-                // Force the app to be active and show in Dock
-                let _: id = msg_send![app, activateIgnoringOtherApps: YES];
-            }
-        }
-
-        // Load settings
-        let settings = config::load_settings();
-        let language = Language::from_id(&settings.language);
-        let font_size = settings.font_size;
-        let custom_font_path = settings.custom_font_path.clone().unwrap_or_default();
-        // Use default theme preset (Tokyo Night)
-        let theme_preset = ThemePreset::TokyoNight;
-        let theme = theme_preset.colors();
-
-        let mut fonts = egui::FontDefinitions::default();
-
-        // Load custom font if specified
-        if !custom_font_path.is_empty() {
-            if let Ok(font_data) = std::fs::read(&custom_font_path) {
-                fonts.font_data.insert(
-                    "CustomFont".to_owned(),
-                    egui::FontData::from_owned(font_data),
-                );
-                fonts.families
-                    .entry(egui::FontFamily::Monospace)
-                    .or_insert_with(Vec::new)
-                    .insert(0, "CustomFont".to_owned());
-            }
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            if let Ok(font_data) = std::fs::read("/System/Library/Fonts/Monaco.dfont") {
-                fonts.font_data.insert(
-                    "Monaco".to_owned(),
-                    egui::FontData::from_owned(font_data),
-                );
-                fonts.families
-                    .entry(egui::FontFamily::Monospace)
-                    .or_insert_with(Vec::new)
-                    .push("Monaco".to_owned());
-            }
-
-            // CJK fallback font for Chinese/Japanese/Korean characters
-            let cjk_paths = [
-                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-                "/System/Library/Fonts/STHeiti Medium.ttc",
-                "/System/Library/Fonts/Hiragino Sans GB.ttc",
-            ];
-            for path in &cjk_paths {
-                if let Ok(font_data) = std::fs::read(path) {
-                    fonts.font_data.insert(
-                        "CJK".to_owned(),
-                        egui::FontData::from_owned(font_data),
-                    );
-                    fonts.families
-                        .entry(egui::FontFamily::Monospace)
-                        .or_insert_with(Vec::new)
-                        .push("CJK".to_owned());
-                    fonts.families
-                        .entry(egui::FontFamily::Proportional)
-                        .or_insert_with(Vec::new)
-                        .push("CJK".to_owned());
-                    break;
-                }
-            }
-        }
-
-        cc.egui_ctx.set_fonts(fonts);
-
-        // Visuals will be applied on the first frame via visuals_dirty flag,
-        // because eframe may override visuals set during new().
-
-        let runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-        let selected_shell = std::env::var("SHELL")
-            .unwrap_or_else(|_| "/bin/zsh".to_string());
-        let first_tab = Tab {
-            title: "Terminal 1".to_owned(),
-            sessions: vec![TerminalSession::new_local(0, &selected_shell)],
-            layout: PaneNode::Terminal(0),
-            focused_session: 0,
-            broadcast_enabled: false,
-        };
-
-        let hosts_file = config::hosts_file_path();
-        let mut hosts = config::load_hosts(&hosts_file);
-
-        // Load credentials and run migration
-        let credentials_file = config::credentials_file_path();
-        let mut credentials = config::load_credentials(&credentials_file);
-        config::migrate_hosts_to_credentials(&mut hosts, &mut credentials);
-        config::save_credentials(&credentials_file, &credentials);
-        config::save_hosts(&hosts_file, &hosts);
-
-        Self {
-            tabs: vec![first_tab],
-            active_tab: 0,
-            current_view: AppView::Terminal,
-            hosts,
-            hosts_file,
-            credentials,
-            credentials_file,
-            next_id: 1,
-            add_host_dialog: AddHostDialog::default(),
-            host_filter: HostFilter::default(),
-            host_to_delete: None,
-            confirm_delete_host: None,
-            ime_composing: false,
-            ime_preedit: String::new(),
-            runtime,
-            sftp_browser_left: None,
-            sftp_browser: None,
-            local_browser_left: LocalBrowser::new(),
-            local_browser_right: LocalBrowser::new(),
-            left_panel_is_local: true,
-            right_panel_is_local: false,
-            sftp_context_menu: None,
-            sftp_rename_dialog: None,
-            sftp_new_folder_dialog: None,
-            sftp_new_file_dialog: None,
-            sftp_confirm_delete: None,
-            sftp_editor_dialog: None,
-            sftp_error_dialog: None,
-            sftp_local_left_refresh_start: None,
-            sftp_local_right_refresh_start: None,
-            sftp_remote_refresh_start: None,
-            sftp_left_remote_refresh_start: None,
-            sftp_active_panel_is_local: true,  // Track which panel has focus
-            tab_drag: TabDragState::default(),
-
-            selected_shell,
-            selected_encoding: "UTF-8".to_string(),
-detached_windows: Vec::new(),
-            next_viewport_id: 0,
-            main_window_hidden: false,
-            broadcast_state: BroadcastState::default(),
-            batch_execution: BatchExecutionState::default(),
-            keychain_confirm_delete: None,
-            credential_dialog: CredentialDialog::default(),
-            theme,
-            theme_preset,
-            language,
-            font_size,
-            custom_font_path,
-            fonts_dirty: false,
-            visuals_dirty: true,
-        }
-    }
-
-    fn add_tab_local(&mut self) {
-        let id = self.next_id;
-        self.next_id += 1;
-        let tab = Tab {
-            title: format!("Terminal {}", id),
-            sessions: vec![TerminalSession::new_local(id, &self.selected_shell)],
-            layout: PaneNode::Terminal(0),
-            focused_session: 0,
-            broadcast_enabled: false,
-        };
-        self.tabs.push(tab);
-        self.active_tab = self.tabs.len() - 1;
-        self.current_view = AppView::Terminal;
-    }
-
-    fn add_tab_ssh(&mut self, host: &HostEntry) {
-        let auth = config::resolve_auth(host, &self.credentials);
-        let session = TerminalSession::new_ssh(host, auth, &self.runtime);
-        let tab = Tab {
-            title: host.name.clone(),
-            sessions: vec![session],
-            layout: PaneNode::Terminal(0),
-            focused_session: 0,
-            broadcast_enabled: false,
-        };
-        self.tabs.push(tab);
-        self.active_tab = self.tabs.len() - 1;
-        self.current_view = AppView::Terminal;
-    }
-
-    fn split_focused_pane(&mut self, direction: SplitDirection) {
-        let new_id = self.next_id;
-        self.next_id += 1;
-        let tab = &self.tabs[self.active_tab];
-        let old_idx = tab.focused_session;
-        // Clone connection info from the focused session
-        let ssh_host = tab.sessions.get(old_idx).and_then(|s| s.ssh_host.clone());
-        let resolved_auth = tab.sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
-        let new_session = if let Some(host) = &ssh_host {
-            let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-            TerminalSession::new_ssh(host, auth, &self.runtime)
-        } else {
-            let shell = self.selected_shell.clone();
-            TerminalSession::new_local(new_id, &shell)
-        };
-        let tab = &mut self.tabs[self.active_tab];
-        tab.sessions.push(new_session);
-        let new_idx = tab.sessions.len() - 1;
-        tab.layout.replace(old_idx, PaneNode::Split {
-            direction,
-            ratio: 0.5,
-            first: Box::new(PaneNode::Terminal(old_idx)),
-            second: Box::new(PaneNode::Terminal(new_idx)),
-        });
-        tab.focused_session = new_idx;
-    }
-
-    fn close_pane(&mut self, session_idx: usize) {
-        let active = self.active_tab;
-        let tab = &mut self.tabs[active];
-
-        if tab.sessions.len() <= 1 {
-            // Only one pane → close the entire tab
-            let _ = tab;
-            if self.tabs.len() > 1 {
-                self.tabs.remove(active);
-                self.active_tab = active.saturating_sub(1);
-            }
-            return;
-        }
-
-        // Remove from layout tree; collapse the parent Split
-        let old_layout = tab.layout.clone();
-        if let Some(new_layout) = old_layout.remove(session_idx) {
-            tab.layout = new_layout;
-        }
-        // Decrement indices of sessions that came after the removed one
-        tab.layout.decrement_indices_above(session_idx);
-        // Remove the session itself
-        tab.sessions.remove(session_idx);
-        // Fix focused_session
-        if tab.focused_session >= tab.sessions.len() {
-            tab.focused_session = tab.sessions.len().saturating_sub(1);
-        } else if tab.focused_session == session_idx && session_idx > 0 {
-            tab.focused_session = session_idx - 1;
-        }
-    }
-
-    fn detach_tab(&mut self, tab_index: usize) {
-        if self.tabs.len() <= 1 {
-            return; // don't detach the only tab
-        }
-        let tab = self.tabs.remove(tab_index);
-        if self.active_tab >= self.tabs.len() {
-            self.active_tab = self.tabs.len().saturating_sub(1);
-        }
-
-        let id_val = self.next_viewport_id;
-        self.next_viewport_id += 1;
-        let viewport_id = egui::ViewportId::from_hash_of(format!("detached_{}", id_val));
-
-        let next_id = self.next_id;
-        self.next_id += 100; // avoid ID conflicts with main window
-
-        self.detached_windows.push(DetachedWindow {
-            viewport_id,
-            title: tab.title.clone(),
-            tabs: vec![tab],
-            active_tab: 0,
-            current_view: AppView::Terminal,
-            close_requested: false,
-            ime_composing: false,
-            ime_preedit: String::new(),
-            next_id,
-            tab_drag: TabDragState::default(),
-broadcast_state: BroadcastState::default(),
-        });
-    }
-
-    fn save_hosts(&self) {
-        config::save_hosts(&self.hosts_file, &self.hosts);
-    }
-
-    fn save_credentials(&self) {
-        config::save_credentials(&self.credentials_file, &self.credentials);
-    }
-}
+use ssh::SshConnectionState;
 
 impl eframe::App for PortalApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -803,25 +435,27 @@ impl eframe::App for PortalApp {
                                                     }
                                                 }
                                             }
+
+                                            // New tab button (+) - right after last tab, inside scroll area
+                                            ui.add_space(4.0);
+                                            if ui.add(
+                                                egui::Button::new(egui::RichText::new("+").color(self.theme.fg_dim).size(16.0))
+                                                    .frame(false)
+                                            ).clicked() {
+                                                let id = dw.next_id;
+                                                dw.next_id += 1;
+                                                let new_tab = Tab {
+                                                    title: format!("Terminal {}", id),
+                                                    sessions: vec![TerminalSession::new_local(id, &self.selected_shell)],
+                                                    layout: PaneNode::Terminal(0),
+                                                    focused_session: 0,
+                                                    broadcast_enabled: false,
+                                                };
+                                                dw.tabs.push(new_tab);
+                                                dw.active_tab = dw.tabs.len() - 1;
+                                            }
                                         });
                                     });
-
-                                // New tab button (outside scroll area)
-                                if ui.add(
-                                    egui::Button::new(egui::RichText::new("+").color(self.theme.fg_dim).size(16.0)).frame(false)
-                                ).clicked() {
-                                    let id = dw.next_id;
-                                    dw.next_id += 1;
-                                    let new_tab = Tab {
-                                        title: format!("Terminal {}", id),
-                                        sessions: vec![TerminalSession::new_local(id, &self.selected_shell)],
-                                        layout: PaneNode::Terminal(0),
-                                        focused_session: 0,
-                                        broadcast_enabled: false,
-                                    };
-                                    dw.tabs.push(new_tab);
-                                    dw.active_tab = dw.tabs.len() - 1;
-                                }
 
                                 // ── More menu (⋯) at far right of detached tab bar ──
                                 let current_tab_broadcast_on = dw.tabs[dw.active_tab].broadcast_enabled;
@@ -1940,6 +1574,7 @@ fn main() -> eframe::Result<()> {
     #[cfg(target_os = "macos")]
     {
         use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
+        use cocoa::base::{id, YES};
 
         unsafe {
             let app: id = NSApp();
