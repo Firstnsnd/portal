@@ -666,17 +666,25 @@ pub fn settings_file_path() -> PathBuf {
 // ── Portal Settings ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PortalSettings {
-    #[serde(default = "default_font_size")]
     pub font_size: f32,
-    #[serde(default)]
     pub custom_font_path: Option<String>,
-    #[serde(default = "default_language")]
     pub language: String,
+    /// Scrollback buffer limit in MB (default: 100MB)
+    pub scrollback_limit_mb: u64,
+}
+
+impl PortalSettings {
+    /// Get scrollback limit in bytes
+    pub fn scrollback_limit_bytes(&self) -> usize {
+        (self.scrollback_limit_mb as usize) * 1024 * 1024
+    }
 }
 
 fn default_font_size() -> f32 { 14.0 }
 fn default_language() -> String { "en".to_string() }
+fn default_scrollback_limit() -> u64 { 100 }
 
 impl Default for PortalSettings {
     fn default() -> Self {
@@ -684,6 +692,7 @@ impl Default for PortalSettings {
             font_size: 14.0,
             custom_font_path: None,
             language: "en".to_string(),
+            scrollback_limit_mb: 100,
         }
     }
 }

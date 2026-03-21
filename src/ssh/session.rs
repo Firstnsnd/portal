@@ -168,7 +168,35 @@ impl SshSession {
         rows: u16,
         startup_commands: Vec<String>,
     ) -> Self {
-        let grid = Arc::new(Mutex::new(TerminalGrid::new(cols as usize, rows as usize)));
+        Self::with_scrollback_limit(
+            runtime,
+            host,
+            port,
+            username,
+            auth,
+            cols,
+            rows,
+            startup_commands,
+            crate::terminal::TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES,
+        )
+    }
+
+    pub fn with_scrollback_limit(
+        runtime: &tokio::runtime::Runtime,
+        host: String,
+        port: u16,
+        username: String,
+        auth: ResolvedAuth,
+        cols: u16,
+        rows: u16,
+        startup_commands: Vec<String>,
+        scrollback_limit_bytes: usize,
+    ) -> Self {
+        let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
+            cols as usize,
+            rows as usize,
+            scrollback_limit_bytes,
+        )));
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let state = Arc::new(Mutex::new(SshConnectionState::Connecting));
         let alive = Arc::new(AtomicBool::new(true));

@@ -410,9 +410,14 @@ pub struct TerminalSession {
 
 impl TerminalSession {
     pub fn new_local(id: usize, shell: &str) -> Self {
-        let session = RealPtySession::new(id, 80, 24, shell).ok().map(SessionBackend::Local);
+        // Load settings to get scrollback limit
+        let settings = crate::config::load_settings();
+        let scrollback_bytes = (settings.scrollback_limit_mb as usize) * 1024 * 1024;
+
+        let session = RealPtySession::with_scrollback_limit(id, 80, 24, shell, scrollback_bytes)
+            .ok().map(SessionBackend::Local);
         let grid = session.as_ref().map(|s| s.get_grid()).unwrap_or_else(|| {
-            Arc::new(Mutex::new(TerminalGrid::new(80, 24)))
+            Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(80, 24, scrollback_bytes)))
         });
 
         // Get initial cwd
@@ -455,7 +460,11 @@ impl TerminalSession {
         // Use current system user if username is empty
         let username = Self::get_effective_username(&host.username);
 
-        let ssh = SshSession::connect(
+        // Load settings to get scrollback limit
+        let settings = crate::config::load_settings();
+        let scrollback_bytes = (settings.scrollback_limit_mb as usize) * 1024 * 1024;
+
+        let ssh = SshSession::with_scrollback_limit(
             runtime,
             host.host.clone(),
             host.port,
@@ -464,6 +473,7 @@ impl TerminalSession {
             80,
             24,
             host.startup_commands.clone(),
+            scrollback_bytes,
         );
         let grid = ssh.get_grid();
         Self {

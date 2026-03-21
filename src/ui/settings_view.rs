@@ -122,6 +122,7 @@ impl PortalApp {
                 Some(self.custom_font_path.clone())
             },
             language: self.language.id().to_string(),
+            scrollback_limit_mb: self.scrollback_limit_mb,
         };
         crate::config::save_settings(&settings);
     }
@@ -173,6 +174,27 @@ impl PortalApp {
                     );
                     if resp.lost_focus() {
                         self.fonts_dirty = true;
+                        changed = true;
+                    }
+                });
+
+                ui.add_space(16.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                // ── Terminal section ──
+                ui.label(egui::RichText::new(lang.t("terminal")).color(theme.fg_primary).size(14.0).strong());
+                ui.add_space(4.0);
+
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(lang.t("scrollback_limit")).color(theme.fg_dim).size(12.0));
+                    ui.add_space(8.0);
+                    let slider = ui.add(
+                        egui::Slider::new(&mut self.scrollback_limit_mb, 10..=1000)
+                            .step_by(10.0)
+                            .text("MB")
+                    );
+                    if slider.changed() {
                         changed = true;
                     }
                 });

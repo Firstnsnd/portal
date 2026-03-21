@@ -140,8 +140,10 @@ pub struct TerminalGrid {
     wrap_pending: bool,
     /// Scrollback history buffer
     pub scrollback: VecDeque<Vec<TerminalCell>>,
-    /// Maximum scrollback lines
-    max_scrollback: usize,
+    /// Maximum scrollback memory in bytes (like Ghostty: 10MB default)
+    max_scrollback_bytes: usize,
+    /// Current scrollback memory usage in bytes
+    current_scrollback_bytes: usize,
     /// Per-row flag: true if this row was soft-wrapped (auto-wrap at column boundary)
     pub line_wrapped: Vec<bool>,
     /// Per-scrollback-row wrapped flag
@@ -151,7 +153,15 @@ pub struct TerminalGrid {
 }
 
 impl TerminalGrid {
+    /// Default scrollback limit: 100MB
+    pub const DEFAULT_MAX_SCROLLBACK_BYTES: usize = 100 * 1024 * 1024;
+
     pub fn new(cols: usize, rows: usize) -> Self {
+        Self::with_scrollback_limit(cols, rows, Self::DEFAULT_MAX_SCROLLBACK_BYTES)
+    }
+
+    /// Create a new grid with a specific scrollback memory limit
+    pub fn with_scrollback_limit(cols: usize, rows: usize, max_bytes: usize) -> Self {
         let cells = vec![vec![TerminalCell::default(); cols]; rows];
         // Get initial cwd
         let cwd = std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string());
@@ -168,10 +178,24 @@ impl TerminalGrid {
             scroll_bottom: rows.saturating_sub(1),
             wrap_pending: false,
             scrollback: VecDeque::new(),
-            max_scrollback: 10000,
+            max_scrollback_bytes: max_bytes,
+            current_scrollback_bytes: 0,
             line_wrapped: vec![false; rows],
             scrollback_wrapped: VecDeque::new(),
             cwd,
+        }
+    }
+
+    /// Update the scrollback memory limit (e.g., from settings change)
+    pub fn set_scrollback_limit(&mut self, max_bytes: usize) {
+        self.max_scrollback_bytes = max_bytes;
+        // Trim if currently over the new limit
+        while self.current_scrollback_bytes > self.max_scrollback_bytes {
+            if let Some(oldest) = self.scrollback.pop_front() {
+                let oldest_bytes = Self::row_memory_usage(&oldest);
+                self.current_scrollback_bytes -= oldest_bytes;
+            }
+            self.scrollback_wrapped.pop_front();
         }
     }
 
@@ -505,6 +529,14 @@ impl TerminalGrid {
         }
     }
 
+    /// Calculate the memory usage of a row in bytes
+    ///
+    /// This estimates the memory used by storing a row of terminal cells.
+    /// Each TerminalCell contains: char (4 bytes) + colors + attributes
+    fn row_memory_usage(row: &[TerminalCell]) -> usize {
+        row.len() * std::mem::size_of::<TerminalCell>()
+    }
+
     /// Scroll up within a region: remove top line, add blank at bottom
     /// When scrolling from the absolute top (top == 0), save the removed line to scrollback.
     pub fn scroll_up(&mut self, top: usize, bottom: usize) {
@@ -513,10 +545,18 @@ impl TerminalGrid {
             if top == 0 && self.alt_screen.is_none() {
                 let removed = self.cells.remove(top);
                 let wrapped = self.line_wrapped.remove(top);
+                let removed_bytes = Self::row_memory_usage(&removed);
+
                 self.scrollback.push_back(removed);
                 self.scrollback_wrapped.push_back(wrapped);
-                if self.scrollback.len() > self.max_scrollback {
-                    self.scrollback.pop_front();
+                self.current_scrollback_bytes += removed_bytes;
+
+                // Remove oldest entries if we exceed the memory limit
+                while self.current_scrollback_bytes > self.max_scrollback_bytes {
+                    if let Some(oldest) = self.scrollback.pop_front() {
+                        let oldest_bytes = Self::row_memory_usage(&oldest);
+                        self.current_scrollback_bytes -= oldest_bytes;
+                    }
                     self.scrollback_wrapped.pop_front();
                 }
             } else {
@@ -1077,11 +1117,16 @@ pub struct RealPtySession {
 impl RealPtySession {
     #[cfg(unix)]
     pub fn new(id: usize, cols: u16, rows: u16, shell: &str) -> Result<Self> {
+        Self::with_scrollback_limit(id, cols, rows, shell, TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES)
+    }
+
+    #[cfg(unix)]
+    pub fn with_scrollback_limit(id: usize, cols: u16, rows: u16, shell: &str, scrollback_limit_bytes: usize) -> Result<Self> {
         use std::os::unix::io::{AsRawFd, FromRawFd};
         use std::sync::atomic::{AtomicBool, Ordering};
         let _ = id;
 
-        let grid = Arc::new(Mutex::new(TerminalGrid::new(cols as usize, rows as usize)));
+        let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols as usize, rows as usize, scrollback_limit_bytes)));
         let pty = UnixPty::spawn(shell, &["-l"], PtySize::new(rows, cols))?;
 
         // Dup the master fd: one for reading (background thread), one for writing (main thread)

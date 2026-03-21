@@ -84,6 +84,7 @@ pub struct PortalApp {
     pub language: Language,
     pub font_size: f32,
     pub custom_font_path: String,
+    pub scrollback_limit_mb: u64,
     pub fonts_dirty: bool,
     pub visuals_dirty: bool,
 }
@@ -109,6 +110,7 @@ impl PortalApp {
         let language = Language::from_id(&settings.language);
         let font_size = settings.font_size;
         let custom_font_path = settings.custom_font_path.clone().unwrap_or_default();
+        let scrollback_limit_mb = settings.scrollback_limit_mb;
         // Use default theme preset (Tokyo Night)
         let theme_preset = ThemePreset::TokyoNight;
         let theme = theme_preset.colors();
@@ -243,6 +245,7 @@ impl PortalApp {
             language,
             font_size,
             custom_font_path,
+            scrollback_limit_mb,
             fonts_dirty: false,
             visuals_dirty: true,
         }
