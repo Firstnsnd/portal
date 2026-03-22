@@ -31,6 +31,7 @@ impl eframe::App for PortalApp {
             AppView::Hosts => self.language.t("hosts").to_string(),
             AppView::Sftp => self.language.t("sftp").to_string(),
             AppView::Keychain => self.language.t("keychain").to_string(),
+            AppView::Tunnels => self.language.t("tunnels").to_string(),
             AppView::Settings => self.language.t("settings").to_string(),
             AppView::Batch => "Batch".to_string(),
         };
@@ -81,6 +82,7 @@ impl eframe::App for PortalApp {
                     AppView::Hosts => self.language.t("hosts").to_string(),
                     AppView::Sftp => self.language.t("sftp").to_string(),
                     AppView::Keychain => self.language.t("keychain").to_string(),
+                    AppView::Tunnels => self.language.t("tunnels").to_string(),
                     AppView::Settings => self.language.t("settings").to_string(),
                     AppView::Batch => "Batch".to_string(),
                 };
@@ -286,6 +288,9 @@ impl eframe::App for PortalApp {
                         }
                         if nav_btn(ui, "\u{1f511}", self.language.t("keychain"), dw.current_view == AppView::Keychain) {
                             dw.current_view = AppView::Keychain;
+                        }
+                        if nav_btn(ui, "\u{1f310}", self.language.t("tunnels"), dw.current_view == AppView::Tunnels) {
+                            dw.current_view = AppView::Tunnels;
                         }
 
                         // Settings button at bottom - fill remaining space to reach window bottom
@@ -902,6 +907,9 @@ impl eframe::App for PortalApp {
                             }
                             AppView::Keychain => {
                                 self.show_keychain_view(ctx, ui);
+                            }
+                            AppView::Tunnels => {
+                                self.show_tunnels_view(ctx, ui);
                             }
                             AppView::Settings => {
                                 self.show_settings_view(ctx, ui);
@@ -1766,6 +1774,10 @@ impl eframe::App for PortalApp {
 
                     AppView::Keychain => {
                         self.show_keychain_view(ctx, ui);
+                    }
+
+                    AppView::Tunnels => {
+                        self.show_tunnels_view(ctx, ui);
                     }
 
                     AppView::Settings => {

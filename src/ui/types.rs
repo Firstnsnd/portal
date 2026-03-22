@@ -784,9 +784,47 @@ pub enum AppView {
     Terminal,
     Sftp,
     Keychain,
+    Tunnels,
     Settings,
     #[allow(dead_code)]
     Batch,
+}
+
+/// State for the "Add Tunnel" dialog
+pub struct AddTunnelDialog {
+    pub open: bool,
+    /// Index of the selected tab (in app.tabs)
+    pub selected_tab_idx: Option<usize>,
+    /// Index of the selected session within that tab
+    pub selected_session_idx: Option<usize>,
+    pub forward_kind: crate::config::ForwardKind,
+    pub local_host: String,
+    pub local_port: String,
+    pub remote_host: String,
+    pub remote_port: String,
+    pub error: String,
+}
+
+impl Default for AddTunnelDialog {
+    fn default() -> Self {
+        Self {
+            open: false,
+            selected_tab_idx: None,
+            selected_session_idx: None,
+            forward_kind: crate::config::ForwardKind::Local,
+            local_host: "127.0.0.1".to_owned(),
+            local_port: String::new(),
+            remote_host: "127.0.0.1".to_owned(),
+            remote_port: String::new(),
+            error: String::new(),
+        }
+    }
+}
+
+impl AddTunnelDialog {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 /// Pending keychain credential deletion (awaiting user confirmation).

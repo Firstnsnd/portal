@@ -49,6 +49,7 @@ pub mod sftp_view;
 pub mod hosts_view;
 pub mod settings_view;
 pub mod keychain_view;
+pub mod tunnel_view;
 
 // Re-export all public types for convenient access via `use ui::*`
 pub use theme::{ThemeColors, ThemePreset};
