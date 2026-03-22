@@ -87,11 +87,14 @@
 //!
 //! Transient in-memory authentication data with secrets loaded:
 //! ```rust
-//! ResolvedAuth::Password { password: "secret" }
+//! # use portal::config::ResolvedAuth;
+//! ResolvedAuth::Password { password: "secret".to_string() }
+//! # ;
 //! ResolvedAuth::Key {
-//!   key_content: "-----BEGIN RSA...",
-//!   passphrase: Some("keypassphrase")
+//!   key_content: "-----BEGIN RSA...".to_string(),
+//!   passphrase: Some("keypassphrase".to_string())
 //! }
+//! # ;
 //! ```
 
 use serde::{Deserialize, Serialize};
