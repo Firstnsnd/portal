@@ -91,7 +91,14 @@ pub async fn connect_and_authenticate(
     username: &str,
     auth: &ResolvedAuth,
 ) -> Result<russh::client::Handle<SshClient>, String> {
-    let config = Arc::new(russh::client::Config::default());
+    let mut config = russh::client::Config::default();
+    // Enable SSH keepalive: send a keepalive packet every 15 seconds
+    // This helps prevent connections from dropping due to inactivity
+    config.keepalive_interval = Some(std::time::Duration::from_secs(15));
+    // Max number of failed keepalives before disconnecting (30 = 15s * 30 = 7.5 minutes)
+    config.keepalive_max = 30;
+
+    let config = Arc::new(config);
     let addr = format!("{}:{}", host, port);
 
     let mut handle = russh::client::connect(config, &addr, SshClient::new(host, port))
