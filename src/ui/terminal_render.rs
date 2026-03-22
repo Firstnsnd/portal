@@ -201,7 +201,7 @@ use eframe::egui;
 
 use crate::ssh::SshConnectionState;
 use crate::terminal;
-use crate::ui::types::{SessionBackend, TerminalSession, BroadcastState};
+use crate::ui::types::{SessionBackend, TerminalSession, BroadcastState, SearchMatch};
 use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, split_rect};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
@@ -556,6 +556,7 @@ pub fn render_terminal_session(
     if ctx_close   { action = Some(PaneAction::ClosePane); }
 
     // Keyboard input — only for the focused pane
+    let search_is_active = session.search_state.is_some();
     if is_focused && response.has_focus() {
         let events: Vec<egui::Event> = ctx.input(|i| i.events.clone());
         let has_input_events = events.iter().any(|e| matches!(e,
@@ -563,8 +564,42 @@ pub fn render_terminal_session(
             | egui::Event::Ime(_)
             | egui::Event::Paste(_)
         ));
-        if has_input_events {
+        if has_input_events && !search_is_active {
             session.scroll_offset = 0;
+        }
+
+        // When search bar is active, intercept Escape and Enter keys
+        if search_is_active {
+            for event in &events {
+                if let egui::Event::Key { key, pressed: true, modifiers, .. } = event {
+                    match key {
+                        egui::Key::Escape => {
+                            session.search_state = None;
+                        }
+                        egui::Key::Enter if modifiers.shift => {
+                            // Shift+Enter: go to previous match
+                            if let Some(ref mut state) = session.search_state {
+                                if !state.matches.is_empty() {
+                                    if state.current_index == 0 {
+                                        state.current_index = state.matches.len() - 1;
+                                    } else {
+                                        state.current_index -= 1;
+                                    }
+                                }
+                            }
+                        }
+                        egui::Key::Enter => {
+                            // Enter: go to next match
+                            if let Some(ref mut state) = session.search_state {
+                                if !state.matches.is_empty() {
+                                    state.current_index = (state.current_index + 1) % state.matches.len();
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
 
         let mut ime_committed = false;
@@ -590,6 +625,9 @@ pub fn render_terminal_session(
                 '<' | '>'                // Angle brackets -> 《》
             )
         }
+
+        // When search is active, don't forward keyboard input to the terminal
+        if !search_is_active {
 
         // First pass: process all IME events
         for event in &events {
@@ -797,6 +835,8 @@ pub fn render_terminal_session(
                 _ => {}
             }
         }
+
+        } // end if !search_is_active
     }
 
     // ── Render terminal content ──────────────────────────
@@ -1039,6 +1079,78 @@ pub fn render_terminal_session(
             }
         }
 
+        // Search match highlighting
+        if let Some(ref search_state) = session.search_state {
+            let match_color = egui::Color32::from_rgba_premultiplied(255, 220, 50, 80);   // semi-transparent yellow
+            let current_color = egui::Color32::from_rgba_premultiplied(255, 140, 0, 120); // orange for current match
+
+            for (match_idx, m) in search_state.matches.iter().enumerate() {
+                let is_current = match_idx == search_state.current_index;
+
+                // Determine screen row for this match
+                let (grid_row_idx, is_scrollback) = if m.row < scrollback_len {
+                    (m.row, true)
+                } else {
+                    (m.row.saturating_sub(scrollback_len), false)
+                };
+
+                let screen_row = if is_scrollback {
+                    if m.row >= scrollback_len {
+                        continue;
+                    }
+                    let vis_start = scrollback_len.saturating_sub(offset);
+                    if m.row < vis_start || m.row >= vis_start + offset.min(new_rows) {
+                        continue;
+                    }
+                    m.row - vis_start
+                } else {
+                    if grid_row_idx >= grid.rows {
+                        continue;
+                    }
+                    grid_row_idx + offset
+                };
+
+                if screen_row >= new_rows {
+                    continue;
+                }
+
+                // Get cells for this row to compute accurate positions
+                let cells = if is_scrollback {
+                    match grid.get_scrollback_row(m.row) {
+                        Some(c) => c,
+                        None => continue,
+                    }
+                } else {
+                    &grid.cells[grid_row_idx]
+                };
+
+                let col_end_clamped = m.col_end.min(cells.len()).min(grid.cols);
+                let col_start_clamped = m.col_start.min(col_end_clamped);
+                if col_start_clamped >= col_end_clamped {
+                    continue;
+                }
+
+                // Use galley for precise positions (same approach as selection highlighting)
+                let job = build_row_layout(cells, &font_id, col_end_clamped);
+                let galley = ui.fonts(|f| f.layout_job(job));
+                let galley_width = galley.rect.width();
+                let n_cols = col_end_clamped;
+                let avg_col_width = if n_cols > 0 { galley_width / n_cols as f32 } else { char_width };
+
+                let start_x = col_start_clamped as f32 * avg_col_width;
+                let end_x = col_end_clamped as f32 * avg_col_width;
+                let char_height = sample_galley.rect.height();
+
+                let row_y = rect.min.y + screen_row as f32 * line_height;
+                let highlight_rect = egui::Rect::from_min_max(
+                    egui::pos2(rect.min.x + start_x, row_y + vertical_offset),
+                    egui::pos2(rect.min.x + end_x, row_y + vertical_offset + char_height),
+                );
+                let color = if is_current { current_color } else { match_color };
+                painter.rect_filled(highlight_rect, 0.0, color);
+            }
+        }
+
         // Cursor (skip when SSH is not yet connected)
         let ssh_not_connected = matches!(&session.session, Some(SessionBackend::Ssh(ssh))
             if !matches!(ssh.connection_state(), SshConnectionState::Connected));
@@ -1213,6 +1325,208 @@ pub fn render_terminal_session(
         }
     }
 
+    // ── Search bar overlay ──
+    if session.search_state.is_some() {
+        let search_bar_width = 320.0_f32;
+        let search_bar_height = 32.0_f32;
+        let search_bar_margin = 8.0_f32;
+        let search_bar_rect = egui::Rect::from_min_size(
+            egui::pos2(
+                pane_rect.max.x - search_bar_width - search_bar_margin,
+                pane_rect.min.y + search_bar_margin,
+            ),
+            egui::vec2(search_bar_width, search_bar_height),
+        );
+
+        // Draw search bar background with border
+        let search_painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("search_bar").with(pane_id),
+        ));
+        search_painter.rect(
+            search_bar_rect,
+            6.0,
+            theme.bg_elevated,
+            egui::Stroke::new(1.0, theme.border),
+        );
+
+        // Layout: [text input] [match count] [prev] [next] [close]
+        let inner_margin = 4.0;
+        let btn_width = 22.0;
+        let count_width = 50.0;
+        let input_width = search_bar_width - inner_margin * 2.0 - btn_width * 3.0 - count_width - 8.0;
+
+        // Extract current state for rendering
+        let match_count = session.search_state.as_ref().map(|s| s.matches.len()).unwrap_or(0);
+        let current_index = session.search_state.as_ref().map(|s| s.current_index).unwrap_or(0);
+        let query_str = session.search_state.as_ref().map(|s| s.query.clone()).unwrap_or_default();
+
+        // Match count label
+        let count_text = if query_str.is_empty() {
+            String::new()
+        } else if match_count == 0 {
+            language.t("no_matches").to_string()
+        } else {
+            format!("{}/{}", current_index + 1, match_count)
+        };
+
+        let count_color = if match_count == 0 && !query_str.is_empty() {
+            theme.red
+        } else {
+            theme.fg_dim
+        };
+
+        let count_galley = ui.fonts(|f| f.layout_no_wrap(
+            count_text,
+            egui::FontId::proportional(11.0),
+            count_color,
+        ));
+
+        let count_x = search_bar_rect.min.x + inner_margin + input_width + 4.0;
+        let count_y = search_bar_rect.center().y - count_galley.rect.height() / 2.0;
+        search_painter.galley(egui::pos2(count_x, count_y), count_galley, egui::Color32::TRANSPARENT);
+
+        // Previous button (▲)
+        let prev_x = count_x + count_width;
+        let prev_rect = egui::Rect::from_min_size(
+            egui::pos2(prev_x, search_bar_rect.min.y + (search_bar_height - btn_width) / 2.0),
+            egui::vec2(btn_width, btn_width),
+        );
+        let prev_resp = ui.allocate_rect(prev_rect, egui::Sense::click());
+        let prev_bg = if prev_resp.hovered() { theme.hover_bg } else { egui::Color32::TRANSPARENT };
+        search_painter.rect_filled(prev_rect, 4.0, prev_bg);
+        search_painter.text(
+            prev_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "\u{25b2}",
+            egui::FontId::proportional(10.0),
+            theme.fg_dim,
+        );
+        if prev_resp.clicked() {
+            if let Some(ref mut state) = session.search_state {
+                if !state.matches.is_empty() {
+                    if state.current_index == 0 {
+                        state.current_index = state.matches.len() - 1;
+                    } else {
+                        state.current_index -= 1;
+                    }
+                }
+            }
+        }
+
+        // Next button (▼)
+        let next_x = prev_x + btn_width;
+        let next_rect = egui::Rect::from_min_size(
+            egui::pos2(next_x, search_bar_rect.min.y + (search_bar_height - btn_width) / 2.0),
+            egui::vec2(btn_width, btn_width),
+        );
+        let next_resp = ui.allocate_rect(next_rect, egui::Sense::click());
+        let next_bg = if next_resp.hovered() { theme.hover_bg } else { egui::Color32::TRANSPARENT };
+        search_painter.rect_filled(next_rect, 4.0, next_bg);
+        search_painter.text(
+            next_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "\u{25bc}",
+            egui::FontId::proportional(10.0),
+            theme.fg_dim,
+        );
+        if next_resp.clicked() {
+            if let Some(ref mut state) = session.search_state {
+                if !state.matches.is_empty() {
+                    state.current_index = (state.current_index + 1) % state.matches.len();
+                }
+            }
+        }
+
+        // Close button (×)
+        let close_x = next_x + btn_width;
+        let close_rect = egui::Rect::from_min_size(
+            egui::pos2(close_x, search_bar_rect.min.y + (search_bar_height - btn_width) / 2.0),
+            egui::vec2(btn_width, btn_width),
+        );
+        let close_resp = ui.allocate_rect(close_rect, egui::Sense::click());
+        let close_bg = if close_resp.hovered() {
+            egui::Color32::from_rgb(192, 77, 77)
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        search_painter.rect_filled(close_rect, 4.0, close_bg);
+        search_painter.text(
+            close_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "\u{00d7}",
+            egui::FontId::proportional(13.0),
+            theme.fg_dim,
+        );
+        if close_resp.clicked() {
+            session.search_state = None;
+        }
+
+        // Text input field — rendered using egui's TextEdit widget
+        if session.search_state.is_some() {
+            let input_rect = egui::Rect::from_min_size(
+                egui::pos2(search_bar_rect.min.x + inner_margin, search_bar_rect.min.y + inner_margin),
+                egui::vec2(input_width, search_bar_height - inner_margin * 2.0),
+            );
+
+            let search_input_id = egui::Id::new("search_input").with(pane_id);
+            let mut query = session.search_state.as_ref().map(|s| s.query.clone()).unwrap_or_default();
+            let prev_query = query.clone();
+
+            let text_edit = egui::TextEdit::singleline(&mut query)
+                .id(search_input_id)
+                .font(egui::FontId::proportional(13.0))
+                .desired_width(input_width)
+                .hint_text(language.t("search_placeholder"))
+                .text_color(theme.fg_primary)
+                .frame(false);
+
+            let inner_resp = ui.put(input_rect, text_edit);
+
+            // Auto-focus the text input when search opens
+            if !inner_resp.has_focus() {
+                inner_resp.request_focus();
+            }
+
+            // Update search state when query changes
+            if query != prev_query {
+                if let Some(ref mut state) = session.search_state {
+                    state.query = query.clone();
+                    // Run search
+                    if let Ok(grid) = session.grid.lock() {
+                        let raw_matches = grid.search(&state.query, state.case_sensitive);
+                        state.matches = raw_matches.into_iter().map(|(row, col_start, col_end)| {
+                            SearchMatch { row, col_start, col_end }
+                        }).collect();
+                        if state.matches.is_empty() {
+                            state.current_index = 0;
+                        } else {
+                            state.current_index = state.current_index.min(state.matches.len() - 1);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Auto-scroll to current match
+        if let Some(ref state) = session.search_state {
+            if !state.matches.is_empty() {
+                let current_match = &state.matches[state.current_index];
+                if let Ok(grid) = session.grid.lock() {
+                    let scrollback_len = grid.scrollback_len();
+                    if current_match.row < scrollback_len {
+                        // Match is in scrollback — scroll to show it
+                        let target_offset = scrollback_len - current_match.row;
+                        session.scroll_offset = target_offset;
+                    } else {
+                        // Match is in current grid — ensure we're scrolled to bottom
+                        session.scroll_offset = 0;
+                    }
+                }
+            }
+        }
+    }
+
     // ── Broadcast mode border (accent border on non-focused panes) ──
     if broadcast_state.is_active() && !is_focused {
         let painter = ui.painter_at(pane_rect);
@@ -1230,7 +1544,7 @@ pub fn render_terminal_session(
         painter.text(
             close_btn_rect.center(),
             egui::Align2::CENTER_CENTER,
-            "×",
+            "\u{00d7}",
             egui::FontId::proportional(13.0),
             egui::Color32::WHITE,
         );
