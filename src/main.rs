@@ -11,6 +11,7 @@ mod ui;
 use app::PortalApp;
 use std::time::Duration;
 
+use config::ShortcutAction;
 use ui::*;
 use ssh::SshConnectionState;
 
@@ -95,8 +96,7 @@ impl eframe::App for PortalApp {
 
                 // ── Keyboard shortcuts ──
                 if dw.current_view == AppView::Terminal {
-                    if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && !i.modifiers.shift) {
-                        // Split horizontal in detached window
+                    if self.shortcut_resolver.matches(ShortcutAction::SplitHorizontal, ctx) {
                         let active = dw.active_tab;
                         let tab = &dw.tabs[active];
                         let old_idx = tab.focused_session;
@@ -121,8 +121,7 @@ impl eframe::App for PortalApp {
                         });
                         tab.focused_session = new_idx;
                     }
-                    if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && i.modifiers.shift) {
-                        // Split vertical in detached window
+                    if self.shortcut_resolver.matches(ShortcutAction::SplitVertical, ctx) {
                         let active = dw.active_tab;
                         let tab = &dw.tabs[active];
                         let old_idx = tab.focused_session;
@@ -147,8 +146,7 @@ impl eframe::App for PortalApp {
                         });
                         tab.focused_session = new_idx;
                     }
-                    // Cmd+F → toggle search in focused terminal session (detached window)
-                    if ctx.input(|i| i.key_pressed(egui::Key::F) && i.modifiers.command && !i.modifiers.shift) {
+                    if self.shortcut_resolver.matches(ShortcutAction::Search, ctx) {
                         let active = dw.active_tab;
                         if let Some(tab) = dw.tabs.get_mut(active) {
                             if let Some(session) = tab.sessions.get_mut(tab.focused_session) {
@@ -164,6 +162,61 @@ impl eframe::App for PortalApp {
                                 }
                             }
                         }
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::NewTab, ctx) {
+                        let id = dw.next_id;
+                        dw.next_id += 1;
+                        let new_tab = Tab {
+                            title: format!("Terminal {}", id),
+                            sessions: vec![TerminalSession::new_local(id, &self.selected_shell)],
+                            layout: PaneNode::Terminal(0),
+                            focused_session: 0,
+                            broadcast_enabled: false,
+                        };
+                        dw.tabs.push(new_tab);
+                        dw.active_tab = dw.tabs.len() - 1;
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::ClosePane, ctx) {
+                        let active = dw.active_tab;
+                        let tab = &dw.tabs[active];
+                        if tab.sessions.len() > 1 {
+                            let idx = tab.focused_session;
+                            let tab = &mut dw.tabs[active];
+                            let old_layout = tab.layout.clone();
+                            if let Some(new_layout) = old_layout.remove(idx) {
+                                tab.layout = new_layout;
+                            }
+                            tab.layout.decrement_indices_above(idx);
+                            tab.sessions.remove(idx);
+                            if tab.focused_session >= tab.sessions.len() {
+                                tab.focused_session = tab.sessions.len().saturating_sub(1);
+                            } else if tab.focused_session == idx && idx > 0 {
+                                tab.focused_session = idx - 1;
+                            }
+                        }
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::CloseTab, ctx) {
+                        if dw.tabs.len() > 1 {
+                            let active = dw.active_tab;
+                            dw.tabs.remove(active);
+                            if dw.active_tab >= dw.tabs.len() {
+                                dw.active_tab = dw.tabs.len().saturating_sub(1);
+                            }
+                        }
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::NextTab, ctx) {
+                        if !dw.tabs.is_empty() {
+                            dw.active_tab = (dw.active_tab + 1) % dw.tabs.len();
+                        }
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::PrevTab, ctx) {
+                        if !dw.tabs.is_empty() {
+                            dw.active_tab = if dw.active_tab == 0 { dw.tabs.len() - 1 } else { dw.active_tab - 1 };
+                        }
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::ToggleBroadcast, ctx) {
+                        let active = dw.active_tab;
+                        dw.tabs[active].broadcast_enabled = !dw.tabs[active].broadcast_enabled;
                     }
                 }
 
@@ -681,6 +734,7 @@ impl eframe::App for PortalApp {
                                         &self.theme,
                                         self.font_size,
                                         &self.language,
+                                        &self.shortcut_resolver,
                                     )
                                 };
                                 if let Some((idx, action, input_bytes)) = pane_result {
@@ -847,18 +901,15 @@ impl eframe::App for PortalApp {
             return;
         }
 
-        // ── Split keyboard shortcuts (terminal view only) ─────────────────────
-        // Cmd+D  → split horizontally (left | right)
-        // Cmd+Shift+D → split vertically (top / bottom)
+        // ── Keyboard shortcuts (terminal view only) ─────────────────────
         if self.current_view == AppView::Terminal {
-            if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && !i.modifiers.shift) {
+            if self.shortcut_resolver.matches(ShortcutAction::SplitHorizontal, ctx) {
                 self.split_focused_pane(SplitDirection::Horizontal);
             }
-            if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && i.modifiers.shift) {
+            if self.shortcut_resolver.matches(ShortcutAction::SplitVertical, ctx) {
                 self.split_focused_pane(SplitDirection::Vertical);
             }
-            // Cmd+F → toggle search in focused terminal session
-            if ctx.input(|i| i.key_pressed(egui::Key::F) && i.modifiers.command && !i.modifiers.shift) {
+            if self.shortcut_resolver.matches(ShortcutAction::Search, ctx) {
                 if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                     if let Some(session) = tab.sessions.get_mut(tab.focused_session) {
                         if session.search_state.is_some() {
@@ -872,6 +923,40 @@ impl eframe::App for PortalApp {
                             });
                         }
                     }
+                }
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::NewTab, ctx) {
+                self.add_tab_local();
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::ClosePane, ctx) {
+                let active = self.active_tab;
+                if self.tabs[active].sessions.len() > 1 {
+                    let idx = self.tabs[active].focused_session;
+                    self.close_pane(idx);
+                }
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::CloseTab, ctx) {
+                if self.tabs.len() > 1 {
+                    let active = self.active_tab;
+                    self.tabs.remove(active);
+                    if self.active_tab >= self.tabs.len() {
+                        self.active_tab = self.tabs.len().saturating_sub(1);
+                    }
+                }
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::NextTab, ctx) {
+                if !self.tabs.is_empty() {
+                    self.active_tab = (self.active_tab + 1) % self.tabs.len();
+                }
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::PrevTab, ctx) {
+                if !self.tabs.is_empty() {
+                    self.active_tab = if self.active_tab == 0 { self.tabs.len() - 1 } else { self.active_tab - 1 };
+                }
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::ToggleBroadcast, ctx) {
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    tab.broadcast_enabled = !tab.broadcast_enabled;
                 }
             }
         }
@@ -1537,6 +1622,7 @@ impl eframe::App for PortalApp {
                                 &self.theme,
                                 self.font_size,
                                 &self.language,
+                                &self.shortcut_resolver,
                             )
                         };
                         if let Some((idx, action, input_bytes)) = pane_result {

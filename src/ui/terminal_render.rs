@@ -199,13 +199,14 @@
 
 use eframe::egui;
 
+use crate::config::ShortcutAction;
 use crate::ssh::SshConnectionState;
 use crate::terminal;
 use crate::ui::types::{SessionBackend, TerminalSession, BroadcastState, SearchMatch};
 use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, split_rect};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
-use crate::ui::input::{key_to_ctrl_byte, key_to_char};
+use crate::ui::input::{key_to_ctrl_byte, key_to_char, ShortcutResolver};
 
 /// Core terminal session rendering function.
 ///
@@ -273,6 +274,7 @@ pub fn render_terminal_session(
     theme: &ThemeColors,
     font_size: f32,
     language: &Language,
+    shortcut_resolver: &ShortcutResolver,
 ) -> (Option<PaneAction>, Vec<u8>) {
     let font_id = egui::FontId::monospace(font_size);
     let pad_x = 8.0_f32;
@@ -717,10 +719,9 @@ pub fn render_terminal_session(
                         };
                         if cmd_arrow {
                             session.selection.clear();
-                        } else if modifiers.shift && *key == egui::Key::I {
-                            // Cmd+Shift+I: toggle broadcast mode
+                        } else if shortcut_resolver.matches(ShortcutAction::ToggleBroadcast, ctx) {
                             action = Some(PaneAction::ToggleBroadcast);
-                        } else if *key == egui::Key::C {
+                        } else if shortcut_resolver.matches(ShortcutAction::Copy, ctx) {
                             if let Some(ref text) = selected_text {
                                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                                     let _ = clipboard.set_text(text.clone());
@@ -730,10 +731,10 @@ pub fn render_terminal_session(
                                 session.write_bytes(&[0x03]);
                                 input_bytes.push(0x03);
                             }
-                        } else if *key == egui::Key::A {
+                        } else if shortcut_resolver.matches(ShortcutAction::SelectAll, ctx) {
                             session.selection.start = (0, 0);
                             session.selection.end = (new_rows.saturating_sub(1), new_cols.saturating_sub(1));
-                        } else if *key == egui::Key::V {
+                        } else if shortcut_resolver.matches(ShortcutAction::Paste, ctx) {
                             // Cmd+V: handled by egui::Event::Paste below — no-op here
                         }
                         // Cmd+D / Cmd+Shift+D are consumed by split shortcuts — not forwarded to PTY
@@ -1594,6 +1595,7 @@ pub fn render_terminal_pane(
     theme: &ThemeColors,
     font_size: f32,
     language: &Language,
+    shortcut_resolver: &ShortcutResolver,
 ) -> (Option<PaneAction>, Vec<u8>) {
     if session_idx >= sessions.len() {
         return (None, Vec::new());
@@ -1610,6 +1612,7 @@ pub fn render_terminal_pane(
         show_close_btn,
         can_close_pane,
         theme, font_size, language,
+        shortcut_resolver,
     )
 }
 
@@ -1690,6 +1693,7 @@ pub fn render_pane_tree(
     theme: &ThemeColors,
     font_size: f32,
     language: &Language,
+    shortcut_resolver: &ShortcutResolver,
 ) -> Option<(usize, PaneAction, Vec<u8>)> {
     match node {
         PaneNode::Terminal(idx) => {
@@ -1699,6 +1703,7 @@ pub fn render_pane_tree(
                 sessions.len() > 1,
                 can_close_pane,
                 theme, font_size, language,
+                shortcut_resolver,
             );
             match action {
                 Some(a) => Some((*idx, a, input_bytes)),
@@ -1752,8 +1757,8 @@ pub fn render_pane_tree(
             }
 
             // Render panes
-            let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language);
-            let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language);
+            let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language, shortcut_resolver);
+            let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language, shortcut_resolver);
 
             // Prefer the pane with a non-Focus action (split) over a plain focus
             let result = match (f1, f2) {
