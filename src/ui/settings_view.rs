@@ -2,19 +2,19 @@ use eframe::egui;
 
 use crate::app::PortalApp;
 use crate::ui::theme::ThemePreset;
-use crate::ui::theme::{darker, brighter};
 use crate::ui::i18n::Language;
+use crate::ui::widgets;
 
 impl PortalApp {
     pub fn apply_visuals(&self, ctx: &egui::Context) {
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = self.theme.bg_primary;
         visuals.window_fill = self.theme.bg_secondary;
-        visuals.extreme_bg_color = darker(self.theme.bg_secondary, 10);
+        visuals.extreme_bg_color = self.theme.input_bg;
         visuals.faint_bg_color = self.theme.bg_elevated;
 
         // Border color derived from theme
-        let border = brighter(self.theme.bg_elevated, 20);
+        let border = self.theme.input_border;
 
         // Non-interactive widgets (labels, separators)
         visuals.widgets.noninteractive.bg_fill = self.theme.bg_secondary;
@@ -27,7 +27,7 @@ impl PortalApp {
 
         // Hovered widgets
         visuals.widgets.hovered.bg_fill = self.theme.bg_elevated;
-        visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, self.theme.accent_alpha(120));
+        visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, self.theme.focus_ring);
         visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, self.theme.fg_primary);
 
         // Active / focused widgets
@@ -138,7 +138,7 @@ impl PortalApp {
             ui.add_space(20.0);
             ui.horizontal(|ui| {
                 ui.add_space(24.0);
-                ui.label(egui::RichText::new(lang.t("settings")).color(theme.fg_dim).size(12.0).strong());
+                ui.label(widgets::section_header(lang.t("settings"), &theme));
             });
             ui.add_space(16.0);
 
@@ -154,7 +154,7 @@ impl PortalApp {
                 ui.add_space(4.0);
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(lang.t("font_size")).color(theme.fg_dim).size(12.0));
+                    ui.label(widgets::field_label(lang.t("font_size"), &theme));
                     ui.add_space(8.0);
                     let slider = ui.add(
                         egui::Slider::new(&mut self.font_size, 8.0..=32.0)
@@ -167,7 +167,7 @@ impl PortalApp {
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(lang.t("custom_font")).color(theme.fg_dim).size(12.0));
+                    ui.label(widgets::field_label(lang.t("custom_font"), &theme));
                     ui.add_space(8.0);
                     let resp = ui.add(
                         egui::TextEdit::singleline(&mut self.custom_font_path)
@@ -189,7 +189,7 @@ impl PortalApp {
                 ui.add_space(4.0);
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(lang.t("scrollback_limit")).color(theme.fg_dim).size(12.0));
+                    ui.label(widgets::field_label(lang.t("scrollback_limit"), &theme));
                     ui.add_space(8.0);
                     let slider = ui.add(
                         egui::Slider::new(&mut self.scrollback_limit_mb, 10..=1000)
@@ -210,7 +210,7 @@ impl PortalApp {
                 ui.add_space(4.0);
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(lang.t("ssh_keepalive")).color(theme.fg_dim).size(12.0));
+                    ui.label(widgets::field_label(lang.t("ssh_keepalive"), &theme));
                     ui.add_space(8.0);
                     let slider = ui.add(
                         egui::Slider::new(&mut self.ssh_keepalive_interval, 0..=300)

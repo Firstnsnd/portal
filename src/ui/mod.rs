@@ -39,6 +39,7 @@
 //! - **SSH**: Remote SSH connection
 //! - Future: Telnet, serial, etc.
 
+pub mod tokens;
 pub mod theme;
 pub mod i18n;
 pub mod input;
@@ -51,6 +52,7 @@ pub mod settings_view;
 pub mod keychain_view;
 pub mod snippet_view;
 pub mod tunnel_view;
+pub mod widgets;
 
 // Re-export all public types for convenient access via `use ui::*`
 pub use theme::{ThemeColors, ThemePreset};

@@ -4,6 +4,7 @@ use crate::app::PortalApp;
 use crate::config::{ForwardKind, PortForwardConfig};
 use crate::ssh::port_forward::ForwardState;
 use crate::ui::types::SessionBackend;
+use crate::ui::widgets;
 
 /// Information about a single tunnel gathered from session state
 struct TunnelInfo {
@@ -38,23 +39,11 @@ impl PortalApp {
                 // ── Page header ──
                 ui.horizontal(|ui| {
                     ui.add_space(24.0);
-                    ui.label(
-                        egui::RichText::new(lang.t("tunnels"))
-                            .color(theme.fg_dim)
-                            .size(12.0)
-                            .strong(),
-                    );
+                    ui.label(widgets::section_header(lang.t("tunnels"), &theme));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(24.0);
                         if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new(format!("+ {}", lang.t("add_tunnel")))
-                                        .color(theme.accent)
-                                        .size(12.0),
-                                )
-                                .frame(false),
-                            )
+                            .add(widgets::text_button(&format!("+ {}", lang.t("add_tunnel")), theme.accent))
                             .clicked()
                         {
                             self.add_tunnel_dialog.reset();
@@ -361,22 +350,12 @@ impl PortalApp {
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .fixed_size([360.0, 320.0])
-            .frame(egui::Frame {
-                fill: theme.bg_elevated,
-                inner_margin: egui::Margin::same(20.0),
-                rounding: egui::Rounding::same(8.0),
-                stroke: egui::Stroke::new(1.0, theme.border),
-                ..Default::default()
-            })
+            .frame(widgets::dialog_frame(&theme))
             .show(ctx, |ui| {
                 ui.add_space(4.0);
 
                 // Session selector
-                ui.label(
-                    egui::RichText::new(lang.t("select_session"))
-                        .color(theme.fg_dim)
-                        .size(11.0),
-                );
+                ui.label(widgets::field_label(lang.t("select_session"), &theme));
                 ui.add_space(4.0);
 
                 let current_label = if let (Some(tab_idx), Some(sess_idx)) =
@@ -423,17 +402,9 @@ impl PortalApp {
 
                 // Local host:port
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Local Host")
-                            .color(theme.fg_dim)
-                            .size(11.0),
-                    );
+                    ui.label(widgets::field_label("Local Host", &theme));
                     ui.add_space(40.0);
-                    ui.label(
-                        egui::RichText::new("Local Port")
-                            .color(theme.fg_dim)
-                            .size(11.0),
-                    );
+                    ui.label(widgets::field_label("Local Port", &theme));
                 });
                 ui.horizontal(|ui| {
                     ui.add(
@@ -451,17 +422,9 @@ impl PortalApp {
 
                 // Remote host:port
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Remote Host")
-                            .color(theme.fg_dim)
-                            .size(11.0),
-                    );
+                    ui.label(widgets::field_label("Remote Host", &theme));
                     ui.add_space(32.0);
-                    ui.label(
-                        egui::RichText::new("Remote Port")
-                            .color(theme.fg_dim)
-                            .size(11.0),
-                    );
+                    ui.label(widgets::field_label("Remote Port", &theme));
                 });
                 ui.horizontal(|ui| {
                     ui.add(
@@ -492,31 +455,14 @@ impl PortalApp {
                 // Buttons
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new(lang.t("cancel")).size(12.0),
-                                )
-                                .min_size(egui::vec2(70.0, 28.0)),
-                            )
-                            .clicked()
+                        if ui.add(widgets::secondary_button(lang.t("cancel"), &theme)).clicked()
                         {
                             should_close = true;
                         }
 
                         ui.add_space(8.0);
 
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new(lang.t("create"))
-                                        .color(egui::Color32::WHITE)
-                                        .size(12.0),
-                                )
-                                .fill(theme.accent)
-                                .min_size(egui::vec2(70.0, 28.0)),
-                            )
-                            .clicked()
+                        if ui.add(widgets::primary_button(lang.t("create"), &theme)).clicked()
                         {
                             // Validate
                             if self.add_tunnel_dialog.selected_tab_idx.is_none()

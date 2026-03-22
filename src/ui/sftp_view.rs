@@ -5,6 +5,7 @@ use crate::sftp::{FileSelection, SftpConnectionState, SftpEntry, SftpEntryKind};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
 use crate::ui::types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog, SftpPanel};
+use crate::ui::widgets;
 
 /// A single entry in a drag payload.
 #[derive(Clone)]
@@ -1601,19 +1602,7 @@ impl PortalApp {
                 .fixed_size(egui::vec2(300.0, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
-                .frame(egui::Frame {
-                    fill: self.theme.bg_secondary,
-                    rounding: egui::Rounding::same(10.0),
-                    inner_margin: egui::Margin::same(20.0),
-                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                    shadow: egui::epaint::Shadow {
-                        offset: egui::vec2(0.0, 4.0),
-                        blur: 20.0,
-                        spread: 2.0,
-                        color: egui::Color32::from_black_alpha(80),
-                    },
-                    ..Default::default()
-                })
+                .frame(widgets::dialog_frame(&self.theme))
                 .show(ui.ctx(), |ui| {
                     // Title
                     ui.horizontal(|ui| {
@@ -1645,27 +1634,13 @@ impl PortalApp {
                     ui.add_space(16.0);
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("save")).color(egui::Color32::WHITE).size(13.0)
-                                )
-                                .fill(self.theme.accent)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::primary_button(self.language.t("save"), &self.theme)).clicked() {
                                 if !dialog.new_name.is_empty() && dialog.new_name != dialog.old_name {
                                     rename_action = Some((dialog.panel, dialog.old_name.clone(), dialog.new_name.clone()));
                                     close_rename = true;
                                 }
                             }
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("cancel")).color(self.theme.fg_dim).size(13.0)
-                                )
-                                .fill(self.theme.bg_elevated)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::secondary_button(self.language.t("cancel"), &self.theme)).clicked() {
                                 close_rename = true;
                             }
                         });
@@ -1719,19 +1694,7 @@ impl PortalApp {
                 .fixed_size(egui::vec2(300.0, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
-                .frame(egui::Frame {
-                    fill: self.theme.bg_secondary,
-                    rounding: egui::Rounding::same(10.0),
-                    inner_margin: egui::Margin::same(20.0),
-                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                    shadow: egui::epaint::Shadow {
-                        offset: egui::vec2(0.0, 4.0),
-                        blur: 20.0,
-                        spread: 2.0,
-                        color: egui::Color32::from_black_alpha(80),
-                    },
-                    ..Default::default()
-                })
+                .frame(widgets::dialog_frame(&self.theme))
                 .show(ui.ctx(), |ui| {
                     // Title
                     ui.horizontal(|ui| {
@@ -1763,27 +1726,13 @@ impl PortalApp {
                     ui.add_space(16.0);
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("save")).color(egui::Color32::WHITE).size(13.0)
-                                )
-                                .fill(self.theme.accent)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::primary_button(self.language.t("save"), &self.theme)).clicked() {
                                 if !dialog.name.is_empty() {
                                     create_dir_action = Some((dialog.panel, dialog.name.clone()));
                                     close_new_folder = true;
                                 }
                             }
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("cancel")).color(self.theme.fg_dim).size(13.0)
-                                )
-                                .fill(self.theme.bg_elevated)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::secondary_button(self.language.t("cancel"), &self.theme)).clicked() {
                                 close_new_folder = true;
                             }
                         });
@@ -1835,19 +1784,7 @@ impl PortalApp {
                 .fixed_size(egui::vec2(300.0, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
-                .frame(egui::Frame {
-                    fill: self.theme.bg_secondary,
-                    rounding: egui::Rounding::same(10.0),
-                    inner_margin: egui::Margin::same(20.0),
-                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                    shadow: egui::epaint::Shadow {
-                        offset: egui::vec2(0.0, 4.0),
-                        blur: 20.0,
-                        spread: 2.0,
-                        color: egui::Color32::from_black_alpha(80),
-                    },
-                    ..Default::default()
-                })
+                .frame(widgets::dialog_frame(&self.theme))
                 .show(ui.ctx(), |ui| {
                     // Title
                     ui.horizontal(|ui| {
@@ -1879,27 +1816,13 @@ impl PortalApp {
                     ui.add_space(16.0);
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("save")).color(egui::Color32::WHITE).size(13.0)
-                                )
-                                .fill(self.theme.accent)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::primary_button(self.language.t("save"), &self.theme)).clicked() {
                                 if !dialog.name.is_empty() {
                                     create_file_action = Some((dialog.panel, dialog.name.clone()));
                                     close_new_file = true;
                                 }
                             }
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("cancel")).color(self.theme.fg_dim).size(13.0)
-                                )
-                                .fill(self.theme.bg_elevated)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::secondary_button(self.language.t("cancel"), &self.theme)).clicked() {
                                 close_new_file = true;
                             }
                         });
@@ -1957,19 +1880,7 @@ impl PortalApp {
                 .fixed_size(egui::vec2(300.0, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
-                .frame(egui::Frame {
-                    fill: self.theme.bg_secondary,
-                    rounding: egui::Rounding::same(10.0),
-                    inner_margin: egui::Margin::same(20.0),
-                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                    shadow: egui::epaint::Shadow {
-                        offset: egui::vec2(0.0, 4.0),
-                        blur: 20.0,
-                        spread: 2.0,
-                        color: egui::Color32::from_black_alpha(80),
-                    },
-                    ..Default::default()
-                })
+                .frame(widgets::dialog_frame(&self.theme))
                 .show(ui.ctx(), |ui| {
                     // Warning icon + title
                     ui.horizontal(|ui| {
@@ -1994,25 +1905,11 @@ impl PortalApp {
                     // Right-aligned buttons
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("delete_file")).color(egui::Color32::WHITE).size(13.0)
-                                )
-                                .fill(self.theme.red)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::danger_button(self.language.t("delete_file"), &self.theme)).clicked() {
                                 delete_action = Some((panel, names.clone()));
                                 close_delete = true;
                             }
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("cancel")).color(self.theme.fg_dim).size(13.0)
-                                )
-                                .fill(self.theme.bg_elevated)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::secondary_button(self.language.t("cancel"), &self.theme)).clicked() {
                                 close_delete = true;
                             }
                         });
@@ -2037,19 +1934,7 @@ impl PortalApp {
                 .fixed_size(egui::vec2(400.0, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
-                .frame(egui::Frame {
-                    fill: self.theme.bg_secondary,
-                    rounding: egui::Rounding::same(10.0),
-                    inner_margin: egui::Margin::same(20.0),
-                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                    shadow: egui::epaint::Shadow {
-                        offset: egui::vec2(0.0, 4.0),
-                        blur: 20.0,
-                        spread: 2.0,
-                        color: egui::Color32::from_black_alpha(80),
-                    },
-                    ..Default::default()
-                })
+                .frame(widgets::dialog_frame(&self.theme))
                 .show(ui.ctx(), |ui| {
                     ui.vertical_centered(|ui| {
                         // Error icon + title
@@ -2064,14 +1949,7 @@ impl PortalApp {
                         ui.add_space(20.0);
                         // Close button
                         ui.vertical_centered(|ui| {
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new("确定").color(egui::Color32::WHITE).size(13.0)
-                                )
-                                .fill(self.theme.accent)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(100.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::primary_button("确定", &self.theme)).clicked() {
                                 close_error = true;
                             }
                         });

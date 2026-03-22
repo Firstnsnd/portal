@@ -3,7 +3,8 @@ use eframe::egui;
 use crate::app::PortalApp;
 use crate::config::{self, Credential, CredentialType};
 use crate::ui::types::{KeychainDeleteRequest, CredentialTypeChoice, KeySourceChoice};
-use crate::ui::theme::brighter;
+use crate::ui::tokens::*;
+use crate::ui::widgets;
 
 impl PortalApp {
     pub fn show_keychain_view(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -27,46 +28,36 @@ impl PortalApp {
         egui::ScrollArea::vertical()
             .id_salt("keychain_page_scroll")
             .show(ui, |ui| {
-            ui.add_space(20.0);
+            ui.add_space(SPACE_2XL / 2.0);
 
             // ── Page header ──
             ui.horizontal(|ui| {
-                ui.add_space(24.0);
+                ui.add_space(SPACE_XL);
                 ui.label(
                     egui::RichText::new(lang.t("keychain"))
                         .color(theme.fg_dim)
-                        .size(12.0)
+                        .size(FONT_MD)
                         .strong(),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(24.0);
+                    ui.add_space(SPACE_XL);
                     // New credential button
                     if ui.add(
-                        egui::Button::new(
-                            egui::RichText::new(lang.t("new_credential"))
-                                .color(theme.accent)
-                                .size(12.0),
-                        )
-                        .frame(false)
+                        widgets::text_button(lang.t("new_credential"), theme.accent)
                     ).clicked() {
                         self.credential_dialog.open_new();
                     }
                     if !self.credentials.is_empty() {
-                        ui.add_space(12.0);
+                        ui.add_space(SPACE_MD);
                         if ui.add(
-                            egui::Button::new(
-                                egui::RichText::new(lang.t("delete_all"))
-                                    .color(theme.red)
-                                    .size(12.0),
-                            )
-                            .frame(false)
+                            widgets::text_button(lang.t("delete_all"), theme.red)
                         ).clicked() {
                             delete_request = Some(KeychainDeleteRequest::All);
                         }
                     }
                 });
             });
-            ui.add_space(16.0);
+            ui.add_space(SPACE_LG);
 
             if self.credentials.is_empty() {
                 // ── Empty state ──
@@ -74,31 +65,31 @@ impl PortalApp {
                 ui.vertical_centered(|ui| {
                     ui.label(
                         egui::RichText::new("\u{1f511}")
-                            .size(32.0)
+                            .size(SPACE_2XL)
                             .color(theme.fg_dim),
                     );
-                    ui.add_space(12.0);
+                    ui.add_space(SPACE_MD);
                     ui.label(
                         egui::RichText::new(lang.t("keychain_empty"))
                             .color(theme.fg_dim)
-                            .size(13.0),
+                            .size(FONT_BASE),
                     );
                 });
                 ui.add_space(60.0);
             } else {
                 // ── Section header ──
                 ui.horizontal(|ui| {
-                    ui.add_space(24.0);
+                    ui.add_space(SPACE_XL);
                     ui.label(
                         egui::RichText::new(lang.t("credentials_section"))
                             .color(theme.fg_dim)
-                            .size(10.0)
+                            .size(FONT_XS)
                             .strong(),
                     );
                 });
-                ui.add_space(4.0);
+                ui.add_space(SPACE_XS);
 
-                let border = brighter(theme.bg_elevated, 20);
+                let border = theme.input_border;
 
                 // ── Credential rows ──
                 for cred in &self.credentials {
@@ -127,7 +118,7 @@ impl PortalApp {
                         }
                     };
 
-                    let row_h = 52.0;
+                    let row_h = LIST_ROW_HEIGHT;
                     let width = ui.available_width();
                     let (rect, resp) = ui.allocate_exact_size(
                         egui::vec2(width, row_h),
@@ -227,7 +218,7 @@ impl PortalApp {
                             egui::pos2(badge_x, rect.center().y - badge_h / 2.0),
                             egui::vec2(badge_w, badge_h),
                         );
-                        ui.painter().rect_filled(badge_rect, 4.0, theme.accent_alpha(20));
+                        ui.painter().rect_filled(badge_rect, 4.0, theme.badge_bg);
                         ui.painter().galley(
                             egui::pos2(badge_rect.center().x - badge_galley.size().x / 2.0, badge_rect.center().y - badge_galley.size().y / 2.0),
                             badge_galley,
@@ -332,7 +323,7 @@ impl PortalApp {
                 ui.add_space(16.0);
 
                 // Name field
-                ui.label(egui::RichText::new(lang.t("label")).color(theme.fg_dim).size(12.0));
+                ui.label(widgets::field_label(lang.t("label"), &theme));
                 ui.add_space(4.0);
                 ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.name)
                     .desired_width(f32::INFINITY)
@@ -340,7 +331,7 @@ impl PortalApp {
                 ui.add_space(12.0);
 
                 // Type selector
-                ui.label(egui::RichText::new(lang.t("credential_type")).color(theme.fg_dim).size(12.0));
+                ui.label(widgets::field_label(lang.t("credential_type"), &theme));
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.selectable_value(
@@ -359,7 +350,7 @@ impl PortalApp {
                 match self.credential_dialog.cred_type {
                     CredentialTypeChoice::Password => {
                         // Username field
-                        ui.label(egui::RichText::new(lang.t("username")).color(theme.fg_dim).size(12.0));
+                        ui.label(widgets::field_label(lang.t("username"), &theme));
                         ui.add_space(4.0);
                         ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.username)
                             .desired_width(f32::INFINITY)
@@ -367,7 +358,7 @@ impl PortalApp {
                         ui.add_space(12.0);
 
                         // Password field
-                        ui.label(egui::RichText::new(lang.t("password")).color(theme.fg_dim).size(12.0));
+                        ui.label(widgets::field_label(lang.t("password"), &theme));
                         ui.add_space(4.0);
                         ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.password)
                             .desired_width(f32::INFINITY)
@@ -392,7 +383,7 @@ impl PortalApp {
 
                         match self.credential_dialog.key_source {
                             KeySourceChoice::LocalFile => {
-                                ui.label(egui::RichText::new(lang.t("key_path")).color(theme.fg_dim).size(12.0));
+                                ui.label(widgets::field_label(lang.t("key_path"), &theme));
                                 ui.add_space(4.0);
                                 ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.key_path)
                                     .desired_width(f32::INFINITY)
@@ -400,7 +391,7 @@ impl PortalApp {
                                     .font(egui::FontId::proportional(13.0)));
                             }
                             KeySourceChoice::ImportContent => {
-                                ui.label(egui::RichText::new(lang.t("key_content")).color(theme.fg_dim).size(12.0));
+                                ui.label(widgets::field_label(lang.t("key_content"), &theme));
                                 ui.add_space(4.0);
                                 ui.add(egui::TextEdit::multiline(&mut self.credential_dialog.key_content)
                                     .desired_width(f32::INFINITY)
@@ -411,7 +402,7 @@ impl PortalApp {
                         ui.add_space(12.0);
 
                         // Passphrase
-                        ui.label(egui::RichText::new(lang.t("key_passphrase")).color(theme.fg_dim).size(12.0));
+                        ui.label(widgets::field_label(lang.t("key_passphrase"), &theme));
                         ui.add_space(4.0);
                         ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.key_passphrase)
                             .desired_width(f32::INFINITY)
@@ -429,20 +420,10 @@ impl PortalApp {
 
                 // Save / Cancel buttons
                 ui.horizontal(|ui| {
-                    if ui.add(
-                        egui::Button::new(egui::RichText::new(lang.t("save")).color(egui::Color32::WHITE).size(13.0))
-                            .fill(theme.accent)
-                            .rounding(6.0)
-                            .min_size(egui::vec2(70.0, 32.0))
-                    ).clicked() {
+                    if ui.add(widgets::primary_button(lang.t("save"), &theme)).clicked() {
                         save_clicked = true;
                     }
-                    if ui.add(
-                        egui::Button::new(egui::RichText::new(lang.t("cancel")).color(theme.fg_dim).size(13.0))
-                            .fill(theme.bg_elevated)
-                            .rounding(6.0)
-                            .min_size(egui::vec2(70.0, 32.0))
-                    ).clicked() {
+                    if ui.add(widgets::secondary_button(lang.t("cancel"), &theme)).clicked() {
                         close_clicked = true;
                     }
                 });
@@ -597,19 +578,7 @@ impl PortalApp {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .fixed_size([340.0, 0.0])
             .title_bar(false)
-            .frame(egui::Frame {
-                fill: self.theme.bg_secondary,
-                rounding: egui::Rounding::same(8.0),
-                inner_margin: egui::Margin::same(20.0),
-                stroke: egui::Stroke::new(1.0, self.theme.border),
-                shadow: egui::epaint::Shadow {
-                    offset: egui::vec2(0.0, 4.0),
-                    blur: 20.0,
-                    spread: 2.0,
-                    color: egui::Color32::from_black_alpha(80),
-                },
-                ..Default::default()
-            })
+            .frame(widgets::dialog_frame(&self.theme))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("\u{26A0}").size(18.0).color(self.theme.red));
@@ -631,20 +600,10 @@ impl PortalApp {
 
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(
-                            egui::Button::new(egui::RichText::new(lang.t("delete")).color(egui::Color32::WHITE).size(13.0))
-                                .fill(self.theme.red)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                        ).clicked() {
+                        if ui.add(widgets::danger_button(lang.t("delete"), &self.theme)).clicked() {
                             self.execute_keychain_delete();
                         }
-                        if ui.add(
-                            egui::Button::new(egui::RichText::new(lang.t("cancel")).color(self.theme.fg_dim).size(13.0))
-                                .fill(self.theme.bg_elevated)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                        ).clicked() {
+                        if ui.add(widgets::secondary_button(lang.t("cancel"), &self.theme)).clicked() {
                             self.keychain_confirm_delete = None;
                         }
                     });

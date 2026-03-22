@@ -3,8 +3,8 @@ use uuid::Uuid;
 
 use crate::app::PortalApp;
 use crate::config::{self, Snippet};
-use crate::ui::theme::brighter;
 use crate::ui::types::AppView;
+use crate::ui::widgets;
 
 impl PortalApp {
     pub fn show_snippets_view(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -25,22 +25,10 @@ impl PortalApp {
                 // ── Page header ──
                 ui.horizontal(|ui| {
                     ui.add_space(24.0);
-                    ui.label(
-                        egui::RichText::new(lang.t("snippets"))
-                            .color(theme.fg_dim)
-                            .size(12.0)
-                            .strong(),
-                    );
+                    ui.label(widgets::section_header(lang.t("snippets"), &theme));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(24.0);
-                        if ui.add(
-                            egui::Button::new(
-                                egui::RichText::new(lang.t("new_snippet"))
-                                    .color(theme.accent)
-                                    .size(12.0),
-                            )
-                            .frame(false)
-                        ).clicked() {
+                        if ui.add(widgets::text_button(lang.t("new_snippet"), theme.accent)).clicked() {
                             self.snippet_view_state.show_new = true;
                             self.snippet_view_state.new_name.clear();
                             self.snippet_view_state.new_command.clear();
@@ -88,11 +76,7 @@ impl PortalApp {
                             ui.add_space(8.0);
 
                             ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new(lang.t("snippet_name"))
-                                        .color(theme.fg_dim)
-                                        .size(12.0),
-                                );
+                                ui.label(widgets::field_label(lang.t("snippet_name"), &theme));
                                 ui.add_sized(
                                     [200.0, 24.0],
                                     egui::TextEdit::singleline(&mut self.snippet_view_state.new_name)
@@ -100,11 +84,7 @@ impl PortalApp {
                                         .font(egui::FontId::proportional(13.0)),
                                 );
                                 ui.add_space(16.0);
-                                ui.label(
-                                    egui::RichText::new(lang.t("snippet_group"))
-                                        .color(theme.fg_dim)
-                                        .size(12.0),
-                                );
+                                ui.label(widgets::field_label(lang.t("snippet_group"), &theme));
                                 ui.add_sized(
                                     [120.0, 24.0],
                                     egui::TextEdit::singleline(&mut self.snippet_view_state.new_group)
@@ -114,11 +94,7 @@ impl PortalApp {
                             });
                             ui.add_space(4.0);
 
-                            ui.label(
-                                egui::RichText::new(lang.t("snippet_command"))
-                                    .color(theme.fg_dim)
-                                    .size(12.0),
-                            );
+                            ui.label(widgets::field_label(lang.t("snippet_command"), &theme));
                             ui.add_sized(
                                 [ui.available_width(), 60.0],
                                 egui::TextEdit::multiline(&mut self.snippet_view_state.new_command)
@@ -130,14 +106,7 @@ impl PortalApp {
 
                             ui.horizontal(|ui| {
                                 if ui.add(
-                                    egui::Button::new(
-                                        egui::RichText::new(lang.t("save"))
-                                            .color(egui::Color32::WHITE)
-                                            .size(12.0),
-                                    )
-                                    .fill(theme.accent)
-                                    .rounding(6.0)
-                                    .min_size(egui::vec2(60.0, 28.0))
+                                    widgets::primary_button(lang.t("save"), &theme)
                                 ).clicked() && !self.snippet_view_state.new_name.trim().is_empty() {
                                     let group = if self.snippet_view_state.new_group.trim().is_empty() {
                                         lang.t("snippet_default_group").to_string()
@@ -153,14 +122,7 @@ impl PortalApp {
                                 }
                                 ui.add_space(8.0);
                                 if ui.add(
-                                    egui::Button::new(
-                                        egui::RichText::new(lang.t("cancel"))
-                                            .color(theme.fg_dim)
-                                            .size(12.0),
-                                    )
-                                    .fill(theme.bg_secondary)
-                                    .rounding(6.0)
-                                    .min_size(egui::vec2(60.0, 28.0))
+                                    widgets::secondary_button(lang.t("cancel"), &theme)
                                 ).clicked() {
                                     self.snippet_view_state.show_new = false;
                                 }
@@ -244,7 +206,7 @@ impl PortalApp {
                         ui.horizontal(|ui| {
                             ui.add_space(24.0);
                             egui::Frame {
-                                fill: if is_editing { theme.bg_elevated } else { brighter(theme.bg_primary, 8) },
+                                fill: if is_editing { theme.bg_elevated } else { theme.card_bg },
                                 rounding: egui::Rounding::same(6.0),
                                 inner_margin: egui::Margin::same(12.0),
                                 stroke: if is_editing {
@@ -260,11 +222,7 @@ impl PortalApp {
                                 if is_editing {
                                     // ── Inline edit form ──
                                     ui.horizontal(|ui| {
-                                        ui.label(
-                                            egui::RichText::new(lang.t("snippet_name"))
-                                                .color(theme.fg_dim)
-                                                .size(12.0),
-                                        );
+                                        ui.label(widgets::field_label(lang.t("snippet_name"), &theme));
                                         ui.add_sized(
                                             [200.0, 24.0],
                                             egui::TextEdit::singleline(&mut self.snippet_view_state.edit_name)
@@ -272,11 +230,7 @@ impl PortalApp {
                                                 .font(egui::FontId::proportional(13.0)),
                                         );
                                         ui.add_space(16.0);
-                                        ui.label(
-                                            egui::RichText::new(lang.t("snippet_group"))
-                                                .color(theme.fg_dim)
-                                                .size(12.0),
-                                        );
+                                        ui.label(widgets::field_label(lang.t("snippet_group"), &theme));
                                         ui.add_sized(
                                             [120.0, 24.0],
                                             egui::TextEdit::singleline(&mut self.snippet_view_state.edit_group)
@@ -286,11 +240,7 @@ impl PortalApp {
                                     });
                                     ui.add_space(4.0);
 
-                                    ui.label(
-                                        egui::RichText::new(lang.t("snippet_command"))
-                                            .color(theme.fg_dim)
-                                            .size(12.0),
-                                    );
+                                    ui.label(widgets::field_label(lang.t("snippet_command"), &theme));
                                     ui.add_sized(
                                         [ui.available_width(), 60.0],
                                         egui::TextEdit::multiline(&mut self.snippet_view_state.edit_command)
@@ -302,14 +252,7 @@ impl PortalApp {
 
                                     ui.horizontal(|ui| {
                                         if ui.add(
-                                            egui::Button::new(
-                                                egui::RichText::new(lang.t("save"))
-                                                    .color(egui::Color32::WHITE)
-                                                    .size(12.0),
-                                            )
-                                            .fill(theme.accent)
-                                            .rounding(6.0)
-                                            .min_size(egui::vec2(60.0, 28.0))
+                                            widgets::primary_button(lang.t("save"), &theme)
                                         ).clicked() && !self.snippet_view_state.edit_name.trim().is_empty() {
                                             let group = if self.snippet_view_state.edit_group.trim().is_empty() {
                                                 lang.t("snippet_default_group").to_string()
@@ -325,14 +268,7 @@ impl PortalApp {
                                         }
                                         ui.add_space(8.0);
                                         if ui.add(
-                                            egui::Button::new(
-                                                egui::RichText::new(lang.t("cancel"))
-                                                    .color(theme.fg_dim)
-                                                    .size(12.0),
-                                            )
-                                            .fill(theme.bg_secondary)
-                                            .rounding(6.0)
-                                            .min_size(egui::vec2(60.0, 28.0))
+                                            widgets::secondary_button(lang.t("cancel"), &theme)
                                         ).clicked() {
                                             self.snippet_view_state.editing = None;
                                         }
@@ -368,24 +304,10 @@ impl PortalApp {
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             // Delete button / confirmation
                                             if is_confirming_delete {
-                                                if ui.add(
-                                                    egui::Button::new(
-                                                        egui::RichText::new(lang.t("cancel"))
-                                                            .color(theme.fg_dim)
-                                                            .size(11.0),
-                                                    )
-                                                    .frame(false)
-                                                ).clicked() {
+                                                if ui.add(widgets::text_button(lang.t("cancel"), theme.fg_dim)).clicked() {
                                                     self.snippet_view_state.confirm_delete = None;
                                                 }
-                                                if ui.add(
-                                                    egui::Button::new(
-                                                        egui::RichText::new(lang.t("delete"))
-                                                            .color(theme.red)
-                                                            .size(11.0),
-                                                    )
-                                                    .frame(false)
-                                                ).clicked() {
+                                                if ui.add(widgets::text_button(lang.t("delete"), theme.red)).clicked() {
                                                     snippet_to_delete = Some(snippet.id.clone());
                                                 }
                                                 ui.label(
@@ -394,26 +316,12 @@ impl PortalApp {
                                                         .size(11.0),
                                                 );
                                             } else {
-                                                if ui.add(
-                                                    egui::Button::new(
-                                                        egui::RichText::new(lang.t("delete"))
-                                                            .color(theme.fg_dim)
-                                                            .size(11.0),
-                                                    )
-                                                    .frame(false)
-                                                ).clicked() {
+                                                if ui.add(widgets::text_button(lang.t("delete"), theme.fg_dim)).clicked() {
                                                     self.snippet_view_state.confirm_delete = Some(snippet.id.clone());
                                                 }
 
                                                 // Edit button
-                                                if ui.add(
-                                                    egui::Button::new(
-                                                        egui::RichText::new(lang.t("edit_file"))
-                                                            .color(theme.fg_dim)
-                                                            .size(11.0),
-                                                    )
-                                                    .frame(false)
-                                                ).clicked() {
+                                                if ui.add(widgets::text_button(lang.t("edit_file"), theme.fg_dim)).clicked() {
                                                     self.snippet_view_state.editing = Some(snippet.id.clone());
                                                     self.snippet_view_state.edit_name = snippet.name.clone();
                                                     self.snippet_view_state.edit_command = snippet.command.clone();
@@ -428,7 +336,7 @@ impl PortalApp {
                                                             .size(11.0)
                                                             .strong(),
                                                     )
-                                                    .fill(theme.accent_alpha(25))
+                                                    .fill(theme.badge_bg)
                                                     .rounding(4.0)
                                                     .min_size(egui::vec2(48.0, 24.0))
                                                 ).clicked() {
