@@ -94,6 +94,7 @@ impl PortalApp {
             use cocoa::appkit::NSApp;
             use cocoa::base::{id, YES};
 
+            #[allow(unexpected_cfgs)]  // Suppress warning from objc crate's msg_send! macro
             unsafe {
                 let app: id = NSApp();
                 // Force the app to be active and show in Dock
