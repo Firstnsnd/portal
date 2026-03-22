@@ -9,53 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfontconfig1-dev
-
-      - name: Install cargo-deb
-        run: cargo install cargo-deb
-
-      - name: Install cargo-generate-rpm
-        run: cargo install cargo-generate-rpm
-
-      - name: Clean build cache
-        run: cargo clean
-
-      - name: Build release
-        run: cargo build --release
-
-      - name: Build .deb package
-        run: |
-          cargo deb --no-build
-          DEB_FILE=$(ls target/debian/portal_*.deb | head -1)
-          cp "$DEB_FILE" "portal-linux-deb.deb"
-
-      - name: Build .rpm package
-        run: |
-          cargo generate-rpm --no-build
-          RPM_FILE=$(ls target/generate-rpm/portal-*.rpm | head -1)
-          cp "$RPM_FILE" "portal-linux-rpm.rpm"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-packages
-          path: |
-            portal-linux-deb.deb
-            portal-linux-rpm.rpm
-
   build-macos:
-    needs: build-linux
     strategy:
       matrix:
         include:
@@ -91,16 +45,10 @@ jobs:
           path: Portal-macos-${{ matrix.name }}.dmg
 
   release:
-    needs: [build-linux, build-macos]
+    needs: build-macos
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-packages
-          path: ./artifacts
 
       - name: Download macOS x86_64 artifact
         uses: actions/download-artifact@v4
