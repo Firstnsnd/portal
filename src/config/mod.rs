@@ -98,6 +98,54 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+// ── Port Forward Config Types ─────────────────────────────────────
+// Defined here so both config and ssh modules can use them without circular deps.
+
+/// Forward direction
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ForwardKind {
+    /// -L: listen locally, forward to remote
+    Local,
+    /// -R: listen on remote, forward to local
+    Remote,
+}
+
+impl std::fmt::Display for ForwardKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ForwardKind::Local => write!(f, "L"),
+            ForwardKind::Remote => write!(f, "R"),
+        }
+    }
+}
+
+/// Persistent configuration for one port forward rule
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortForwardConfig {
+    pub kind: ForwardKind,
+    pub local_host: String,
+    pub local_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+}
+
+impl std::fmt::Display for PortForwardConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            ForwardKind::Local => write!(
+                f,
+                "-L {}:{}:{}:{}",
+                self.local_host, self.local_port, self.remote_host, self.remote_port
+            ),
+            ForwardKind::Remote => write!(
+                f,
+                "-R {}:{}:{}:{}",
+                self.remote_host, self.remote_port, self.local_host, self.local_port
+            ),
+        }
+    }
+}
 use uuid::Uuid;
 
 /// Authentication method for SSH connections (LEGACY — kept for migration/fallback)
@@ -209,6 +257,10 @@ pub struct HostEntry {
     pub startup_commands: Vec<String>,
     #[serde(default)]
     pub agent_forwarding: bool,
+    #[serde(default)]
+    pub jump_host: Option<String>,
+    #[serde(default)]
+    pub port_forwards: Vec<PortForwardConfig>,
 }
 
 fn default_port() -> u16 {
@@ -229,6 +281,8 @@ impl HostEntry {
             auth: AuthMethod::None,
             startup_commands: Vec::new(),
             agent_forwarding: false,
+            jump_host: None,
+            port_forwards: Vec::new(),
         }
     }
 
@@ -245,6 +299,8 @@ impl HostEntry {
             auth: AuthMethod::None,
             startup_commands,
             agent_forwarding: false,
+            jump_host: None,
+            port_forwards: Vec::new(),
         }
     }
 }

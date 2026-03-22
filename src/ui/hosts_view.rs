@@ -1125,6 +1125,151 @@ impl PortalApp {
 
                         ui.add_space(8.0);
 
+                        // Jump Host
+                        ui.label(egui::RichText::new(lang.t("jump_host")).color(theme.fg_dim).size(12.0));
+                        let current_label = self.add_host_dialog.jump_host
+                            .as_deref()
+                            .unwrap_or(lang.t("jump_host_none"));
+                        let editing_name = self.add_host_dialog.name.clone();
+                        egui::ComboBox::from_id_salt("jump_host_combo")
+                            .selected_text(current_label)
+                            .width(ui.available_width() - 8.0)
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(self.add_host_dialog.jump_host.is_none(), lang.t("jump_host_none")).clicked() {
+                                    self.add_host_dialog.jump_host = None;
+                                }
+                                for h in &self.hosts {
+                                    if h.is_local || h.name == editing_name {
+                                        continue;
+                                    }
+                                    let selected = self.add_host_dialog.jump_host.as_deref() == Some(&h.name);
+                                    if ui.selectable_label(selected, &h.name).clicked() {
+                                        self.add_host_dialog.jump_host = Some(h.name.clone());
+                                    }
+                                }
+                            });
+                        ui.label(egui::RichText::new(lang.t("jump_host_desc")).color(theme.fg_dim).size(11.0));
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        // Port forwards section
+                        ui.label(egui::RichText::new(lang.t("port_forwards")).color(theme.fg_dim).size(12.0));
+                        ui.add_space(4.0);
+
+                        // List existing port forwards
+                        let mut remove_fwd_idx = None;
+                        for (fi, fwd) in self.add_host_dialog.port_forwards.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                let kind_label = match fwd.kind {
+                                    crate::config::ForwardKind::Local => "L",
+                                    crate::config::ForwardKind::Remote => "R",
+                                };
+                                ui.label(egui::RichText::new(kind_label).color(theme.accent).size(11.0).strong());
+                                ui.label(egui::RichText::new(format!(
+                                    "{}:{} -> {}:{}",
+                                    fwd.local_host, fwd.local_port,
+                                    fwd.remote_host, fwd.remote_port
+                                )).color(theme.fg_primary).size(11.0));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.add(
+                                        egui::Button::new(egui::RichText::new("✕").color(theme.red).size(11.0))
+                                            .frame(false)
+                                    ).clicked() {
+                                        remove_fwd_idx = Some(fi);
+                                    }
+                                });
+                            });
+                        }
+                        if let Some(idx) = remove_fwd_idx {
+                            self.add_host_dialog.port_forwards.remove(idx);
+                        }
+
+                        ui.add_space(4.0);
+
+                        // Add new forward form
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut self.add_host_dialog.new_forward_kind,
+                                crate::config::ForwardKind::Local,
+                                egui::RichText::new(lang.t("local_forward")).size(11.0),
+                            );
+                            ui.selectable_value(
+                                &mut self.add_host_dialog.new_forward_kind,
+                                crate::config::ForwardKind::Remote,
+                                egui::RichText::new(lang.t("remote_forward")).size(11.0),
+                            );
+                        });
+                        ui.add_space(4.0);
+
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(lang.t("forward_local_host")).color(theme.fg_dim).size(10.0));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_local_host)
+                                        .desired_width(100.0)
+                                        .text_color(theme.fg_primary)
+                                        .font(egui::TextStyle::Small)
+                                );
+                            });
+                            ui.add_space(4.0);
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(lang.t("forward_local_port")).color(theme.fg_dim).size(10.0));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_local_port)
+                                        .desired_width(50.0)
+                                        .text_color(theme.fg_primary)
+                                        .font(egui::TextStyle::Small)
+                                );
+                            });
+                        });
+                        ui.add_space(2.0);
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(lang.t("forward_remote_host")).color(theme.fg_dim).size(10.0));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_remote_host)
+                                        .desired_width(100.0)
+                                        .text_color(theme.fg_primary)
+                                        .font(egui::TextStyle::Small)
+                                );
+                            });
+                            ui.add_space(4.0);
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(lang.t("forward_remote_port")).color(theme.fg_dim).size(10.0));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_remote_port)
+                                        .desired_width(50.0)
+                                        .text_color(theme.fg_primary)
+                                        .font(egui::TextStyle::Small)
+                                );
+                            });
+                        });
+                        ui.add_space(4.0);
+                        if ui.add(
+                            egui::Button::new(egui::RichText::new(lang.t("add_forward")).color(theme.accent).size(11.0))
+                                .frame(false)
+                        ).clicked() {
+                            let lp: u16 = self.add_host_dialog.new_forward_local_port.trim().parse().unwrap_or(0);
+                            let rp: u16 = self.add_host_dialog.new_forward_remote_port.trim().parse().unwrap_or(0);
+                            if lp > 0 && rp > 0 {
+                                self.add_host_dialog.port_forwards.push(
+                                    crate::config::PortForwardConfig {
+                                        kind: self.add_host_dialog.new_forward_kind.clone(),
+                                        local_host: self.add_host_dialog.new_forward_local_host.trim().to_owned(),
+                                        local_port: lp,
+                                        remote_host: self.add_host_dialog.new_forward_remote_host.trim().to_owned(),
+                                        remote_port: rp,
+                                    }
+                                );
+                                self.add_host_dialog.new_forward_local_port.clear();
+                                self.add_host_dialog.new_forward_remote_port.clear();
+                            }
+                        }
+
+                        ui.add_space(8.0);
+
                         if !self.add_host_dialog.error.is_empty() {
                             ui.label(egui::RichText::new(&self.add_host_dialog.error).color(theme.red).size(12.0));
                         }
@@ -1397,6 +1542,8 @@ impl PortalApp {
             );
 
             entry.agent_forwarding = self.add_host_dialog.agent_forwarding;
+            entry.jump_host = self.add_host_dialog.jump_host.clone();
+            entry.port_forwards = self.add_host_dialog.port_forwards.clone();
 
             // Parse tags from comma-separated string
             let tags: Vec<String> = self.add_host_dialog.tags

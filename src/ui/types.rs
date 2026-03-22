@@ -63,7 +63,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::config::{HostEntry, ResolvedAuth};
-use crate::ssh::{SshSession, SshConnectionState};
+use crate::ssh::{SshSession, SshConnectionState, JumpHostInfo};
 use crate::terminal::{TerminalGrid, RealPtySession};
 
 /// Broadcast state - for Tab-internal continuous interactive batch operations
@@ -251,6 +251,15 @@ pub struct AddHostDialog {
     pub show_remove_key_button: bool,
     /// Message to display after removing a key
     pub remove_key_message: String,
+    pub jump_host: Option<String>,
+    /// Port forward rules configured for this host
+    pub port_forwards: Vec<crate::config::PortForwardConfig>,
+    /// Editing state for a new port forward being added
+    pub new_forward_kind: crate::config::ForwardKind,
+    pub new_forward_local_host: String,
+    pub new_forward_local_port: String,
+    pub new_forward_remote_host: String,
+    pub new_forward_remote_port: String,
 }
 
 /// Key source choice for SSH key authentication
@@ -288,6 +297,13 @@ impl Default for AddHostDialog {
             test_conn_result: None,
             show_remove_key_button: false,
             remove_key_message: String::new(),
+            jump_host: None,
+            port_forwards: Vec::new(),
+            new_forward_kind: crate::config::ForwardKind::Local,
+            new_forward_local_host: "127.0.0.1".to_owned(),
+            new_forward_local_port: String::new(),
+            new_forward_remote_host: "127.0.0.1".to_owned(),
+            new_forward_remote_port: String::new(),
         }
     }
 }
@@ -313,6 +329,8 @@ impl AddHostDialog {
         self.tags = host.tags.join(", ");
         self.startup_commands = host.startup_commands.join("\n");
         self.agent_forwarding = host.agent_forwarding;
+        self.jump_host = host.jump_host.clone();
+        self.port_forwards = host.port_forwards.clone();
         self.error = String::new();
 
         // Set credential mode based on host state
@@ -485,7 +503,7 @@ impl TerminalSession {
         }
     }
 
-    pub fn new_ssh(host: &HostEntry, auth: ResolvedAuth, runtime: &tokio::runtime::Runtime) -> Self {
+    pub fn new_ssh(host: &HostEntry, auth: ResolvedAuth, runtime: &tokio::runtime::Runtime, jump_host: Option<JumpHostInfo>) -> Self {
         // Use current system user if username is empty
         let username = Self::get_effective_username(&host.username);
 
@@ -517,6 +535,8 @@ impl TerminalSession {
             scrollback_bytes,
             settings.ssh_keepalive_interval,
             host.agent_forwarding,
+            host.port_forwards.clone(),
+            jump_host,
         );
         let grid = ssh.get_grid();
         Self {
@@ -563,7 +583,7 @@ impl TerminalSession {
     }
 
     /// Reconnect a disconnected SSH session
-    pub fn reconnect_ssh(&mut self, runtime: &tokio::runtime::Runtime) {
+    pub fn reconnect_ssh(&mut self, runtime: &tokio::runtime::Runtime, jump_host: Option<JumpHostInfo>) {
         if let (Some(ref host), Some(ref auth)) = (&self.ssh_host, &self.resolved_auth) {
             let settings = crate::config::load_settings();
             let ssh = SshSession::connect(
@@ -577,6 +597,7 @@ impl TerminalSession {
                 host.startup_commands.clone(),
                 settings.ssh_keepalive_interval,
                 host.agent_forwarding,
+                jump_host,
             );
             self.grid = ssh.get_grid();
             self.session = Some(SessionBackend::Ssh(ssh));
