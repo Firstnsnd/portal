@@ -9,6 +9,24 @@
 
 ---
 
+## 🛠️ 技术栈
+
+### 当前使用
+- **语言**: Rust
+- **GUI**: egui 0.29 (即时模式渲染)
+- **窗口**: eframe
+- **异步**: tokio
+- **PTY**: pty crate (Unix)
+- **终端解析**: vte 0.11
+- **SSH**: russh 0.57 (纯 Rust, tokio-native)
+- **宽字符**: unicode-width 0.2
+- **剪贴板**: arboard 3.4
+- **凭据存储**: keyring 3 + apple-native (macOS Keychain)
+- **序列化**: serde + serde_json
+- **配置目录**: dirs 5.0
+
+---
+
 ## ✅ 已完成功能
 
 ### 核心架构
@@ -103,6 +121,7 @@
 - [x] **广播模式** — 向多个终端同时发送命令
 - [x] **多语言支持 (i18n)** — 中文 / 日文 / 韩文
 
+
 ### 打包分发
 - [x] **macOS .dmg 安装包** — cargo-bundle + hdiutil 一键打包脚本 (scripts/build-dmg.sh)
 
@@ -173,6 +192,14 @@
    - 或使用 egui Painter 直接绘制字符
 2. **CJK 字符对齐** — 比例字体回退下宽字符可能与等宽网格微有偏差
 
+
+### 未来考虑
+- **高亮**: syntect (已集成)
+- **打包**: cargo-bundle (macOS .app) + hdiutil (.dmg)
+
+### 已集成
+- **密码安全存储**: keyring 3 + apple-native (macOS Keychain, per-host service name)
+
 ---
 
 ## 📊 开发优先级
@@ -196,31 +223,6 @@
 1. 隧道管理 UI
 2. 脚本自动化
 3. 云同步配置
-
----
-
-## 🛠️ 技术栈
-
-### 当前使用
-- **语言**: Rust
-- **GUI**: egui 0.29 (即时模式渲染)
-- **窗口**: eframe
-- **异步**: tokio
-- **PTY**: pty crate (Unix)
-- **终端解析**: vte 0.11
-- **SSH**: russh 0.57 (纯 Rust, tokio-native)
-- **宽字符**: unicode-width 0.2
-- **剪贴板**: arboard 3.4
-- **凭据存储**: keyring 3 + apple-native (macOS Keychain)
-- **序列化**: serde + serde_json
-- **配置目录**: dirs 5.0
-
-### 未来考虑
-- **高亮**: syntect (已集成)
-- **打包**: cargo-bundle (macOS .app) + hdiutil (.dmg)
-
-### 已集成
-- **密码安全存储**: keyring 3 + apple-native (macOS Keychain, per-host service name)
 
 ---
 
