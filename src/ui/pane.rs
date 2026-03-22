@@ -210,6 +210,8 @@ pub struct TabDragState {
     pub target_index: Option<usize>,
     pub ghost_title: String,
     pub ghost_size: egui::Vec2,
+    /// Insert position: true = insert before target, false = insert after target
+    pub insert_before: bool,
 }
 
 /// A tab that has been detached into its own OS window (full UI)

@@ -341,9 +341,15 @@ impl eframe::App for PortalApp {
                                             if let Some(src) = dw.tab_drag.source_index {
                                                 if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                                                     dw.tab_drag.target_index = None;
+                                                    dw.tab_drag.insert_before = true;
+
+                                                    // Check if hovering over a tab
                                                     for (ti, rect) in tab_rects.iter().enumerate() {
                                                         if rect.contains(pos) && Some(ti) != dw.tab_drag.source_index {
                                                             dw.tab_drag.target_index = Some(ti);
+                                                            // Determine insert position based on which side of the tab we're on
+                                                            let center_x = rect.center().x;
+                                                            dw.tab_drag.insert_before = pos.x < center_x;
                                                             break;
                                                         }
                                                     }
@@ -381,29 +387,24 @@ impl eframe::App for PortalApp {
 
                                                 if ctx.input(|i| i.pointer.any_released()) {
                                                     if let Some(dst) = dw.tab_drag.target_index {
-                                                        // Dropping on another tab → merge
+                                                        // Dropping on/next to another tab → reorder
                                                         if src != dst && src < dw.tabs.len() && dst < dw.tabs.len() {
-                                                            let mut src_tab = dw.tabs.remove(src);
-                                                            let dst = if src < dst { dst - 1 } else { dst };
-                                                            let dst_tab = &mut dw.tabs[dst];
-                                                            let offset = dst_tab.sessions.len();
-                                                            src_tab.layout.offset_indices(offset);
-                                                            dst_tab.sessions.extend(src_tab.sessions);
-                                                            let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
-                                                            dst_tab.layout = PaneNode::Split {
-                                                                direction: SplitDirection::Horizontal,
-                                                                ratio: 0.5,
-                                                                first: Box::new(old_layout),
-                                                                second: Box::new(src_tab.layout),
+                                                            let src_tab = dw.tabs.remove(src);
+                                                            // Calculate insertion index
+                                                            let insert_idx = if dw.tab_drag.insert_before {
+                                                                if src < dst { dst - 1 } else { dst }
+                                                            } else {
+                                                                if src < dst { dst } else { dst + 1 }
                                                             };
-                                                            // Update active_tab
+                                                            dw.tabs.insert(insert_idx, src_tab);
+
+                                                            // Update active_tab if needed
                                                             if dw.active_tab == src {
-                                                                dw.active_tab = dst;
-                                                            } else if dw.active_tab > src && dw.active_tab > 0 {
-                                                                dw.active_tab -= 1;
-                                                            }
-                                                            if dw.active_tab >= dw.tabs.len() {
-                                                                dw.active_tab = dw.tabs.len().saturating_sub(1);
+                                                                dw.active_tab = insert_idx;
+                                                            } else if src < dw.active_tab && insert_idx >= dw.active_tab {
+                                                                dw.active_tab += 1;
+                                                            } else if src > dw.active_tab && insert_idx <= dw.active_tab {
+                                                                dw.active_tab += 1;
                                                             }
                                                         }
                                                     } else {
@@ -1000,9 +1001,15 @@ impl eframe::App for PortalApp {
                                 if let Some(src) = self.tab_drag.source_index {
                                     if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                                         self.tab_drag.target_index = None;
+                                        self.tab_drag.insert_before = true;
+
+                                        // Check if hovering over a tab
                                         for (i, rect) in tab_rects.iter().enumerate() {
                                             if rect.contains(pos) && Some(i) != self.tab_drag.source_index {
                                                 self.tab_drag.target_index = Some(i);
+                                                // Determine insert position based on which side of the tab we're on
+                                                let center_x = rect.center().x;
+                                                self.tab_drag.insert_before = pos.x < center_x;
                                                 break;
                                             }
                                         }
@@ -1038,33 +1045,27 @@ impl eframe::App for PortalApp {
                                         );
                                     }
 
-                                    // Handle drop → merge source tab into target tab, or detach to new window
+                                    // Handle drop → reorder tabs, or detach to new window if outside
                                     if ctx.input(|i| i.pointer.any_released()) {
                                         if let Some(dst) = self.tab_drag.target_index {
-                                            // Dropping on another tab → merge
+                                            // Dropping on/next to another tab → reorder
                                             if src != dst && src < self.tabs.len() && dst < self.tabs.len() {
-                                                let mut src_tab = self.tabs.remove(src);
-                                                // Adjust dst index after removal
-                                                let dst = if src < dst { dst - 1 } else { dst };
-                                                let dst_tab = &mut self.tabs[dst];
-                                                let offset = dst_tab.sessions.len();
-                                                src_tab.layout.offset_indices(offset);
-                                                dst_tab.sessions.extend(src_tab.sessions);
-                                                let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
-                                                dst_tab.layout = PaneNode::Split {
-                                                    direction: SplitDirection::Horizontal,
-                                                    ratio: 0.5,
-                                                    first: Box::new(old_layout),
-                                                    second: Box::new(src_tab.layout),
+                                                let src_tab = self.tabs.remove(src);
+                                                // Calculate insertion index
+                                                let insert_idx = if self.tab_drag.insert_before {
+                                                    if src < dst { dst - 1 } else { dst }
+                                                } else {
+                                                    if src < dst { dst } else { dst + 1 }
                                                 };
-                                                // Update active_tab
+                                                self.tabs.insert(insert_idx, src_tab);
+
+                                                // Update active_tab if needed
                                                 if self.active_tab == src {
-                                                    self.active_tab = dst;
-                                                } else if self.active_tab > src && self.active_tab > 0 {
-                                                    self.active_tab -= 1;
-                                                }
-                                                if self.active_tab >= self.tabs.len() {
-                                                    self.active_tab = self.tabs.len().saturating_sub(1);
+                                                    self.active_tab = insert_idx;
+                                                } else if src < self.active_tab && insert_idx >= self.active_tab {
+                                                    self.active_tab += 1;
+                                                } else if src > self.active_tab && insert_idx <= self.active_tab {
+                                                    self.active_tab += 1;
                                                 }
                                             }
                                         } else {
