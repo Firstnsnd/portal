@@ -92,6 +92,15 @@ impl eframe::App for PortalApp {
                     self.detached_windows[i].close_requested = true;
                 }
 
+                // Pre-resolve jump host info before mutable borrow of detached_windows
+                let dw_jump_host = {
+                    let dw = &self.detached_windows[i];
+                    let active = dw.active_tab;
+                    dw.tabs.get(active)
+                        .and_then(|tab| tab.sessions.get(tab.focused_session))
+                        .and_then(|s| s.ssh_host.as_ref())
+                        .and_then(|h| self.resolve_jump_host(h))
+                };
                 let dw = &mut self.detached_windows[i];
 
                 // ── Keyboard shortcuts ──
@@ -104,7 +113,7 @@ impl eframe::App for PortalApp {
                         let resolved_auth = tab.sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                         let new_session = if let Some(host) = &ssh_host {
                             let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                            TerminalSession::new_ssh(host, auth, &self.runtime)
+                            TerminalSession::new_ssh(host, auth, &self.runtime, dw_jump_host.clone())
                         } else {
                             let id = dw.next_id;
                             dw.next_id += 1;
@@ -129,7 +138,7 @@ impl eframe::App for PortalApp {
                         let resolved_auth = tab.sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                         let new_session = if let Some(host) = &ssh_host {
                             let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                            TerminalSession::new_ssh(host, auth, &self.runtime)
+                            TerminalSession::new_ssh(host, auth, &self.runtime, dw_jump_host.clone())
                         } else {
                             let id = dw.next_id;
                             dw.next_id += 1;
@@ -741,6 +750,15 @@ impl eframe::App for PortalApp {
 
                 // ── Central Panel ──
                 let dw_view = self.detached_windows[i].current_view;
+                // Pre-resolve jump host info for splits/reconnects in detached windows
+                let dw_jump2 = {
+                    let dw = &self.detached_windows[i];
+                    let active = dw.active_tab;
+                    dw.tabs.get(active)
+                        .and_then(|tab| tab.sessions.get(tab.focused_session))
+                        .and_then(|s| s.ssh_host.as_ref())
+                        .and_then(|h| self.resolve_jump_host(h))
+                };
                 egui::CentralPanel::default()
                     .frame(egui::Frame {
                         fill: self.theme.bg_primary,
@@ -802,7 +820,7 @@ impl eframe::App for PortalApp {
                                             let resolved_auth = dw.tabs[active].sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                                             let new_session = if let Some(host) = &ssh_host {
                                                 let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                                                TerminalSession::new_ssh(host, auth, &self.runtime)
+                                                TerminalSession::new_ssh(host, auth, &self.runtime, dw_jump2.clone())
                                             } else {
                                                 let id = dw.next_id;
                                                 dw.next_id += 1;
@@ -824,7 +842,7 @@ impl eframe::App for PortalApp {
                                             let resolved_auth = dw.tabs[active].sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                                             let new_session = if let Some(host) = &ssh_host {
                                                 let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                                                TerminalSession::new_ssh(host, auth, &self.runtime)
+                                                TerminalSession::new_ssh(host, auth, &self.runtime, dw_jump2.clone())
                                             } else {
                                                 let id = dw.next_id;
                                                 dw.next_id += 1;
@@ -870,8 +888,7 @@ impl eframe::App for PortalApp {
                                             // Remove old SSH host key and reconnect
                                             if let Some(host) = dw.tabs[active].sessions.get(idx).and_then(|s| s.ssh_host.clone()) {
                                                 let _ = crate::ssh::remove_known_hosts_key(&host.host, host.port);
-                                                // Reconnect the SSH session
-                                                dw.tabs[active].sessions[idx].reconnect_ssh(&self.runtime);
+                                                dw.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, dw_jump2.clone());
                                             }
                                         }
                                     }
@@ -1286,7 +1303,9 @@ impl eframe::App for PortalApp {
                                 }
                                 if let Some(i) = tab_to_reconnect {
                                     let si = self.tabs[i].focused_session;
-                                    self.tabs[i].sessions[si].reconnect_ssh(&self.runtime);
+                                    let jump = self.tabs[i].sessions[si].ssh_host.as_ref()
+                                        .and_then(|h| self.resolve_jump_host(h));
+                                    self.tabs[i].sessions[si].reconnect_ssh(&self.runtime, jump);
                                 }
                                 if let Some(i) = tab_to_detach {
                                     self.detach_tab(i);
@@ -1733,8 +1752,8 @@ impl eframe::App for PortalApp {
                                     // Remove old SSH host key and reconnect
                                     if let Some(host) = self.tabs[active].sessions.get(idx).and_then(|s| s.ssh_host.clone()) {
                                         let _ = crate::ssh::remove_known_hosts_key(&host.host, host.port);
-                                        // Reconnect the SSH session
-                                        self.tabs[active].sessions[idx].reconnect_ssh(&self.runtime);
+                                        let jump = self.resolve_jump_host(&host);
+                                        self.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, jump);
                                     }
                                 }
                             }
