@@ -810,11 +810,7 @@ pub fn remove_known_hosts_key(host: &str, port: u16) -> Result<usize, String> {
         // Check if this line matches our host:port
         let matches = if host_pattern.contains(':') {
             // Pattern already includes port like "[host]:port"
-            let expected = if port == 22 {
-                format!("[{}]:{}", host, port)
-            } else {
-                format!("[{}]:{}", host, port)
-            };
+            let expected = format!("[{}]:{}", host, port);
             host_pattern == expected
         } else {
             // Pattern is just hostname or "[hostname]"
