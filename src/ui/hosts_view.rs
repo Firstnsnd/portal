@@ -91,6 +91,9 @@ impl PortalApp {
                 if nav_btn(ui, "\u{2318}", language.t("snippets"), self.current_view == AppView::Snippets) {
                     self.current_view = AppView::Snippets;
                 }
+                if nav_btn(ui, "\u{1f310}", language.t("tunnels"), self.current_view == AppView::Tunnels) {
+                    self.current_view = AppView::Tunnels;
+                }
 
                 // Settings button at bottom - fill remaining space to reach window bottom
                 let available_size = ui.available_size();

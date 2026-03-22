@@ -7,7 +7,7 @@ mod tab_management;
 use crate::config::{HostEntry, Credential, ConnectionRecord, ShortcutAction, Snippet};
 use crate::sftp::{LocalBrowser, SftpBrowser};
 use crate::ui::types::{
-    BatchExecutionState, HostFilter, CredentialDialog, AddHostDialog,
+    BatchExecutionState, HostFilter, CredentialDialog, AddHostDialog, AddTunnelDialog,
     AppView, SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog,
     SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog,
     KeychainDeleteRequest, TerminalSession, SnippetViewState,
@@ -75,6 +75,8 @@ pub struct PortalApp {
     // Keychain
     pub keychain_confirm_delete: Option<KeychainDeleteRequest>,
     pub credential_dialog: CredentialDialog,
+    // Tunnels
+    pub add_tunnel_dialog: AddTunnelDialog,
     // Settings
     pub theme: ThemeColors,
     pub theme_preset: ThemePreset, // For UI selection only, not persisted
@@ -250,6 +252,7 @@ impl PortalApp {
             batch_execution: BatchExecutionState::default(),
             keychain_confirm_delete: None,
             credential_dialog: CredentialDialog::default(),
+            add_tunnel_dialog: AddTunnelDialog::default(),
             theme,
             theme_preset,
             language,
