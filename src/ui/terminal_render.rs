@@ -818,13 +818,23 @@ pub fn render_terminal_session(
         // ## Conversion Rules
         //
         // When clicking on a row:
+        // - If `screen_row < 0` (above visible area): calculate scrollback index from distance above
         // - If `screen_row < offset` (scrollback visible area): return scrollback global index
         // - If `screen_row >= offset` (grid area): return `scrollback_len + local_grid_row`
         //
         // The returned `grid_row_idx` is a **global index** that can be directly stored in `selection.start/end`.
         let pixel_to_cell = |pos: egui::Pos2| -> (usize, usize) {
-            // Calculate screen row from Y position
-            let screen_row = ((pos.y - rect.min.y) / line_height).max(0.0) as usize;
+            // Calculate screen row from Y position (can be negative for positions above rect)
+            let screen_row_float = (pos.y - rect.min.y) / line_height;
+            let screen_row = if screen_row_float < 0.0 {
+                // Position above the terminal rect - calculate scrollback index
+                // The offset increases as we move up, so we need to add to current scrollback offset
+                let rows_above = (-screen_row_float).ceil() as usize;
+                let sb_idx = scrollback_len.saturating_sub(offset + rows_above);
+                return (sb_idx, 0);
+            } else {
+                screen_row_float as usize
+            };
             let screen_row = screen_row.min(new_rows.saturating_sub(1));
 
             // Get the cells for this row to calculate accurate column position
