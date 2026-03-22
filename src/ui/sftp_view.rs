@@ -5,6 +5,7 @@ use crate::sftp::{FileSelection, SftpConnectionState, SftpEntry, SftpEntryKind};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
 use crate::ui::types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog, SftpPanel};
+use crate::ui::tokens::*;
 use crate::ui::widgets;
 
 /// A single entry in a drag payload.
@@ -1599,7 +1600,8 @@ impl PortalApp {
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
-                .fixed_size(egui::vec2(300.0, 0.0))
+                .min_size(egui::vec2(280.0, 0.0))
+                .default_size(egui::vec2(DIALOG_WIDTH_SM, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
                 .frame(widgets::dialog_frame(&self.theme))
@@ -1691,7 +1693,8 @@ impl PortalApp {
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
-                .fixed_size(egui::vec2(300.0, 0.0))
+                .min_size(egui::vec2(280.0, 0.0))
+                .default_size(egui::vec2(DIALOG_WIDTH_SM, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
                 .frame(widgets::dialog_frame(&self.theme))
@@ -1781,7 +1784,8 @@ impl PortalApp {
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
-                .fixed_size(egui::vec2(300.0, 0.0))
+                .min_size(egui::vec2(280.0, 0.0))
+                .default_size(egui::vec2(DIALOG_WIDTH_SM, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
                 .frame(widgets::dialog_frame(&self.theme))
@@ -1877,7 +1881,8 @@ impl PortalApp {
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
-                .fixed_size(egui::vec2(300.0, 0.0))
+                .min_size(egui::vec2(280.0, 0.0))
+                .default_size(egui::vec2(DIALOG_WIDTH_SM, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
                 .frame(widgets::dialog_frame(&self.theme))
@@ -1931,7 +1936,8 @@ impl PortalApp {
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
-                .fixed_size(egui::vec2(400.0, 0.0))
+                .min_size(egui::vec2(280.0, 0.0))
+                .default_size(egui::vec2(400.0, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
                 .frame(widgets::dialog_frame(&self.theme))

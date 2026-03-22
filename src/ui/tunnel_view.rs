@@ -3,6 +3,7 @@ use eframe::egui;
 use crate::app::PortalApp;
 use crate::config::{ForwardKind, PortForwardConfig};
 use crate::ssh::port_forward::ForwardState;
+use crate::ui::tokens::*;
 use crate::ui::types::SessionBackend;
 use crate::ui::widgets;
 
@@ -34,14 +35,14 @@ impl PortalApp {
         egui::ScrollArea::vertical()
             .id_salt("tunnels_page_scroll")
             .show(ui, |ui| {
-                ui.add_space(20.0);
+                ui.add_space(SPACE_2XL / 2.0);
 
                 // ── Page header ──
                 ui.horizontal(|ui| {
-                    ui.add_space(24.0);
+                    ui.add_space(SPACE_XL);
                     ui.label(widgets::section_header(lang.t("tunnels"), &theme));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_space(24.0);
+                        ui.add_space(SPACE_XL);
                         if ui
                             .add(widgets::text_button(&format!("+ {}", lang.t("add_tunnel")), theme.accent))
                             .clicked()
@@ -51,7 +52,7 @@ impl PortalApp {
                         }
                     });
                 });
-                ui.add_space(16.0);
+                ui.add_space(SPACE_LG);
 
                 if tunnels.is_empty() {
                     // ── Empty state ──
@@ -73,11 +74,11 @@ impl PortalApp {
                 } else {
                     // ── Table header ──
                     ui.horizontal(|ui| {
-                        ui.add_space(24.0);
+                        ui.add_space(SPACE_XL);
                         let header_color = theme.fg_dim;
-                        let header_size = 10.0;
+                        let header_size = FONT_XS;
                         ui.allocate_ui_with_layout(
-                            egui::vec2(ui.available_width() - 24.0, 20.0),
+                            egui::vec2(ui.available_width() - SPACE_XL, 20.0),
                             egui::Layout::left_to_right(egui::Align::Center),
                             |ui| {
                                 ui.allocate_ui(egui::vec2(40.0, 20.0), |ui| {
@@ -107,120 +108,116 @@ impl PortalApp {
                     // ── Tunnel rows ──
                     for tunnel in &tunnels {
                         ui.horizontal(|ui| {
-                            ui.add_space(24.0);
-                            let row_width = ui.available_width() - 24.0;
+                            ui.add_space(SPACE_XL);
+                            let row_width = ui.available_width() - SPACE_XL;
                             let (rect, _resp) = ui.allocate_exact_size(
-                                egui::vec2(row_width, 36.0),
+                                egui::vec2(row_width, TABLE_ROW_HEIGHT),
                                 egui::Sense::hover(),
                             );
 
-                            // Row background
+                            // Row background (keep as painter for hover effect)
                             if _resp.hovered() {
-                                ui.painter().rect_filled(rect, 4.0, theme.hover_bg);
+                                ui.painter().rect_filled(rect, RADIUS_SM, theme.hover_bg);
                             }
 
-                            let mut x = rect.min.x + 4.0;
-                            let cy = rect.center().y;
+                            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                            child.add_space(SPACE_XS);
 
-                            // Type badge
-                            let (type_label, type_color) = match tunnel.kind {
-                                ForwardKind::Local => ("L", theme.accent),
-                                ForwardKind::Remote => ("R", theme.green),
-                            };
-                            let badge_rect = egui::Rect::from_min_size(
-                                egui::pos2(x, cy - 9.0),
-                                egui::vec2(22.0, 18.0),
-                            );
-                            ui.painter().rect_filled(badge_rect, 3.0, type_color);
-                            ui.painter().text(
-                                badge_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                type_label,
-                                egui::FontId::monospace(11.0),
-                                egui::Color32::BLACK,
-                            );
-                            x += 40.0;
+                            // Type badge (keep as painter for custom styling)
+                            child.allocate_ui(egui::vec2(40.0, TABLE_ROW_HEIGHT), |ui| {
+                                let (type_label, type_color) = match tunnel.kind {
+                                    ForwardKind::Local => ("L", theme.accent),
+                                    ForwardKind::Remote => ("R", theme.green),
+                                };
+                                let badge_rect = egui::Rect::from_min_size(
+                                    egui::pos2(ui.min_rect().min.x, ui.min_rect().center().y - 9.0),
+                                    egui::vec2(22.0, 18.0),
+                                );
+                                ui.painter().rect_filled(badge_rect, 3.0, type_color);
+                                ui.painter().text(
+                                    badge_rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    type_label,
+                                    egui::FontId::monospace(FONT_SM),
+                                    egui::Color32::BLACK,
+                                );
+                            });
 
                             // Local host:port
-                            ui.painter().text(
-                                egui::pos2(x, cy),
-                                egui::Align2::LEFT_CENTER,
-                                format!("{}:{}", tunnel.local_host, tunnel.local_port),
-                                egui::FontId::monospace(12.0),
-                                theme.fg_primary,
-                            );
-                            x += 140.0;
+                            child.allocate_ui(egui::vec2(140.0, TABLE_ROW_HEIGHT), |ui| {
+                                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    ui.label(
+                                        egui::RichText::new(format!("{}:{}", tunnel.local_host, tunnel.local_port))
+                                            .family(egui::FontFamily::Monospace)
+                                            .size(FONT_MD)
+                                            .color(theme.fg_primary),
+                                    );
+                                });
+                            });
 
                             // Remote host:port
-                            ui.painter().text(
-                                egui::pos2(x, cy),
-                                egui::Align2::LEFT_CENTER,
-                                format!("{}:{}", tunnel.remote_host, tunnel.remote_port),
-                                egui::FontId::monospace(12.0),
-                                theme.fg_primary,
-                            );
-                            x += 140.0;
+                            child.allocate_ui(egui::vec2(140.0, TABLE_ROW_HEIGHT), |ui| {
+                                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    ui.label(
+                                        egui::RichText::new(format!("{}:{}", tunnel.remote_host, tunnel.remote_port))
+                                            .family(egui::FontFamily::Monospace)
+                                            .size(FONT_MD)
+                                            .color(theme.fg_primary),
+                                    );
+                                });
+                            });
 
                             // Host name
-                            ui.painter().text(
-                                egui::pos2(x, cy),
-                                egui::Align2::LEFT_CENTER,
-                                &tunnel.host_name,
-                                egui::FontId::proportional(12.0),
-                                theme.fg_dim,
-                            );
-                            x += 120.0;
+                            child.allocate_ui(egui::vec2(120.0, TABLE_ROW_HEIGHT), |ui| {
+                                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    ui.label(
+                                        egui::RichText::new(&tunnel.host_name)
+                                            .size(FONT_MD)
+                                            .color(theme.fg_dim),
+                                    );
+                                });
+                            });
 
                             // Status badge
-                            let yellow = egui::Color32::from_rgb(224, 175, 50);
-                            let gray = theme.fg_dim;
-                            let (status_text, status_color) = match &tunnel.state {
-                                ForwardState::Active => (lang.t("tunnel_status_active"), theme.green),
-                                ForwardState::Starting => (lang.t("tunnel_status_starting"), yellow),
-                                ForwardState::Stopped => (lang.t("tunnel_status_stopped"), gray),
-                                ForwardState::Error(_) => (lang.t("tunnel_status_error"), theme.red),
-                            };
-                            ui.painter().text(
-                                egui::pos2(x, cy),
-                                egui::Align2::LEFT_CENTER,
-                                status_text,
-                                egui::FontId::proportional(11.0),
-                                status_color,
-                            );
-                            x += 80.0;
+                            child.allocate_ui(egui::vec2(80.0, TABLE_ROW_HEIGHT), |ui| {
+                                let yellow = egui::Color32::from_rgb(224, 175, 50);
+                                let gray = theme.fg_dim;
+                                let (status_text, status_color) = match &tunnel.state {
+                                    ForwardState::Active => (lang.t("tunnel_status_active"), theme.green),
+                                    ForwardState::Starting => (lang.t("tunnel_status_starting"), yellow),
+                                    ForwardState::Stopped => (lang.t("tunnel_status_stopped"), gray),
+                                    ForwardState::Error(_) => (lang.t("tunnel_status_error"), theme.red),
+                                };
+                                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    ui.label(
+                                        egui::RichText::new(status_text)
+                                            .size(FONT_SM)
+                                            .color(status_color),
+                                    );
+                                });
+                            });
 
-                            // Action buttons
-                            let stop_btn_rect = egui::Rect::from_min_size(
-                                egui::pos2(x, cy - 10.0),
-                                egui::vec2(40.0, 20.0),
-                            );
-                            let stop_resp = ui.allocate_rect(stop_btn_rect, egui::Sense::click());
+                            // Action buttons — use egui Button widgets
                             let is_active = matches!(tunnel.state, ForwardState::Active | ForwardState::Starting);
                             let stop_label = if is_active { "\u{25a0}" } else { "\u{25b6}" }; // stop / play
-                            let stop_color = if stop_resp.hovered() { theme.fg_primary } else { theme.fg_dim };
-                            ui.painter().text(
-                                stop_btn_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                stop_label,
-                                egui::FontId::proportional(12.0),
-                                stop_color,
+
+                            let stop_resp = child.add(
+                                egui::Button::new(
+                                    egui::RichText::new(stop_label).size(FONT_MD).color(theme.fg_dim)
+                                )
+                                .frame(false)
+                                .min_size(egui::vec2(40.0, 20.0)),
                             );
                             if stop_resp.clicked() {
                                 stop_actions.push((tunnel.tab_idx, tunnel.session_idx, tunnel.forward_idx));
                             }
 
-                            let del_btn_rect = egui::Rect::from_min_size(
-                                egui::pos2(x + 44.0, cy - 10.0),
-                                egui::vec2(40.0, 20.0),
-                            );
-                            let del_resp = ui.allocate_rect(del_btn_rect, egui::Sense::click());
-                            let del_color = if del_resp.hovered() { theme.red } else { theme.fg_dim };
-                            ui.painter().text(
-                                del_btn_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                "\u{2715}", // X mark
-                                egui::FontId::proportional(12.0),
-                                del_color,
+                            let del_resp = child.add(
+                                egui::Button::new(
+                                    egui::RichText::new("\u{2715}").size(FONT_MD).color(theme.fg_dim)
+                                )
+                                .frame(false)
+                                .min_size(egui::vec2(40.0, 20.0)),
                             );
                             if del_resp.clicked() {
                                 delete_actions.push((tunnel.tab_idx, tunnel.session_idx, tunnel.forward_idx));
@@ -349,7 +346,8 @@ impl PortalApp {
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .fixed_size([360.0, 320.0])
+            .min_size([280.0, 0.0])
+            .default_size([DIALOG_WIDTH_LG, 320.0])
             .frame(widgets::dialog_frame(&theme))
             .show(ctx, |ui| {
                 ui.add_space(4.0);

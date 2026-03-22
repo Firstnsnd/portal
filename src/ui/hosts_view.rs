@@ -7,6 +7,7 @@ use crate::config::HostEntry;
 use crate::ssh::test_connection;
 use crate::ui::types::{AuthMethodChoice, TestConnState, AppView, KeySourceChoice, BatchTarget, BatchStatus, BatchResult, BatchUpdate};
 use crate::ui::i18n::format_time_ago;
+use crate::ui::tokens::*;
 use crate::ui::widgets;
 
 impl PortalApp {
@@ -832,7 +833,7 @@ impl PortalApp {
         let mut test_clicked = false;
 
         egui::SidePanel::right("add_host_drawer")
-            .exact_width(340.0)
+            .exact_width(ctx.screen_rect().width().min(DRAWER_WIDTH).max(280.0))
             .resizable(false)
             .frame(egui::Frame {
                 fill: theme.bg_secondary,
@@ -2108,7 +2109,7 @@ impl PortalApp {
             return;
         }
 
-        let drawer_width = 320.0;
+        let drawer_width = ctx.screen_rect().width().min(320.0).max(280.0);
         egui::SidePanel::right("batch_hosts_drawer")
             .exact_width(drawer_width)
             .resizable(false)
