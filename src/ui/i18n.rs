@@ -128,6 +128,8 @@ impl Language {
                 "credential_existing" => "Existing",
                 "credential_inline" => "New",
                 "select_credential" => "Select Credential",
+                "ssh_keepalive" => "SSH Keepalive Interval",
+                "ssh_keepalive_desc" => "Seconds between keepalive packets (0 = disabled)",
                 _ => "???",
             },
             Language::Chinese => match key {
@@ -249,6 +251,8 @@ impl Language {
                 "credential_existing" => "已有",
                 "credential_inline" => "新建",
                 "select_credential" => "选择凭据",
+                "ssh_keepalive" => "SSH 心跳间隔",
+                "ssh_keepalive_desc" => "心跳包发送间隔秒数（0 = 禁用）",
                 _ => "???",
             },
             Language::Japanese => match key {
@@ -367,6 +371,8 @@ impl Language {
                 "credential_existing" => "既存",
                 "credential_inline" => "新規",
                 "select_credential" => "認証情報を選択",
+                "ssh_keepalive" => "SSH キープアライブ間隔",
+                "ssh_keepalive_desc" => "キープアライブパケットの送信間隔（秒、0 = 無効）",
                 _ => "???",
             },
             Language::Korean => match key {
@@ -484,6 +490,8 @@ impl Language {
                 "credential_existing" => "기존",
                 "credential_inline" => "새로 만들기",
                 "select_credential" => "자격 증명 선택",
+                "ssh_keepalive" => "SSH 연결 유지 간격",
+                "ssh_keepalive_desc" => "연결 유지 패킷 전송 간격 (초, 0 = 비활성화)",
                 _ => "???",
             },
             Language::Spanish => match key {
@@ -600,6 +608,8 @@ impl Language {
                 "credential_existing" => "Existente",
                 "credential_inline" => "Nuevo",
                 "select_credential" => "Seleccionar Credencial",
+                "ssh_keepalive" => "Intervalo de Keepalive SSH",
+                "ssh_keepalive_desc" => "Segundos entre paquetes keepalive (0 = desactivado)",
                 _ => "???",
             },
             Language::Russian => match key {
@@ -716,6 +726,8 @@ impl Language {
                 "credential_existing" => "Существующий",
                 "credential_inline" => "Новый",
                 "select_credential" => "Выбрать Учётные Данные",
+                "ssh_keepalive" => "Интервал SSH Keepalive",
+                "ssh_keepalive_desc" => "Секунды между keepalive-пакетами (0 = отключено)",
                 _ => "???",
             },
             Language::French => match key {
@@ -832,6 +844,8 @@ impl Language {
                 "credential_existing" => "Existant",
                 "credential_inline" => "Nouveau",
                 "select_credential" => "Sélectionner l'Identifiant",
+                "ssh_keepalive" => "Intervalle de Keepalive SSH",
+                "ssh_keepalive_desc" => "Secondes entre les paquets keepalive (0 = désactivé)",
                 _ => "???",
             },
         }

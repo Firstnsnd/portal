@@ -474,6 +474,7 @@ impl TerminalSession {
             24,
             host.startup_commands.clone(),
             scrollback_bytes,
+            settings.ssh_keepalive_interval,
         );
         let grid = ssh.get_grid();
         Self {
@@ -521,6 +522,7 @@ impl TerminalSession {
     /// Reconnect a disconnected SSH session
     pub fn reconnect_ssh(&mut self, runtime: &tokio::runtime::Runtime) {
         if let (Some(ref host), Some(ref auth)) = (&self.ssh_host, &self.resolved_auth) {
+            let settings = crate::config::load_settings();
             let ssh = SshSession::connect(
                 runtime,
                 host.host.clone(),
@@ -530,6 +532,7 @@ impl TerminalSession {
                 self.last_cols as u16,
                 self.last_rows as u16,
                 host.startup_commands.clone(),
+                settings.ssh_keepalive_interval,
             );
             self.grid = ssh.get_grid();
             self.session = Some(SessionBackend::Ssh(ssh));

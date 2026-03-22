@@ -673,6 +673,12 @@ pub struct PortalSettings {
     pub language: String,
     /// Scrollback buffer limit in MB (default: 100MB)
     pub scrollback_limit_mb: u64,
+    #[serde(default = "default_keepalive_interval")]
+    pub ssh_keepalive_interval: u32,
+}
+
+fn default_keepalive_interval() -> u32 {
+    30
 }
 
 impl PortalSettings {
@@ -690,6 +696,7 @@ impl Default for PortalSettings {
             custom_font_path: None,
             language: "en".to_string(),
             scrollback_limit_mb: 100,
+            ssh_keepalive_interval: default_keepalive_interval(),
         }
     }
 }

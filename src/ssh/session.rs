@@ -90,8 +90,14 @@ pub async fn connect_and_authenticate(
     port: u16,
     username: &str,
     auth: &ResolvedAuth,
+    keepalive_interval: u32,
 ) -> Result<russh::client::Handle<SshClient>, String> {
-    let config = Arc::new(russh::client::Config::default());
+    let mut config = russh::client::Config::default();
+    if keepalive_interval > 0 {
+        config.keepalive_interval = Some(std::time::Duration::from_secs(keepalive_interval as u64));
+        config.keepalive_max = 3;
+    }
+    let config = Arc::new(config);
     let addr = format!("{}:{}", host, port);
 
     let mut handle = russh::client::connect(config, &addr, SshClient::new(host, port))
@@ -167,6 +173,7 @@ impl SshSession {
         cols: u16,
         rows: u16,
         startup_commands: Vec<String>,
+        keepalive_interval: u32,
     ) -> Self {
         Self::with_scrollback_limit(
             runtime,
@@ -178,6 +185,7 @@ impl SshSession {
             rows,
             startup_commands,
             crate::terminal::TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES,
+            keepalive_interval,
         )
     }
 
@@ -191,6 +199,7 @@ impl SshSession {
         rows: u16,
         startup_commands: Vec<String>,
         scrollback_limit_bytes: usize,
+        keepalive_interval: u32,
     ) -> Self {
         let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
             cols as usize,
@@ -211,6 +220,7 @@ impl SshSession {
             Self::ssh_task(
                 host, port, username, auth, cols, rows, grid_clone, cmd_rx,
                 state_clone, alive_clone, shell_hint_clone, startup_commands,
+                keepalive_interval,
             )
             .await;
         });
@@ -236,6 +246,7 @@ impl SshSession {
         alive: Arc<AtomicBool>,
         shell_hint: Arc<Mutex<Option<String>>>,
         startup_commands: Vec<String>,
+        keepalive_interval: u32,
     ) {
         let set_state = |s: SshConnectionState| {
             if let Ok(mut st) = state.lock() {
@@ -246,7 +257,7 @@ impl SshSession {
         // 1. Connect + Authenticate using shared helper
         set_state(SshConnectionState::Authenticating);
 
-        let handle = match connect_and_authenticate(&host, port, &username, &auth).await {
+        let handle = match connect_and_authenticate(&host, port, &username, &auth, keepalive_interval).await {
             Ok(h) => h,
             Err(e) => {
                 set_state(SshConnectionState::Error(e));
@@ -429,8 +440,9 @@ pub async fn test_connection(
     port: u16,
     username: String,
     auth: ResolvedAuth,
+    keepalive_interval: u32,
 ) -> Result<String, String> {
-    let _handle = connect_and_authenticate(&host, port, &username, &auth).await?;
+    let _handle = connect_and_authenticate(&host, port, &username, &auth, keepalive_interval).await?;
     Ok("Connection successful! Authentication passed.".to_string())
 }
 

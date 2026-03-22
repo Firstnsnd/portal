@@ -123,6 +123,7 @@ impl PortalApp {
             },
             language: self.language.id().to_string(),
             scrollback_limit_mb: self.scrollback_limit_mb,
+            ssh_keepalive_interval: self.ssh_keepalive_interval,
         };
         crate::config::save_settings(&settings);
     }
@@ -198,6 +199,28 @@ impl PortalApp {
                         changed = true;
                     }
                 });
+
+                ui.add_space(16.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                // ── SSH section ──
+                ui.label(egui::RichText::new("SSH").color(theme.fg_primary).size(14.0).strong());
+                ui.add_space(4.0);
+
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(lang.t("ssh_keepalive")).color(theme.fg_dim).size(12.0));
+                    ui.add_space(8.0);
+                    let slider = ui.add(
+                        egui::Slider::new(&mut self.ssh_keepalive_interval, 0..=300)
+                            .step_by(5.0)
+                            .text("s")
+                    );
+                    if slider.changed() {
+                        changed = true;
+                    }
+                });
+                ui.label(egui::RichText::new(lang.t("ssh_keepalive_desc")).color(theme.fg_dim).size(11.0));
 
                 ui.add_space(16.0);
                 ui.separator();

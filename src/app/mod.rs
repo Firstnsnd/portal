@@ -81,6 +81,7 @@ pub struct PortalApp {
     pub font_size: f32,
     pub custom_font_path: String,
     pub scrollback_limit_mb: u64,
+    pub ssh_keepalive_interval: u32,
     pub fonts_dirty: bool,
     pub visuals_dirty: bool,
 }
@@ -108,6 +109,7 @@ impl PortalApp {
         let font_size = settings.font_size;
         let custom_font_path = settings.custom_font_path.clone().unwrap_or_default();
         let scrollback_limit_mb = settings.scrollback_limit_mb;
+        let ssh_keepalive_interval = settings.ssh_keepalive_interval;
         // Use default theme preset (Tokyo Night)
         let theme_preset = ThemePreset::TokyoNight;
         let theme = theme_preset.colors();
@@ -243,6 +245,7 @@ impl PortalApp {
             font_size,
             custom_font_path,
             scrollback_limit_mb,
+            ssh_keepalive_interval,
             fonts_dirty: false,
             visuals_dirty: true,
         }

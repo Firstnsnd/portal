@@ -1132,7 +1132,8 @@ impl PortalApp {
                 self.add_host_dialog.error.clear();
 
                 self.runtime.spawn(async move {
-                    let result = test_connection(host, port, username, resolved).await;
+                    let settings = crate::config::load_settings();
+                    let result = test_connection(host, port, username, resolved, settings.ssh_keepalive_interval).await;
                     if let Ok(mut guard) = result_arc.lock() {
                         *guard = Some(result);
                     }
