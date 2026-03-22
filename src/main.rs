@@ -31,6 +31,7 @@ impl eframe::App for PortalApp {
             AppView::Hosts => self.language.t("hosts").to_string(),
             AppView::Sftp => self.language.t("sftp").to_string(),
             AppView::Keychain => self.language.t("keychain").to_string(),
+            AppView::Snippets => self.language.t("snippets").to_string(),
             AppView::Settings => self.language.t("settings").to_string(),
             AppView::Batch => "Batch".to_string(),
         };
@@ -81,6 +82,7 @@ impl eframe::App for PortalApp {
                     AppView::Hosts => self.language.t("hosts").to_string(),
                     AppView::Sftp => self.language.t("sftp").to_string(),
                     AppView::Keychain => self.language.t("keychain").to_string(),
+                    AppView::Snippets => self.language.t("snippets").to_string(),
                     AppView::Settings => self.language.t("settings").to_string(),
                     AppView::Batch => "Batch".to_string(),
                 };
@@ -286,6 +288,9 @@ impl eframe::App for PortalApp {
                         }
                         if nav_btn(ui, "\u{1f511}", self.language.t("keychain"), dw.current_view == AppView::Keychain) {
                             dw.current_view = AppView::Keychain;
+                        }
+                        if nav_btn(ui, "\u{2318}", self.language.t("snippets"), dw.current_view == AppView::Snippets) {
+                            dw.current_view = AppView::Snippets;
                         }
 
                         // Settings button at bottom - fill remaining space to reach window bottom
@@ -902,6 +907,9 @@ impl eframe::App for PortalApp {
                             }
                             AppView::Keychain => {
                                 self.show_keychain_view(ctx, ui);
+                            }
+                            AppView::Snippets => {
+                                self.show_snippets_view(ctx, ui);
                             }
                             AppView::Settings => {
                                 self.show_settings_view(ctx, ui);
@@ -1766,6 +1774,10 @@ impl eframe::App for PortalApp {
 
                     AppView::Keychain => {
                         self.show_keychain_view(ctx, ui);
+                    }
+
+                    AppView::Snippets => {
+                        self.show_snippets_view(ctx, ui);
                     }
 
                     AppView::Settings => {

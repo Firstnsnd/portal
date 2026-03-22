@@ -4,13 +4,13 @@
 
 mod tab_management;
 
-use crate::config::{HostEntry, Credential, ConnectionRecord, ShortcutAction};
+use crate::config::{HostEntry, Credential, ConnectionRecord, ShortcutAction, Snippet};
 use crate::sftp::{LocalBrowser, SftpBrowser};
 use crate::ui::types::{
     BatchExecutionState, HostFilter, CredentialDialog, AddHostDialog,
     AppView, SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog,
     SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog,
-    KeychainDeleteRequest, TerminalSession,
+    KeychainDeleteRequest, TerminalSession, SnippetViewState,
 };
 use crate::ui::pane::{Tab, DetachedWindow, TabDragState};
 use crate::ui::input::ShortcutResolver;
@@ -88,6 +88,9 @@ pub struct PortalApp {
     pub connection_history: Vec<ConnectionRecord>,
     pub shortcut_resolver: ShortcutResolver,
     pub recording_shortcut: Option<ShortcutAction>,
+    // Command Snippets
+    pub snippets: Vec<Snippet>,
+    pub snippet_view_state: SnippetViewState,
 }
 
 impl PortalApp {
@@ -190,6 +193,7 @@ impl PortalApp {
         };
 
         let connection_history = crate::config::load_history();
+        let snippets = crate::config::load_snippets();
 
         let hosts_file = crate::config::hosts_file_path();
         let mut hosts = crate::config::load_hosts(&hosts_file);
@@ -258,6 +262,8 @@ impl PortalApp {
             connection_history,
             shortcut_resolver,
             recording_shortcut: None,
+            snippets,
+            snippet_view_state: SnippetViewState::default(),
         }
     }
 }

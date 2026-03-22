@@ -718,6 +718,42 @@ pub fn hosts_file_path() -> PathBuf {
     config_dir().join("hosts.json")
 }
 
+// ── Command Snippets ────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Snippet {
+    pub id: String,         // UUID
+    pub name: String,
+    pub command: String,
+    pub group: String,      // Category group
+}
+
+/// Get the snippets file path
+pub fn snippets_file_path() -> PathBuf {
+    config_dir().join("snippets.json")
+}
+
+/// Load snippets from JSON file. Returns empty vec on error.
+pub fn load_snippets() -> Vec<Snippet> {
+    let path = snippets_file_path();
+    if let Ok(data) = std::fs::read_to_string(&path) {
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Save snippets to JSON file.
+pub fn save_snippets(snippets: &[Snippet]) {
+    let path = snippets_file_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(snippets) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
 // ── Connection History ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

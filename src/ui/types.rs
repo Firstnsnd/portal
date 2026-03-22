@@ -784,6 +784,7 @@ pub enum AppView {
     Terminal,
     Sftp,
     Keychain,
+    Snippets,
     Settings,
     #[allow(dead_code)]
     Batch,
@@ -881,6 +882,37 @@ pub enum CredentialTypeChoice {
 }
 
 
+
+/// Snippet view state for Command Snippets feature
+pub struct SnippetViewState {
+    pub search_query: String,
+    pub editing: Option<String>,  // id of snippet being edited
+    pub edit_name: String,
+    pub edit_command: String,
+    pub edit_group: String,
+    pub show_new: bool,
+    pub new_name: String,
+    pub new_command: String,
+    pub new_group: String,
+    pub confirm_delete: Option<String>,  // id of snippet pending delete confirmation
+}
+
+impl Default for SnippetViewState {
+    fn default() -> Self {
+        Self {
+            search_query: String::new(),
+            editing: None,
+            edit_name: String::new(),
+            edit_command: String::new(),
+            edit_group: String::new(),
+            show_new: false,
+            new_name: String::new(),
+            new_command: String::new(),
+            new_group: String::new(),
+            confirm_delete: None,
+        }
+    }
+}
 
 /// Host filter state for the hosts list view
 #[derive(Default, Clone)]
