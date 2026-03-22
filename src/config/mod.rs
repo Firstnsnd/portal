@@ -658,9 +658,99 @@ pub fn hosts_file_path() -> PathBuf {
     config_dir().join("hosts.json")
 }
 
+// ── Connection History ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionRecord {
+    pub host_name: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub timestamp: u64,
+    pub success: bool,
+}
+
+pub fn history_file_path() -> PathBuf {
+    config_dir().join("history.json")
+}
+
+pub fn load_history() -> Vec<ConnectionRecord> {
+    let path = history_file_path();
+    if let Ok(data) = std::fs::read_to_string(&path) {
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
+
+pub fn save_history(records: &[ConnectionRecord]) {
+    let path = history_file_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(records) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+pub fn append_history(record: ConnectionRecord) {
+    let mut records = load_history();
+    records.push(record);
+    if records.len() > 200 {
+        let drain_count = records.len() - 200;
+        records.drain(..drain_count);
+    }
+    save_history(&records);
+}
+
 /// Get the settings file path
 pub fn settings_file_path() -> PathBuf {
     config_dir().join("settings.json")
+}
+
+// ── Keyboard Shortcuts ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ShortcutAction {
+    SplitHorizontal,
+    SplitVertical,
+    NewTab,
+    CloseTab,
+    ClosePane,
+    NextTab,
+    PrevTab,
+    ToggleBroadcast,
+    Search,
+    Copy,
+    Paste,
+    SelectAll,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyBinding {
+    pub action: ShortcutAction,
+    pub key: String,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+    pub command: bool,
+}
+
+pub fn default_shortcuts() -> Vec<KeyBinding> {
+    vec![
+        KeyBinding { action: ShortcutAction::SplitHorizontal, key: "D".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding { action: ShortcutAction::SplitVertical, key: "D".into(), ctrl: false, alt: false, shift: true, command: true },
+        KeyBinding { action: ShortcutAction::NewTab, key: "T".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding { action: ShortcutAction::CloseTab, key: "W".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding { action: ShortcutAction::ClosePane, key: "W".into(), ctrl: false, alt: false, shift: true, command: true },
+        KeyBinding { action: ShortcutAction::NextTab, key: "RightBracket".into(), ctrl: false, alt: false, shift: true, command: true },
+        KeyBinding { action: ShortcutAction::PrevTab, key: "LeftBracket".into(), ctrl: false, alt: false, shift: true, command: true },
+        KeyBinding { action: ShortcutAction::ToggleBroadcast, key: "I".into(), ctrl: false, alt: false, shift: true, command: true },
+        KeyBinding { action: ShortcutAction::Search, key: "F".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding { action: ShortcutAction::Copy, key: "C".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding { action: ShortcutAction::Paste, key: "V".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding { action: ShortcutAction::SelectAll, key: "A".into(), ctrl: false, alt: false, shift: false, command: true },
+    ]
 }
 
 // ── Portal Settings ────────────────────────────────────────────────
@@ -675,6 +765,8 @@ pub struct PortalSettings {
     pub scrollback_limit_mb: u64,
     #[serde(default = "default_keepalive_interval")]
     pub ssh_keepalive_interval: u32,
+    #[serde(default = "default_shortcuts")]
+    pub keyboard_shortcuts: Vec<KeyBinding>,
 }
 
 fn default_keepalive_interval() -> u32 {
@@ -697,6 +789,7 @@ impl Default for PortalSettings {
             language: "en".to_string(),
             scrollback_limit_mb: 100,
             ssh_keepalive_interval: default_keepalive_interval(),
+            keyboard_shortcuts: default_shortcuts(),
         }
     }
 }

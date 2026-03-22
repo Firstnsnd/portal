@@ -36,6 +36,7 @@ impl PortalApp {
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
         self.current_view = AppView::Terminal;
+        self.connection_history = crate::config::load_history();
     }
 
     /// Split the currently focused pane in the specified direction

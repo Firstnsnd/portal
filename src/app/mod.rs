@@ -4,7 +4,7 @@
 
 mod tab_management;
 
-use crate::config::{HostEntry, Credential};
+use crate::config::{HostEntry, Credential, ConnectionRecord, ShortcutAction};
 use crate::sftp::{LocalBrowser, SftpBrowser};
 use crate::ui::types::{
     BatchExecutionState, HostFilter, CredentialDialog, AddHostDialog,
@@ -13,6 +13,7 @@ use crate::ui::types::{
     KeychainDeleteRequest, TerminalSession,
 };
 use crate::ui::pane::{Tab, DetachedWindow, TabDragState};
+use crate::ui::input::ShortcutResolver;
 use crate::ui::{ThemeColors, ThemePreset, Language};
 use eframe::egui;
 use std::path::PathBuf;
@@ -84,6 +85,9 @@ pub struct PortalApp {
     pub ssh_keepalive_interval: u32,
     pub fonts_dirty: bool,
     pub visuals_dirty: bool,
+    pub connection_history: Vec<ConnectionRecord>,
+    pub shortcut_resolver: ShortcutResolver,
+    pub recording_shortcut: Option<ShortcutAction>,
 }
 
 impl PortalApp {
@@ -110,6 +114,7 @@ impl PortalApp {
         let custom_font_path = settings.custom_font_path.clone().unwrap_or_default();
         let scrollback_limit_mb = settings.scrollback_limit_mb;
         let ssh_keepalive_interval = settings.ssh_keepalive_interval;
+        let shortcut_resolver = ShortcutResolver::new(settings.keyboard_shortcuts.clone());
         // Use default theme preset (Tokyo Night)
         let theme_preset = ThemePreset::TokyoNight;
         let theme = theme_preset.colors();
@@ -184,6 +189,8 @@ impl PortalApp {
             broadcast_enabled: false,
         };
 
+        let connection_history = crate::config::load_history();
+
         let hosts_file = crate::config::hosts_file_path();
         let mut hosts = crate::config::load_hosts(&hosts_file);
 
@@ -248,6 +255,9 @@ impl PortalApp {
             ssh_keepalive_interval,
             fonts_dirty: false,
             visuals_dirty: true,
+            connection_history,
+            shortcut_resolver,
+            recording_shortcut: None,
         }
     }
 }

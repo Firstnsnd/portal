@@ -486,6 +486,18 @@ impl TerminalSession {
         // Use current system user if username is empty
         let username = Self::get_effective_username(&host.username);
 
+        crate::config::append_history(crate::config::ConnectionRecord {
+            host_name: host.name.clone(),
+            host: host.host.clone(),
+            port: host.port,
+            username: username.clone(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            success: true,
+        });
+
         // Load settings to get scrollback limit
         let settings = crate::config::load_settings();
         let scrollback_bytes = (settings.scrollback_limit_mb as usize) * 1024 * 1024;
