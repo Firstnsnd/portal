@@ -39,6 +39,7 @@
 //! - **SSH**: Remote SSH connection
 //! - Future: Telnet, serial, etc.
 
+pub mod tokens;
 pub mod theme;
 pub mod i18n;
 pub mod input;
@@ -49,10 +50,13 @@ pub mod sftp_view;
 pub mod hosts_view;
 pub mod settings_view;
 pub mod keychain_view;
+pub mod snippet_view;
+pub mod tunnel_view;
+pub mod widgets;
 
 // Re-export all public types for convenient access via `use ui::*`
 pub use theme::{ThemeColors, ThemePreset};
 pub use i18n::Language;
-pub use types::{SessionBackend, TerminalSession, AppView, BroadcastState};
+pub use types::{SessionBackend, TerminalSession, AppView, BroadcastState, SearchState};
 pub use pane::{SplitDirection, PaneNode, PaneAction, Tab, DetachedWindow, TabDragState};
 pub use terminal_render::render_pane_tree;

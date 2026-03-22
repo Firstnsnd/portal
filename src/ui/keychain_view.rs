@@ -3,7 +3,8 @@ use eframe::egui;
 use crate::app::PortalApp;
 use crate::config::{self, Credential, CredentialType};
 use crate::ui::types::{KeychainDeleteRequest, CredentialTypeChoice, KeySourceChoice};
-use crate::ui::theme::brighter;
+use crate::ui::tokens::*;
+use crate::ui::widgets;
 
 impl PortalApp {
     pub fn show_keychain_view(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -27,46 +28,36 @@ impl PortalApp {
         egui::ScrollArea::vertical()
             .id_salt("keychain_page_scroll")
             .show(ui, |ui| {
-            ui.add_space(20.0);
+            ui.add_space(SPACE_2XL / 2.0);
 
             // ── Page header ──
             ui.horizontal(|ui| {
-                ui.add_space(24.0);
+                ui.add_space(SPACE_XL);
                 ui.label(
                     egui::RichText::new(lang.t("keychain"))
                         .color(theme.fg_dim)
-                        .size(12.0)
+                        .size(FONT_MD)
                         .strong(),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(24.0);
+                    ui.add_space(SPACE_XL);
                     // New credential button
                     if ui.add(
-                        egui::Button::new(
-                            egui::RichText::new(lang.t("new_credential"))
-                                .color(theme.accent)
-                                .size(12.0),
-                        )
-                        .frame(false)
+                        widgets::text_button(lang.t("new_credential"), theme.accent)
                     ).clicked() {
                         self.credential_dialog.open_new();
                     }
                     if !self.credentials.is_empty() {
-                        ui.add_space(12.0);
+                        ui.add_space(SPACE_MD);
                         if ui.add(
-                            egui::Button::new(
-                                egui::RichText::new(lang.t("delete_all"))
-                                    .color(theme.red)
-                                    .size(12.0),
-                            )
-                            .frame(false)
+                            widgets::text_button(lang.t("delete_all"), theme.red)
                         ).clicked() {
                             delete_request = Some(KeychainDeleteRequest::All);
                         }
                     }
                 });
             });
-            ui.add_space(16.0);
+            ui.add_space(SPACE_LG);
 
             if self.credentials.is_empty() {
                 // ── Empty state ──
@@ -74,31 +65,31 @@ impl PortalApp {
                 ui.vertical_centered(|ui| {
                     ui.label(
                         egui::RichText::new("\u{1f511}")
-                            .size(32.0)
+                            .size(SPACE_2XL)
                             .color(theme.fg_dim),
                     );
-                    ui.add_space(12.0);
+                    ui.add_space(SPACE_MD);
                     ui.label(
                         egui::RichText::new(lang.t("keychain_empty"))
                             .color(theme.fg_dim)
-                            .size(13.0),
+                            .size(FONT_BASE),
                     );
                 });
                 ui.add_space(60.0);
             } else {
                 // ── Section header ──
                 ui.horizontal(|ui| {
-                    ui.add_space(24.0);
+                    ui.add_space(SPACE_XL);
                     ui.label(
                         egui::RichText::new(lang.t("credentials_section"))
                             .color(theme.fg_dim)
-                            .size(10.0)
+                            .size(FONT_XS)
                             .strong(),
                     );
                 });
-                ui.add_space(4.0);
+                ui.add_space(SPACE_XS);
 
-                let border = brighter(theme.bg_elevated, 20);
+                let border = theme.input_border;
 
                 // ── Credential rows ──
                 for cred in &self.credentials {
@@ -127,7 +118,7 @@ impl PortalApp {
                         }
                     };
 
-                    let row_h = 52.0;
+                    let row_h = LIST_ROW_HEIGHT;
                     let width = ui.available_width();
                     let (rect, resp) = ui.allocate_exact_size(
                         egui::vec2(width, row_h),
@@ -135,6 +126,7 @@ impl PortalApp {
                     );
                     let hovered = resp.hovered();
 
+                    // Background hover effect (keep as painter)
                     if hovered {
                         ui.painter().rect_filled(
                             egui::Rect::from_min_max(
@@ -147,123 +139,120 @@ impl PortalApp {
                         ui.painter().rect_filled(rect, 0.0, theme.hover_bg);
                     }
 
+                    // Use a child UI for layout within the allocated rect
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                    child.add_space(SPACE_XL);
+
                     // Icon
-                    ui.painter().text(
-                        egui::pos2(rect.min.x + 24.0, rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        "\u{1f511}",
-                        egui::FontId::proportional(12.0),
-                        theme.accent,
-                    );
+                    child.label(egui::RichText::new("\u{1f511}").size(FONT_MD).color(theme.accent));
+                    child.add_space(SPACE_SM);
 
-                    // Name (top line)
-                    ui.painter().text(
-                        egui::pos2(rect.min.x + 46.0, rect.center().y - 8.0),
-                        egui::Align2::LEFT_CENTER,
-                        &cred.name,
-                        egui::FontId::proportional(13.0),
-                        theme.fg_primary,
-                    );
+                    // Name and subtitle column
+                    child.vertical(|ui| {
+                        ui.add_space(SPACE_SM);
+                        ui.label(egui::RichText::new(&cred.name).size(FONT_BASE).color(theme.fg_primary));
+                        ui.label(egui::RichText::new(&subtitle).size(FONT_XS).color(theme.fg_dim));
+                    });
 
-                    // Subtitle (bottom line)
-                    ui.painter().text(
-                        egui::pos2(rect.min.x + 46.0, rect.center().y + 8.0),
-                        egui::Align2::LEFT_CENTER,
-                        &subtitle,
-                        egui::FontId::proportional(10.0),
-                        theme.fg_dim,
-                    );
+                    // Right-aligned: delete button + badges
+                    child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(SPACE_XL);
 
-                    // ── Right side: badges + delete button ──
-                    let right_x = rect.max.x - 24.0;
+                        // Delete button (hover only)
+                        if hovered {
+                            let del_rect = egui::Rect::from_center_size(
+                                egui::pos2(ui.max_rect().max.x - SPACE_XL - 4.0, rect.center().y),
+                                egui::vec2(24.0, 22.0),
+                            );
+                            let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
+                            let over_del = pointer_pos.map_or(false, |p| del_rect.contains(p));
+                            let del_bg = if over_del { theme.red } else { theme.bg_elevated };
+                            let del_fg = if over_del { theme.bg_primary } else { theme.fg_dim };
+                            ui.painter().rect(del_rect, RADIUS_SM, del_bg, egui::Stroke::NONE);
+                            ui.painter().text(
+                                del_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "\u{2715}",
+                                egui::FontId::proportional(FONT_XS),
+                                del_fg,
+                            );
+                            // Allocate space for the delete button area
+                            ui.allocate_exact_size(egui::vec2(28.0, 22.0), egui::Sense::hover());
+                        }
 
-                    // Delete button (hover only)
-                    if hovered {
+                        ui.add_space(SPACE_SM);
+
+                        // Binding count badge (keep as painter for custom styling)
+                        if binding_count > 0 {
+                            let badge_text = format!("{} {}", binding_count, lang.t("hosts_bound"));
+                            let badge_galley = ui.painter().layout_no_wrap(
+                                badge_text,
+                                egui::FontId::proportional(FONT_XS),
+                                theme.accent,
+                            );
+                            let badge_w = badge_galley.size().x + SPACE_MD;
+                            let badge_h = 18.0;
+                            let badge_pos = ui.cursor().min;
+                            let badge_rect = egui::Rect::from_min_size(
+                                egui::pos2(badge_pos.x - badge_w, rect.center().y - badge_h / 2.0),
+                                egui::vec2(badge_w, badge_h),
+                            );
+                            ui.painter().rect_filled(badge_rect, RADIUS_SM, theme.badge_bg);
+                            ui.painter().galley(
+                                egui::pos2(badge_rect.center().x - badge_galley.size().x / 2.0, badge_rect.center().y - badge_galley.size().y / 2.0),
+                                badge_galley,
+                                theme.accent,
+                            );
+                            ui.allocate_exact_size(egui::vec2(badge_w, badge_h), egui::Sense::hover());
+                            ui.add_space(SPACE_SM);
+                        }
+
+                        // Type badge (keep as painter for custom styling)
+                        let type_text = lang.t(type_key);
+                        let type_galley = ui.painter().layout_no_wrap(
+                            type_text.to_string(),
+                            egui::FontId::proportional(FONT_XS),
+                            theme.fg_dim,
+                        );
+                        let type_w = type_galley.size().x + SPACE_LG;
+                        let type_h = 18.0;
+                        let type_pos = ui.cursor().min;
+                        let type_rect = egui::Rect::from_min_size(
+                            egui::pos2(type_pos.x - type_w, rect.center().y - type_h / 2.0),
+                            egui::vec2(type_w, type_h),
+                        );
+                        ui.painter().rect(
+                            type_rect,
+                            RADIUS_SM,
+                            egui::Color32::TRANSPARENT,
+                            egui::Stroke::new(1.0, border),
+                        );
+                        ui.painter().galley(
+                            egui::pos2(type_rect.center().x - type_galley.size().x / 2.0, type_rect.center().y - type_galley.size().y / 2.0),
+                            type_galley,
+                            theme.fg_dim,
+                        );
+                        ui.allocate_exact_size(egui::vec2(type_w, type_h), egui::Sense::hover());
+                    });
+
+                    // Handle click interactions
+                    if hovered && resp.clicked() {
+                        let click_pos = ui.ctx().input(|i| i.pointer.interact_pos());
                         let del_rect = egui::Rect::from_center_size(
-                            egui::pos2(right_x - 4.0, rect.center().y),
+                            egui::pos2(rect.max.x - SPACE_XL - 4.0, rect.center().y),
                             egui::vec2(24.0, 22.0),
                         );
-                        let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
-                        let over_del = pointer_pos.map_or(false, |p| del_rect.contains(p));
-                        let del_bg = if over_del { theme.red } else { theme.bg_elevated };
-                        let del_fg = if over_del { theme.bg_primary } else { theme.fg_dim };
-                        ui.painter().rect(del_rect, 4.0, del_bg, egui::Stroke::NONE);
-                        ui.painter().text(
-                            del_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "\u{2715}",
-                            egui::FontId::proportional(10.0),
-                            del_fg,
-                        );
-
-                        if resp.clicked() {
-                            let click_pos = ui.ctx().input(|i| i.pointer.interact_pos());
-                            if click_pos.map_or(false, |p| del_rect.contains(p)) {
-                                delete_request = Some(KeychainDeleteRequest::ById {
-                                    credential_id: cred.id.clone(),
-                                    affected_hosts: bound_hosts.cloned().unwrap_or_default(),
-                                });
-                            } else {
-                                // Click on row (not delete) → edit
-                                edit_credential_id = Some(cred.id.clone());
-                            }
+                        if click_pos.map_or(false, |p| del_rect.contains(p)) {
+                            delete_request = Some(KeychainDeleteRequest::ById {
+                                credential_id: cred.id.clone(),
+                                affected_hosts: bound_hosts.cloned().unwrap_or_default(),
+                            });
+                        } else {
+                            edit_credential_id = Some(cred.id.clone());
                         }
                     } else if resp.clicked() {
                         edit_credential_id = Some(cred.id.clone());
                     }
-
-                    // Binding count badge
-                    if binding_count > 0 {
-                        let badge_text = format!("{} {}", binding_count, lang.t("hosts_bound"));
-                        let badge_galley = ui.painter().layout_no_wrap(
-                            badge_text,
-                            egui::FontId::proportional(10.0),
-                            theme.accent,
-                        );
-                        let badge_w = badge_galley.size().x + 12.0;
-                        let badge_h = 18.0;
-                        let badge_x = right_x - 34.0 - badge_w;
-                        let badge_rect = egui::Rect::from_min_size(
-                            egui::pos2(badge_x, rect.center().y - badge_h / 2.0),
-                            egui::vec2(badge_w, badge_h),
-                        );
-                        ui.painter().rect_filled(badge_rect, 4.0, theme.accent_alpha(20));
-                        ui.painter().galley(
-                            egui::pos2(badge_rect.center().x - badge_galley.size().x / 2.0, badge_rect.center().y - badge_galley.size().y / 2.0),
-                            badge_galley,
-                            theme.accent,
-                        );
-                    }
-
-                    // Type badge
-                    let type_text = lang.t(type_key);
-                    let type_galley = ui.painter().layout_no_wrap(
-                        type_text.to_string(),
-                        egui::FontId::proportional(10.0),
-                        theme.fg_dim,
-                    );
-                    let type_w = type_galley.size().x + 16.0;
-                    let type_h = 18.0;
-                    let type_x = if binding_count > 0 {
-                        right_x - 34.0 - 80.0 - type_w  // after binding badge
-                    } else {
-                        right_x - 34.0 - type_w
-                    };
-                    let type_rect = egui::Rect::from_min_size(
-                        egui::pos2(type_x, rect.center().y - type_h / 2.0),
-                        egui::vec2(type_w, type_h),
-                    );
-                    ui.painter().rect(
-                        type_rect,
-                        4.0,
-                        egui::Color32::TRANSPARENT,
-                        egui::Stroke::new(1.0, border),
-                    );
-                    ui.painter().galley(
-                        egui::pos2(type_rect.center().x - type_galley.size().x / 2.0, type_rect.center().y - type_galley.size().y / 2.0),
-                        type_galley,
-                        theme.fg_dim,
-                    );
                 }
             }
 
@@ -297,7 +286,7 @@ impl PortalApp {
     fn show_credential_drawer(&mut self, ctx: &egui::Context) {
         let theme = self.theme.clone();
         let lang = self.language;
-        let drawer_width = 340.0;
+        let drawer_width = ctx.screen_rect().width().min(DRAWER_WIDTH).max(280.0);
 
         let mut save_clicked = false;
         let mut close_clicked = false;
@@ -332,7 +321,7 @@ impl PortalApp {
                 ui.add_space(16.0);
 
                 // Name field
-                ui.label(egui::RichText::new(lang.t("label")).color(theme.fg_dim).size(12.0));
+                ui.label(widgets::field_label(lang.t("label"), &theme));
                 ui.add_space(4.0);
                 ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.name)
                     .desired_width(f32::INFINITY)
@@ -340,7 +329,7 @@ impl PortalApp {
                 ui.add_space(12.0);
 
                 // Type selector
-                ui.label(egui::RichText::new(lang.t("credential_type")).color(theme.fg_dim).size(12.0));
+                ui.label(widgets::field_label(lang.t("credential_type"), &theme));
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.selectable_value(
@@ -359,7 +348,7 @@ impl PortalApp {
                 match self.credential_dialog.cred_type {
                     CredentialTypeChoice::Password => {
                         // Username field
-                        ui.label(egui::RichText::new(lang.t("username")).color(theme.fg_dim).size(12.0));
+                        ui.label(widgets::field_label(lang.t("username"), &theme));
                         ui.add_space(4.0);
                         ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.username)
                             .desired_width(f32::INFINITY)
@@ -367,7 +356,7 @@ impl PortalApp {
                         ui.add_space(12.0);
 
                         // Password field
-                        ui.label(egui::RichText::new(lang.t("password")).color(theme.fg_dim).size(12.0));
+                        ui.label(widgets::field_label(lang.t("password"), &theme));
                         ui.add_space(4.0);
                         ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.password)
                             .desired_width(f32::INFINITY)
@@ -392,7 +381,7 @@ impl PortalApp {
 
                         match self.credential_dialog.key_source {
                             KeySourceChoice::LocalFile => {
-                                ui.label(egui::RichText::new(lang.t("key_path")).color(theme.fg_dim).size(12.0));
+                                ui.label(widgets::field_label(lang.t("key_path"), &theme));
                                 ui.add_space(4.0);
                                 ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.key_path)
                                     .desired_width(f32::INFINITY)
@@ -400,7 +389,7 @@ impl PortalApp {
                                     .font(egui::FontId::proportional(13.0)));
                             }
                             KeySourceChoice::ImportContent => {
-                                ui.label(egui::RichText::new(lang.t("key_content")).color(theme.fg_dim).size(12.0));
+                                ui.label(widgets::field_label(lang.t("key_content"), &theme));
                                 ui.add_space(4.0);
                                 ui.add(egui::TextEdit::multiline(&mut self.credential_dialog.key_content)
                                     .desired_width(f32::INFINITY)
@@ -411,7 +400,7 @@ impl PortalApp {
                         ui.add_space(12.0);
 
                         // Passphrase
-                        ui.label(egui::RichText::new(lang.t("key_passphrase")).color(theme.fg_dim).size(12.0));
+                        ui.label(widgets::field_label(lang.t("key_passphrase"), &theme));
                         ui.add_space(4.0);
                         ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.key_passphrase)
                             .desired_width(f32::INFINITY)
@@ -429,20 +418,10 @@ impl PortalApp {
 
                 // Save / Cancel buttons
                 ui.horizontal(|ui| {
-                    if ui.add(
-                        egui::Button::new(egui::RichText::new(lang.t("save")).color(egui::Color32::WHITE).size(13.0))
-                            .fill(theme.accent)
-                            .rounding(6.0)
-                            .min_size(egui::vec2(70.0, 32.0))
-                    ).clicked() {
+                    if ui.add(widgets::primary_button(lang.t("save"), &theme)).clicked() {
                         save_clicked = true;
                     }
-                    if ui.add(
-                        egui::Button::new(egui::RichText::new(lang.t("cancel")).color(theme.fg_dim).size(13.0))
-                            .fill(theme.bg_elevated)
-                            .rounding(6.0)
-                            .min_size(egui::vec2(70.0, 32.0))
-                    ).clicked() {
+                    if ui.add(widgets::secondary_button(lang.t("cancel"), &theme)).clicked() {
                         close_clicked = true;
                     }
                 });
@@ -595,21 +574,10 @@ impl PortalApp {
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .fixed_size([340.0, 0.0])
+            .min_size([280.0, 0.0])
+            .default_size([DIALOG_WIDTH_MD, 0.0])
             .title_bar(false)
-            .frame(egui::Frame {
-                fill: self.theme.bg_secondary,
-                rounding: egui::Rounding::same(8.0),
-                inner_margin: egui::Margin::same(20.0),
-                stroke: egui::Stroke::new(1.0, self.theme.border),
-                shadow: egui::epaint::Shadow {
-                    offset: egui::vec2(0.0, 4.0),
-                    blur: 20.0,
-                    spread: 2.0,
-                    color: egui::Color32::from_black_alpha(80),
-                },
-                ..Default::default()
-            })
+            .frame(widgets::dialog_frame(&self.theme))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("\u{26A0}").size(18.0).color(self.theme.red));
@@ -631,20 +599,10 @@ impl PortalApp {
 
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(
-                            egui::Button::new(egui::RichText::new(lang.t("delete")).color(egui::Color32::WHITE).size(13.0))
-                                .fill(self.theme.red)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                        ).clicked() {
+                        if ui.add(widgets::danger_button(lang.t("delete"), &self.theme)).clicked() {
                             self.execute_keychain_delete();
                         }
-                        if ui.add(
-                            egui::Button::new(egui::RichText::new(lang.t("cancel")).color(self.theme.fg_dim).size(13.0))
-                                .fill(self.theme.bg_elevated)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                        ).clicked() {
+                        if ui.add(widgets::secondary_button(lang.t("cancel"), &self.theme)).clicked() {
                             self.keychain_confirm_delete = None;
                         }
                     });

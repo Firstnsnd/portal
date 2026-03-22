@@ -580,6 +580,93 @@ impl TerminalGrid {
         self.scrollback.get(idx)
     }
 
+    /// Search terminal content (scrollback + grid) for all occurrences of a query.
+    ///
+    /// Returns matches sorted by row then column. Each match contains a global row
+    /// index (scrollback rows 0..scrollback_len, grid rows scrollback_len..scrollback_len+rows)
+    /// and column range (col_start inclusive, col_end exclusive).
+    ///
+    /// Wide (CJK) characters are handled by skipping continuation cells when building
+    /// the searchable string and mapping match positions back to cell column indices.
+    pub fn search(&self, query: &str, case_sensitive: bool) -> Vec<(usize, usize, usize)> {
+        if query.is_empty() {
+            return Vec::new();
+        }
+
+        let query_lower: String;
+        let search_query = if case_sensitive {
+            query
+        } else {
+            query_lower = query.to_lowercase();
+            &query_lower
+        };
+
+        let sb_len = self.scrollback.len();
+        let total_rows = sb_len + self.rows;
+        let mut matches = Vec::new();
+
+        for global_row in 0..total_rows {
+            let cells = if global_row < sb_len {
+                match self.scrollback.get(global_row) {
+                    Some(row) => row.as_slice(),
+                    None => continue,
+                }
+            } else {
+                let grid_row = global_row - sb_len;
+                if grid_row >= self.rows {
+                    continue;
+                }
+                &self.cells[grid_row]
+            };
+
+            // Build searchable string, tracking mapping from string index to cell column
+            let mut text = String::new();
+            let mut col_map: Vec<usize> = Vec::new(); // text char index -> cell column
+            for (col, cell) in cells.iter().enumerate() {
+                if !cell.wide_continuation {
+                    col_map.push(col);
+                    text.push(cell.c);
+                }
+            }
+
+            let search_text: String;
+            let haystack = if case_sensitive {
+                &text
+            } else {
+                search_text = text.to_lowercase();
+                &search_text
+            };
+
+            // Find all occurrences
+            let mut start = 0;
+            while let Some(pos) = haystack[start..].find(search_query) {
+                let char_start = haystack[..start + pos].chars().count();
+                let char_end = char_start + search_query.chars().count();
+
+                if char_start < col_map.len() && char_end > 0 {
+                    let col_start = col_map[char_start];
+                    // col_end: column after the last character of the match
+                    let col_end = if char_end < col_map.len() {
+                        col_map[char_end]
+                    } else if let Some(&last) = col_map.last() {
+                        // Match extends to end of visible content
+                        (last + 1).min(cells.len())
+                    } else {
+                        cells.len()
+                    };
+                    matches.push((global_row, col_start, col_end));
+                }
+
+                start += pos + search_query.len().max(1);
+                if start >= haystack.len() {
+                    break;
+                }
+            }
+        }
+
+        matches
+    }
+
     /// Scroll down within a region: remove bottom line, add blank at top
     pub fn scroll_down(&mut self, top: usize, bottom: usize) {
         if top < bottom && bottom < self.rows {

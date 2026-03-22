@@ -1,6 +1,7 @@
 //! Tab management functionality for PortalApp
 
-use crate::config::{HostEntry, resolve_auth};
+use crate::config::{HostEntry, resolve_auth, ResolvedAuth};
+use crate::ssh::JumpHostInfo;
 use crate::ui::pane::{SplitDirection, PaneNode, Tab, DetachedWindow, TabDragState};
 use crate::ui::types::{TerminalSession, AppView, BroadcastState};
 use super::PortalApp;
@@ -22,10 +23,26 @@ impl PortalApp {
         self.current_view = AppView::Terminal;
     }
 
+    pub(crate) fn resolve_jump_host(&self, host: &HostEntry) -> Option<JumpHostInfo> {
+        let jump_name = host.jump_host.as_ref()?;
+        let jump_entry = self.hosts.iter().find(|h| &h.name == jump_name)?;
+        let jump_auth = resolve_auth(jump_entry, &self.credentials);
+        if matches!(jump_auth, ResolvedAuth::None) {
+            return None;
+        }
+        Some(JumpHostInfo {
+            host: jump_entry.host.clone(),
+            port: jump_entry.port,
+            username: TerminalSession::get_effective_username(&jump_entry.username),
+            auth: jump_auth,
+        })
+    }
+
     /// Add a new SSH terminal tab connected to the specified host
     pub fn add_tab_ssh(&mut self, host: &HostEntry) {
         let auth = resolve_auth(host, &self.credentials);
-        let session = TerminalSession::new_ssh(host, auth, &self.runtime);
+        let jump = self.resolve_jump_host(host);
+        let session = TerminalSession::new_ssh(host, auth, &self.runtime, jump);
         let tab = Tab {
             title: host.name.clone(),
             sessions: vec![session],
@@ -36,6 +53,7 @@ impl PortalApp {
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
         self.current_view = AppView::Terminal;
+        self.connection_history = crate::config::load_history();
     }
 
     /// Split the currently focused pane in the specified direction
@@ -49,7 +67,8 @@ impl PortalApp {
         let resolved_auth = tab.sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
         let new_session = if let Some(host) = &ssh_host {
             let auth = resolved_auth.unwrap_or(resolve_auth(host, &self.credentials));
-            TerminalSession::new_ssh(host, auth, &self.runtime)
+            let jump = self.resolve_jump_host(host);
+            TerminalSession::new_ssh(host, auth, &self.runtime, jump)
         } else {
             let shell = self.selected_shell.clone();
             TerminalSession::new_local(new_id, &shell)

@@ -101,6 +101,54 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+// ── Port Forward Config Types ─────────────────────────────────────
+// Defined here so both config and ssh modules can use them without circular deps.
+
+/// Forward direction
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ForwardKind {
+    /// -L: listen locally, forward to remote
+    Local,
+    /// -R: listen on remote, forward to local
+    Remote,
+}
+
+impl std::fmt::Display for ForwardKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ForwardKind::Local => write!(f, "L"),
+            ForwardKind::Remote => write!(f, "R"),
+        }
+    }
+}
+
+/// Persistent configuration for one port forward rule
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortForwardConfig {
+    pub kind: ForwardKind,
+    pub local_host: String,
+    pub local_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+}
+
+impl std::fmt::Display for PortForwardConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            ForwardKind::Local => write!(
+                f,
+                "-L {}:{}:{}:{}",
+                self.local_host, self.local_port, self.remote_host, self.remote_port
+            ),
+            ForwardKind::Remote => write!(
+                f,
+                "-R {}:{}:{}:{}",
+                self.remote_host, self.remote_port, self.local_host, self.local_port
+            ),
+        }
+    }
+}
 use uuid::Uuid;
 
 /// Authentication method for SSH connections (LEGACY — kept for migration/fallback)
@@ -210,6 +258,12 @@ pub struct HostEntry {
     pub auth: AuthMethod,
     #[serde(default)]
     pub startup_commands: Vec<String>,
+    #[serde(default)]
+    pub agent_forwarding: bool,
+    #[serde(default)]
+    pub jump_host: Option<String>,
+    #[serde(default)]
+    pub port_forwards: Vec<PortForwardConfig>,
 }
 
 fn default_port() -> u16 {
@@ -229,6 +283,9 @@ impl HostEntry {
             credential_id: None,
             auth: AuthMethod::None,
             startup_commands: Vec::new(),
+            agent_forwarding: false,
+            jump_host: None,
+            port_forwards: Vec::new(),
         }
     }
 
@@ -244,6 +301,9 @@ impl HostEntry {
             credential_id,
             auth: AuthMethod::None,
             startup_commands,
+            agent_forwarding: false,
+            jump_host: None,
+            port_forwards: Vec::new(),
         }
     }
 }
@@ -661,9 +721,135 @@ pub fn hosts_file_path() -> PathBuf {
     config_dir().join("hosts.json")
 }
 
+// ── Command Snippets ────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Snippet {
+    pub id: String,         // UUID
+    pub name: String,
+    pub command: String,
+    pub group: String,      // Category group
+}
+
+/// Get the snippets file path
+pub fn snippets_file_path() -> PathBuf {
+    config_dir().join("snippets.json")
+}
+
+/// Load snippets from JSON file. Returns empty vec on error.
+pub fn load_snippets() -> Vec<Snippet> {
+    let path = snippets_file_path();
+    if let Ok(data) = std::fs::read_to_string(&path) {
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Save snippets to JSON file.
+pub fn save_snippets(snippets: &[Snippet]) {
+    let path = snippets_file_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(snippets) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+// ── Connection History ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionRecord {
+    pub host_name: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub timestamp: u64,
+    pub success: bool,
+}
+
+pub fn history_file_path() -> PathBuf {
+    config_dir().join("history.json")
+}
+
+pub fn load_history() -> Vec<ConnectionRecord> {
+    let path = history_file_path();
+    if let Ok(data) = std::fs::read_to_string(&path) {
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
+
+pub fn save_history(records: &[ConnectionRecord]) {
+    let path = history_file_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(records) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+pub fn append_history(record: ConnectionRecord) {
+    let mut records = load_history();
+    records.push(record);
+    if records.len() > 200 {
+        let drain_count = records.len() - 200;
+        records.drain(..drain_count);
+    }
+    save_history(&records);
+}
+
 /// Get the settings file path
 pub fn settings_file_path() -> PathBuf {
     config_dir().join("settings.json")
+}
+
+// ── Keyboard Shortcuts ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ShortcutAction {
+    SplitHorizontal,
+    SplitVertical,
+    NewTab,
+    CloseTab,
+    ClosePane,
+    NextTab,
+    PrevTab,
+    ToggleBroadcast,
+    Search,
+    Copy,
+    Paste,
+    SelectAll,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyBinding {
+    pub action: ShortcutAction,
+    pub key: String,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+    pub command: bool,
+}
+
+pub fn default_shortcuts() -> Vec<KeyBinding> {
+    vec![
+        KeyBinding { action: ShortcutAction::SplitHorizontal, key: "D".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding { action: ShortcutAction::SplitVertical, key: "D".into(), ctrl: false, alt: false, shift: true, command: true },
+        KeyBinding { action: ShortcutAction::NewTab, key: "T".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding { action: ShortcutAction::CloseTab, key: "W".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding { action: ShortcutAction::ClosePane, key: "W".into(), ctrl: false, alt: false, shift: true, command: true },
+        KeyBinding { action: ShortcutAction::NextTab, key: "RightBracket".into(), ctrl: false, alt: false, shift: true, command: true },
+        KeyBinding { action: ShortcutAction::PrevTab, key: "LeftBracket".into(), ctrl: false, alt: false, shift: true, command: true },
+        KeyBinding { action: ShortcutAction::ToggleBroadcast, key: "I".into(), ctrl: false, alt: false, shift: true, command: true },
+        KeyBinding { action: ShortcutAction::Search, key: "F".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding { action: ShortcutAction::Copy, key: "C".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding { action: ShortcutAction::Paste, key: "V".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding { action: ShortcutAction::SelectAll, key: "A".into(), ctrl: false, alt: false, shift: false, command: true },
+    ]
 }
 
 // ── Portal Settings ────────────────────────────────────────────────
@@ -676,6 +862,14 @@ pub struct PortalSettings {
     pub language: String,
     /// Scrollback buffer limit in MB (default: 100MB)
     pub scrollback_limit_mb: u64,
+    #[serde(default = "default_keepalive_interval")]
+    pub ssh_keepalive_interval: u32,
+    #[serde(default = "default_shortcuts")]
+    pub keyboard_shortcuts: Vec<KeyBinding>,
+}
+
+fn default_keepalive_interval() -> u32 {
+    30
 }
 
 impl PortalSettings {
@@ -693,6 +887,8 @@ impl Default for PortalSettings {
             custom_font_path: None,
             language: "en".to_string(),
             scrollback_limit_mb: 100,
+            ssh_keepalive_interval: default_keepalive_interval(),
+            keyboard_shortcuts: default_shortcuts(),
         }
     }
 }
