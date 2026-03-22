@@ -346,6 +346,29 @@ impl AddHostDialog {
     }
 }
 
+/// Search match position in terminal content
+#[derive(Clone, Debug)]
+pub struct SearchMatch {
+    /// Global row index (scrollback + grid unified)
+    pub row: usize,
+    /// Start column (inclusive)
+    pub col_start: usize,
+    /// End column (exclusive)
+    pub col_end: usize,
+}
+
+/// Search state for terminal content
+pub struct SearchState {
+    /// Current search query
+    pub query: String,
+    /// All matches found
+    pub matches: Vec<SearchMatch>,
+    /// Index of the currently highlighted match
+    pub current_index: usize,
+    /// Whether search is case-sensitive
+    pub case_sensitive: bool,
+}
+
 /// Text selection state in terminal
 #[derive(Default, Clone)]
 pub struct Selection {
@@ -406,6 +429,8 @@ pub struct TerminalSession {
     pub last_non_ascii_input: bool,
     /// Current working directory (updated via OSC 7 or initial cwd)
     pub cwd: Option<String>,
+    /// Search state (active when Some)
+    pub search_state: Option<SearchState>,
 }
 
 impl TerminalSession {
@@ -438,6 +463,7 @@ impl TerminalSession {
             pty_resize_deadline: Instant::now(),
             last_non_ascii_input: false,
             cwd,
+            search_state: None,
         }
     }
 
@@ -491,6 +517,7 @@ impl TerminalSession {
             pty_resize_deadline: Instant::now(),
             last_non_ascii_input: false,
             cwd: None, // SSH sessions start without known cwd
+            search_state: None,
         }
     }
 

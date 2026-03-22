@@ -128,6 +128,9 @@ impl Language {
                 "credential_existing" => "Existing",
                 "credential_inline" => "New",
                 "select_credential" => "Select Credential",
+                "search" => "Search",
+                "no_matches" => "No matches",
+                "search_placeholder" => "Search...",
                 _ => "???",
             },
             Language::Chinese => match key {
@@ -249,6 +252,9 @@ impl Language {
                 "credential_existing" => "已有",
                 "credential_inline" => "新建",
                 "select_credential" => "选择凭据",
+                "search" => "搜索",
+                "no_matches" => "无匹配",
+                "search_placeholder" => "搜索...",
                 _ => "???",
             },
             Language::Japanese => match key {
@@ -367,6 +373,9 @@ impl Language {
                 "credential_existing" => "既存",
                 "credential_inline" => "新規",
                 "select_credential" => "認証情報を選択",
+                "search" => "検索",
+                "no_matches" => "一致なし",
+                "search_placeholder" => "検索...",
                 _ => "???",
             },
             Language::Korean => match key {
@@ -484,6 +493,9 @@ impl Language {
                 "credential_existing" => "기존",
                 "credential_inline" => "새로 만들기",
                 "select_credential" => "자격 증명 선택",
+                "search" => "검색",
+                "no_matches" => "일치 없음",
+                "search_placeholder" => "검색...",
                 _ => "???",
             },
             Language::Spanish => match key {
@@ -600,6 +612,9 @@ impl Language {
                 "credential_existing" => "Existente",
                 "credential_inline" => "Nuevo",
                 "select_credential" => "Seleccionar Credencial",
+                "search" => "Buscar",
+                "no_matches" => "Sin resultados",
+                "search_placeholder" => "Buscar...",
                 _ => "???",
             },
             Language::Russian => match key {
@@ -716,6 +731,9 @@ impl Language {
                 "credential_existing" => "Существующий",
                 "credential_inline" => "Новый",
                 "select_credential" => "Выбрать Учётные Данные",
+                "search" => "Поиск",
+                "no_matches" => "Нет совпадений",
+                "search_placeholder" => "Поиск...",
                 _ => "???",
             },
             Language::French => match key {
@@ -832,6 +850,9 @@ impl Language {
                 "credential_existing" => "Existant",
                 "credential_inline" => "Nouveau",
                 "select_credential" => "Sélectionner l'Identifiant",
+                "search" => "Rechercher",
+                "no_matches" => "Aucun résultat",
+                "search_placeholder" => "Rechercher...",
                 _ => "???",
             },
         }

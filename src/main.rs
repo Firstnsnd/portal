@@ -147,6 +147,24 @@ impl eframe::App for PortalApp {
                         });
                         tab.focused_session = new_idx;
                     }
+                    // Cmd+F → toggle search in focused terminal session (detached window)
+                    if ctx.input(|i| i.key_pressed(egui::Key::F) && i.modifiers.command && !i.modifiers.shift) {
+                        let active = dw.active_tab;
+                        if let Some(tab) = dw.tabs.get_mut(active) {
+                            if let Some(session) = tab.sessions.get_mut(tab.focused_session) {
+                                if session.search_state.is_some() {
+                                    session.search_state = None;
+                                } else {
+                                    session.search_state = Some(SearchState {
+                                        query: String::new(),
+                                        matches: Vec::new(),
+                                        current_index: 0,
+                                        case_sensitive: false,
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // ── Sidebar ──
@@ -838,6 +856,23 @@ impl eframe::App for PortalApp {
             }
             if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && i.modifiers.shift) {
                 self.split_focused_pane(SplitDirection::Vertical);
+            }
+            // Cmd+F → toggle search in focused terminal session
+            if ctx.input(|i| i.key_pressed(egui::Key::F) && i.modifiers.command && !i.modifiers.shift) {
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    if let Some(session) = tab.sessions.get_mut(tab.focused_session) {
+                        if session.search_state.is_some() {
+                            session.search_state = None;
+                        } else {
+                            session.search_state = Some(SearchState {
+                                query: String::new(),
+                                matches: Vec::new(),
+                                current_index: 0,
+                                case_sensitive: false,
+                            });
+                        }
+                    }
+                }
             }
         }
 
