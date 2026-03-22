@@ -1117,6 +1117,14 @@ impl PortalApp {
 
                         ui.add_space(8.0);
 
+                        // Agent forwarding
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut self.add_host_dialog.agent_forwarding, egui::RichText::new(lang.t("agent_forwarding")).color(theme.fg_primary));
+                        });
+                        ui.label(egui::RichText::new(lang.t("agent_forwarding_desc")).color(theme.fg_dim).size(11.0));
+
+                        ui.add_space(8.0);
+
                         if !self.add_host_dialog.error.is_empty() {
                             ui.label(egui::RichText::new(&self.add_host_dialog.error).color(theme.red).size(12.0));
                         }
@@ -1271,9 +1279,10 @@ impl PortalApp {
                 self.add_host_dialog.test_conn_state = TestConnState::Testing;
                 self.add_host_dialog.error.clear();
 
+                let agent_fwd = self.add_host_dialog.agent_forwarding;
                 self.runtime.spawn(async move {
                     let settings = crate::config::load_settings();
-                    let result = test_connection(host, port, username, resolved, settings.ssh_keepalive_interval).await;
+                    let result = test_connection(host, port, username, resolved, settings.ssh_keepalive_interval, agent_fwd).await;
                     if let Ok(mut guard) = result_arc.lock() {
                         *guard = Some(result);
                     }
@@ -1386,6 +1395,8 @@ impl PortalApp {
                     .filter(|l| !l.is_empty())
                     .collect(),
             );
+
+            entry.agent_forwarding = self.add_host_dialog.agent_forwarding;
 
             // Parse tags from comma-separated string
             let tags: Vec<String> = self.add_host_dialog.tags

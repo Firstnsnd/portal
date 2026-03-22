@@ -244,6 +244,7 @@ pub struct AddHostDialog {
     pub key_passphrase: String,
     pub key_in_keychain: bool,
     pub startup_commands: String,
+    pub agent_forwarding: bool,
     pub test_conn_state: TestConnState,
     pub test_conn_result: Option<Arc<Mutex<Option<Result<String, String>>>>>,
     /// Show "Remove old key" button when host key verification fails
@@ -282,6 +283,7 @@ impl Default for AddHostDialog {
             key_passphrase: String::new(),
             key_in_keychain: false,
             startup_commands: String::new(),
+            agent_forwarding: false,
             test_conn_state: TestConnState::Idle,
             test_conn_result: None,
             show_remove_key_button: false,
@@ -310,6 +312,7 @@ impl AddHostDialog {
         self.group = host.group.clone();
         self.tags = host.tags.join(", ");
         self.startup_commands = host.startup_commands.join("\n");
+        self.agent_forwarding = host.agent_forwarding;
         self.error = String::new();
 
         // Set credential mode based on host state
@@ -513,6 +516,7 @@ impl TerminalSession {
             host.startup_commands.clone(),
             scrollback_bytes,
             settings.ssh_keepalive_interval,
+            host.agent_forwarding,
         );
         let grid = ssh.get_grid();
         Self {
@@ -572,6 +576,7 @@ impl TerminalSession {
                 self.last_rows as u16,
                 host.startup_commands.clone(),
                 settings.ssh_keepalive_interval,
+                host.agent_forwarding,
             );
             self.grid = ssh.get_grid();
             self.session = Some(SessionBackend::Ssh(ssh));

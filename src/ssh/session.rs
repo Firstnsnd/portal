@@ -91,6 +91,7 @@ pub async fn connect_and_authenticate(
     username: &str,
     auth: &ResolvedAuth,
     keepalive_interval: u32,
+    _agent_forwarding: bool,
 ) -> Result<russh::client::Handle<SshClient>, String> {
     let mut config = russh::client::Config::default();
     if keepalive_interval > 0 {
@@ -174,6 +175,7 @@ impl SshSession {
         rows: u16,
         startup_commands: Vec<String>,
         keepalive_interval: u32,
+        agent_forwarding: bool,
     ) -> Self {
         Self::with_scrollback_limit(
             runtime,
@@ -186,6 +188,7 @@ impl SshSession {
             startup_commands,
             crate::terminal::TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES,
             keepalive_interval,
+            agent_forwarding,
         )
     }
 
@@ -200,6 +203,7 @@ impl SshSession {
         startup_commands: Vec<String>,
         scrollback_limit_bytes: usize,
         keepalive_interval: u32,
+        agent_forwarding: bool,
     ) -> Self {
         let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
             cols as usize,
@@ -220,7 +224,7 @@ impl SshSession {
             Self::ssh_task(
                 host, port, username, auth, cols, rows, grid_clone, cmd_rx,
                 state_clone, alive_clone, shell_hint_clone, startup_commands,
-                keepalive_interval,
+                keepalive_interval, agent_forwarding,
             )
             .await;
         });
@@ -247,6 +251,7 @@ impl SshSession {
         shell_hint: Arc<Mutex<Option<String>>>,
         startup_commands: Vec<String>,
         keepalive_interval: u32,
+        agent_forwarding: bool,
     ) {
         let set_state = |s: SshConnectionState| {
             if let Ok(mut st) = state.lock() {
@@ -257,7 +262,7 @@ impl SshSession {
         // 1. Connect + Authenticate using shared helper
         set_state(SshConnectionState::Authenticating);
 
-        let handle = match connect_and_authenticate(&host, port, &username, &auth, keepalive_interval).await {
+        let handle = match connect_and_authenticate(&host, port, &username, &auth, keepalive_interval, agent_forwarding).await {
             Ok(h) => h,
             Err(e) => {
                 set_state(SshConnectionState::Error(e));
@@ -311,6 +316,12 @@ impl SshSession {
             )));
             alive.store(false, Ordering::Relaxed);
             return;
+        }
+
+        if agent_forwarding {
+            if let Err(e) = channel.agent_forward(false).await {
+                log::warn!("Agent forwarding request failed: {}", e);
+            }
         }
 
         if let Err(e) = channel.request_shell(false).await {
@@ -441,8 +452,9 @@ pub async fn test_connection(
     username: String,
     auth: ResolvedAuth,
     keepalive_interval: u32,
+    agent_forwarding: bool,
 ) -> Result<String, String> {
-    let _handle = connect_and_authenticate(&host, port, &username, &auth, keepalive_interval).await?;
+    let _handle = connect_and_authenticate(&host, port, &username, &auth, keepalive_interval, agent_forwarding).await?;
     Ok("Connection successful! Authentication passed.".to_string())
 }
 

@@ -694,7 +694,7 @@ async fn sftp_task_inner(
     // 1. Connect + authenticate (with timeout)
     let handle = match tokio::time::timeout(
         CONNECT_TIMEOUT,
-        connect_and_authenticate(&host, port, &username, &auth, 0),
+        connect_and_authenticate(&host, port, &username, &auth, 0, false),
     ).await {
         Ok(Ok(h)) => h,
         Ok(Err(e)) => {

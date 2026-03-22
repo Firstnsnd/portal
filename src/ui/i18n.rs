@@ -151,6 +151,8 @@ impl Language {
                 "shortcut_copy" => "Copy",
                 "shortcut_paste" => "Paste",
                 "shortcut_select_all" => "Select All",
+                "agent_forwarding" => "Agent Forwarding",
+                "agent_forwarding_desc" => "Forward local SSH agent to remote host",
                 _ => "???",
             },
             Language::Chinese => match key {
@@ -295,6 +297,8 @@ impl Language {
                 "shortcut_copy" => "复制",
                 "shortcut_paste" => "粘贴",
                 "shortcut_select_all" => "全选",
+                "agent_forwarding" => "SSH 代理转发",
+                "agent_forwarding_desc" => "将本地 SSH 代理转发到远程主机",
                 _ => "???",
             },
             Language::Japanese => match key {
@@ -436,6 +440,8 @@ impl Language {
                 "shortcut_copy" => "コピー",
                 "shortcut_paste" => "貼り付け",
                 "shortcut_select_all" => "すべて選択",
+                "agent_forwarding" => "エージェント転送",
+                "agent_forwarding_desc" => "ローカルSSHエージェントをリモートに転送",
                 _ => "???",
             },
             Language::Korean => match key {
@@ -576,6 +582,8 @@ impl Language {
                 "shortcut_copy" => "복사",
                 "shortcut_paste" => "붙여넣기",
                 "shortcut_select_all" => "모두 선택",
+                "agent_forwarding" => "에이전트 포워딩",
+                "agent_forwarding_desc" => "로컬 SSH 에이전트를 원격으로 전달",
                 _ => "???",
             },
             Language::Spanish => match key {
@@ -715,6 +723,8 @@ impl Language {
                 "shortcut_copy" => "Copiar",
                 "shortcut_paste" => "Pegar",
                 "shortcut_select_all" => "Seleccionar todo",
+                "agent_forwarding" => "Reenvío de agente",
+                "agent_forwarding_desc" => "Reenviar agente SSH local al host remoto",
                 _ => "???",
             },
             Language::Russian => match key {
@@ -854,6 +864,8 @@ impl Language {
                 "shortcut_copy" => "Копировать",
                 "shortcut_paste" => "Вставить",
                 "shortcut_select_all" => "Выбрать всё",
+                "agent_forwarding" => "Перенаправление агента",
+                "agent_forwarding_desc" => "Перенаправить локальный SSH-агент на удалённый хост",
                 _ => "???",
             },
             Language::French => match key {
@@ -993,6 +1005,8 @@ impl Language {
                 "shortcut_copy" => "Copier",
                 "shortcut_paste" => "Coller",
                 "shortcut_select_all" => "Tout sélectionner",
+                "agent_forwarding" => "Transfert d'agent",
+                "agent_forwarding_desc" => "Transférer l'agent SSH local vers l'hôte distant",
                 _ => "???",
             },
         }

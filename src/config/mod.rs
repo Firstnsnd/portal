@@ -207,6 +207,8 @@ pub struct HostEntry {
     pub auth: AuthMethod,
     #[serde(default)]
     pub startup_commands: Vec<String>,
+    #[serde(default)]
+    pub agent_forwarding: bool,
 }
 
 fn default_port() -> u16 {
@@ -226,6 +228,7 @@ impl HostEntry {
             credential_id: None,
             auth: AuthMethod::None,
             startup_commands: Vec::new(),
+            agent_forwarding: false,
         }
     }
 
@@ -241,6 +244,7 @@ impl HostEntry {
             credential_id,
             auth: AuthMethod::None,
             startup_commands,
+            agent_forwarding: false,
         }
     }
 }
