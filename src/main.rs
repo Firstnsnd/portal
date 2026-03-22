@@ -410,12 +410,36 @@ impl eframe::App for PortalApp {
 
                                             // Draw drag ghost and handle reorder
                                             if let Some(src) = dw.tab_drag.source_index {
+                                                let alt_held = ctx.input(|i| i.modifiers.alt);
                                                 if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                                                     dw.tab_drag.target_index = None;
+                                                    dw.tab_drag.insert_position = None;
                                                     for (ti, rect) in tab_rects.iter().enumerate() {
                                                         if rect.contains(pos) && Some(ti) != dw.tab_drag.source_index {
-                                                            dw.tab_drag.target_index = Some(ti);
+                                                            if alt_held {
+                                                                dw.tab_drag.target_index = Some(ti);
+                                                            } else {
+                                                                let mid_x = rect.center().x;
+                                                                let insert_pos = if pos.x < mid_x { ti } else { ti + 1 };
+                                                                dw.tab_drag.insert_position = Some(insert_pos);
+                                                            }
                                                             break;
+                                                        }
+                                                    }
+
+                                                    if !alt_held {
+                                                        if let Some(insert_pos) = dw.tab_drag.insert_position {
+                                                            let line_x = if insert_pos < tab_rects.len() {
+                                                                tab_rects[insert_pos].min.x - 1.0
+                                                            } else {
+                                                                tab_rects[tab_rects.len() - 1].max.x + 1.0
+                                                            };
+                                                            let top = tab_rects[0].min.y;
+                                                            let bottom = tab_rects[0].max.y;
+                                                            ui.painter().line_segment(
+                                                                [egui::pos2(line_x, top), egui::pos2(line_x, bottom)],
+                                                                egui::Stroke::new(2.0, self.theme.accent),
+                                                            );
                                                         }
                                                     }
 
@@ -451,34 +475,50 @@ impl eframe::App for PortalApp {
                                                 }
 
                                                 if ctx.input(|i| i.pointer.any_released()) {
-                                                    if let Some(dst) = dw.tab_drag.target_index {
-                                                        // Dropping on another tab → merge
-                                                        if src != dst && src < dw.tabs.len() && dst < dw.tabs.len() {
-                                                            let mut src_tab = dw.tabs.remove(src);
-                                                            let dst = if src < dst { dst - 1 } else { dst };
-                                                            let dst_tab = &mut dw.tabs[dst];
-                                                            let offset = dst_tab.sessions.len();
-                                                            src_tab.layout.offset_indices(offset);
-                                                            dst_tab.sessions.extend(src_tab.sessions);
-                                                            let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
-                                                            dst_tab.layout = PaneNode::Split {
-                                                                direction: SplitDirection::Horizontal,
-                                                                ratio: 0.5,
-                                                                first: Box::new(old_layout),
-                                                                second: Box::new(src_tab.layout),
-                                                            };
-                                                            // Update active_tab
-                                                            if dw.active_tab == src {
-                                                                dw.active_tab = dst;
-                                                            } else if dw.active_tab > src && dw.active_tab > 0 {
-                                                                dw.active_tab -= 1;
+                                                    if alt_held {
+                                                        if let Some(dst) = dw.tab_drag.target_index {
+                                                            if src != dst && src < dw.tabs.len() && dst < dw.tabs.len() {
+                                                                let mut src_tab = dw.tabs.remove(src);
+                                                                let dst = if src < dst { dst - 1 } else { dst };
+                                                                let dst_tab = &mut dw.tabs[dst];
+                                                                let offset = dst_tab.sessions.len();
+                                                                src_tab.layout.offset_indices(offset);
+                                                                dst_tab.sessions.extend(src_tab.sessions);
+                                                                let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
+                                                                dst_tab.layout = PaneNode::Split {
+                                                                    direction: SplitDirection::Horizontal,
+                                                                    ratio: 0.5,
+                                                                    first: Box::new(old_layout),
+                                                                    second: Box::new(src_tab.layout),
+                                                                };
+                                                                if dw.active_tab == src {
+                                                                    dw.active_tab = dst;
+                                                                } else if dw.active_tab > src && dw.active_tab > 0 {
+                                                                    dw.active_tab -= 1;
+                                                                }
+                                                                if dw.active_tab >= dw.tabs.len() {
+                                                                    dw.active_tab = dw.tabs.len().saturating_sub(1);
+                                                                }
                                                             }
-                                                            if dw.active_tab >= dw.tabs.len() {
-                                                                dw.active_tab = dw.tabs.len().saturating_sub(1);
+                                                        }
+                                                    } else if let Some(insert_pos) = dw.tab_drag.insert_position {
+                                                        if src < dw.tabs.len() {
+                                                            let tab = dw.tabs.remove(src);
+                                                            let new_pos = if src < insert_pos {
+                                                                (insert_pos - 1).min(dw.tabs.len())
+                                                            } else {
+                                                                insert_pos.min(dw.tabs.len())
+                                                            };
+                                                            dw.tabs.insert(new_pos, tab);
+                                                            if dw.active_tab == src {
+                                                                dw.active_tab = new_pos;
+                                                            } else if src < dw.active_tab && new_pos >= dw.active_tab {
+                                                                dw.active_tab -= 1;
+                                                            } else if src > dw.active_tab && new_pos <= dw.active_tab {
+                                                                dw.active_tab += 1;
                                                             }
                                                         }
                                                     } else {
-                                                        // Dropped outside tab area → detach to new window
                                                         if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                                                             if !tab_bar_rect.contains(pos) && src < dw.tabs.len() {
                                                                 tab_to_detach = Some(src);
@@ -487,6 +527,7 @@ impl eframe::App for PortalApp {
                                                     }
                                                     dw.tab_drag.source_index = None;
                                                     dw.tab_drag.target_index = None;
+                                                    dw.tab_drag.insert_position = None;
                                                 }
                                             }
 
@@ -1118,12 +1159,36 @@ impl eframe::App for PortalApp {
 
                                 // Draw drag ghost and handle reorder
                                 if let Some(src) = self.tab_drag.source_index {
+                                    let alt_held = ctx.input(|i| i.modifiers.alt);
                                     if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                                         self.tab_drag.target_index = None;
+                                        self.tab_drag.insert_position = None;
                                         for (i, rect) in tab_rects.iter().enumerate() {
                                             if rect.contains(pos) && Some(i) != self.tab_drag.source_index {
-                                                self.tab_drag.target_index = Some(i);
+                                                if alt_held {
+                                                    self.tab_drag.target_index = Some(i);
+                                                } else {
+                                                    let mid_x = rect.center().x;
+                                                    let insert_pos = if pos.x < mid_x { i } else { i + 1 };
+                                                    self.tab_drag.insert_position = Some(insert_pos);
+                                                }
                                                 break;
+                                            }
+                                        }
+
+                                        if !alt_held {
+                                            if let Some(insert_pos) = self.tab_drag.insert_position {
+                                                let line_x = if insert_pos < tab_rects.len() {
+                                                    tab_rects[insert_pos].min.x - 1.0
+                                                } else {
+                                                    tab_rects[tab_rects.len() - 1].max.x + 1.0
+                                                };
+                                                let top = tab_rects[0].min.y;
+                                                let bottom = tab_rects[0].max.y;
+                                                ui.painter().line_segment(
+                                                    [egui::pos2(line_x, top), egui::pos2(line_x, bottom)],
+                                                    egui::Stroke::new(2.0, self.theme.accent),
+                                                );
                                             }
                                         }
 
@@ -1158,37 +1223,51 @@ impl eframe::App for PortalApp {
                                         );
                                     }
 
-                                    // Handle drop → merge source tab into target tab, or detach to new window
                                     if ctx.input(|i| i.pointer.any_released()) {
-                                        if let Some(dst) = self.tab_drag.target_index {
-                                            // Dropping on another tab → merge
-                                            if src != dst && src < self.tabs.len() && dst < self.tabs.len() {
-                                                let mut src_tab = self.tabs.remove(src);
-                                                // Adjust dst index after removal
-                                                let dst = if src < dst { dst - 1 } else { dst };
-                                                let dst_tab = &mut self.tabs[dst];
-                                                let offset = dst_tab.sessions.len();
-                                                src_tab.layout.offset_indices(offset);
-                                                dst_tab.sessions.extend(src_tab.sessions);
-                                                let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
-                                                dst_tab.layout = PaneNode::Split {
-                                                    direction: SplitDirection::Horizontal,
-                                                    ratio: 0.5,
-                                                    first: Box::new(old_layout),
-                                                    second: Box::new(src_tab.layout),
-                                                };
-                                                // Update active_tab
-                                                if self.active_tab == src {
-                                                    self.active_tab = dst;
-                                                } else if self.active_tab > src && self.active_tab > 0 {
-                                                    self.active_tab -= 1;
+                                        if alt_held {
+                                            if let Some(dst) = self.tab_drag.target_index {
+                                                if src != dst && src < self.tabs.len() && dst < self.tabs.len() {
+                                                    let mut src_tab = self.tabs.remove(src);
+                                                    let dst = if src < dst { dst - 1 } else { dst };
+                                                    let dst_tab = &mut self.tabs[dst];
+                                                    let offset = dst_tab.sessions.len();
+                                                    src_tab.layout.offset_indices(offset);
+                                                    dst_tab.sessions.extend(src_tab.sessions);
+                                                    let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
+                                                    dst_tab.layout = PaneNode::Split {
+                                                        direction: SplitDirection::Horizontal,
+                                                        ratio: 0.5,
+                                                        first: Box::new(old_layout),
+                                                        second: Box::new(src_tab.layout),
+                                                    };
+                                                    if self.active_tab == src {
+                                                        self.active_tab = dst;
+                                                    } else if self.active_tab > src && self.active_tab > 0 {
+                                                        self.active_tab -= 1;
+                                                    }
+                                                    if self.active_tab >= self.tabs.len() {
+                                                        self.active_tab = self.tabs.len().saturating_sub(1);
+                                                    }
                                                 }
-                                                if self.active_tab >= self.tabs.len() {
-                                                    self.active_tab = self.tabs.len().saturating_sub(1);
+                                            }
+                                        } else if let Some(insert_pos) = self.tab_drag.insert_position {
+                                            if src < self.tabs.len() {
+                                                let tab = self.tabs.remove(src);
+                                                let new_pos = if src < insert_pos {
+                                                    (insert_pos - 1).min(self.tabs.len())
+                                                } else {
+                                                    insert_pos.min(self.tabs.len())
+                                                };
+                                                self.tabs.insert(new_pos, tab);
+                                                if self.active_tab == src {
+                                                    self.active_tab = new_pos;
+                                                } else if src < self.active_tab && new_pos >= self.active_tab {
+                                                    self.active_tab -= 1;
+                                                } else if src > self.active_tab && new_pos <= self.active_tab {
+                                                    self.active_tab += 1;
                                                 }
                                             }
                                         } else {
-                                            // Dropped outside tab area → detach to new window
                                             if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                                                 if !tab_bar_rect.contains(pos) && src < self.tabs.len() {
                                                     tab_to_detach = Some(src);
@@ -1197,6 +1276,7 @@ impl eframe::App for PortalApp {
                                         }
                                         self.tab_drag.source_index = None;
                                         self.tab_drag.target_index = None;
+                                        self.tab_drag.insert_position = None;
                                     }
                                 }
 

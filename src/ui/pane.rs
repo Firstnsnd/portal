@@ -210,6 +210,7 @@ pub struct TabDragState {
     pub target_index: Option<usize>,
     pub ghost_title: String,
     pub ghost_size: egui::Vec2,
+    pub insert_position: Option<usize>,
 }
 
 /// A tab that has been detached into its own OS window (full UI)
