@@ -18,10 +18,6 @@ use eframe::egui;
 use std::path::PathBuf;
 
 #[cfg(target_os = "macos")]
-use cocoa::appkit::NSApp;
-#[cfg(target_os = "macos")]
-use cocoa::base::{id, YES};
-#[cfg(target_os = "macos")]
 use objc::{msg_send, sel, sel_impl};
 
 /// The main application structure for Portal terminal emulator
@@ -96,7 +92,7 @@ impl PortalApp {
         #[cfg(target_os = "macos")]
         {
             use cocoa::appkit::NSApp;
-            use cocoa::base::id;
+            use cocoa::base::{id, YES};
 
             unsafe {
                 let app: id = NSApp();

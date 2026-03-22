@@ -156,6 +156,7 @@ impl TerminalGrid {
     /// Default scrollback limit: 100MB
     pub const DEFAULT_MAX_SCROLLBACK_BYTES: usize = 100 * 1024 * 1024;
 
+    #[allow(dead_code)]
     pub fn new(cols: usize, rows: usize) -> Self {
         Self::with_scrollback_limit(cols, rows, Self::DEFAULT_MAX_SCROLLBACK_BYTES)
     }
@@ -187,6 +188,7 @@ impl TerminalGrid {
     }
 
     /// Update the scrollback memory limit (e.g., from settings change)
+    #[allow(dead_code)]
     pub fn set_scrollback_limit(&mut self, max_bytes: usize) {
         self.max_scrollback_bytes = max_bytes;
         // Trim if currently over the new limit
@@ -1116,6 +1118,7 @@ pub struct RealPtySession {
 
 impl RealPtySession {
     #[cfg(unix)]
+    #[allow(dead_code)]
     pub fn new(id: usize, cols: u16, rows: u16, shell: &str) -> Result<Self> {
         Self::with_scrollback_limit(id, cols, rows, shell, TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES)
     }
