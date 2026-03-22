@@ -239,6 +239,9 @@ impl eframe::App for PortalApp {
                         })
                         .show(ctx, |ui| {
                             ui.horizontal(|ui| {
+                                // Get the actual tab bar area after horizontal layout
+                                let full_tab_bar_rect = ui.max_rect(); // Full tab bar rect for drag-out detection
+
                                 // Scrollable tab area (no scrollbar)
                                 egui::ScrollArea::horizontal()
                                     .id_salt("detached_tab_scroll")
@@ -251,12 +254,75 @@ impl eframe::App for PortalApp {
                                             let mut tab_to_close: Option<usize> = None;
                                             let mut tab_to_detach: Option<usize> = None;
                                             let mut tab_rects: Vec<egui::Rect> = Vec::with_capacity(dw.tabs.len());
-                                            let tab_bar_rect = ui.max_rect(); // Track tab bar area for drag-out detection
+
+                                            // Calculate tab displacement offset with smooth easing
+                                            let displacement_offset = if let (Some(target), Some(start_time)) = (dw.tab_drag.target_index, dw.tab_drag.animation_start_time) {
+                                                if !dw.tab_drag.is_merge && dw.tab_drag.source_index.is_some() {
+                                                    let current_time = ctx.input(|i| i.time);
+                                                    let elapsed = (current_time - start_time) as f32;
+                                                    let animation_duration = 0.6; // 600ms for smooth animation
+                                                    let progress = (elapsed / animation_duration).min(1.0);
+
+                                                    // Enhanced ease-in-out (slow-fast-slow) for smooth tab displacement
+                                                    // Using cubic easing for more pronounced slow-start and slow-end
+                                                    let t = progress;
+                                                    let eased = if t < 0.5 {
+                                                        4.0 * t * t * t  // Ease in: slow → fast
+                                                    } else {
+                                                        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0  // Ease out: fast → slow
+                                                    };
+
+                                                    // Use actual tab width
+                                                    let tab_width = if dw.tab_drag.ghost_size.x > 0.0 {
+                                                        dw.tab_drag.ghost_size.x
+                                                    } else {
+                                                        150.0
+                                                    };
+
+                                                    // Mark animation as completed for this target
+                                                    if progress >= 1.0 {
+                                                        dw.tab_drag.animation_completed_target = Some(target);
+                                                    }
+
+                                                    Some(eased * tab_width)
+                                                } else {
+                                                    None
+                                                }
+                                            } else if let (Some(target), Some(completed_target)) = (dw.tab_drag.target_index, dw.tab_drag.animation_completed_target) {
+                                                // Animation completed, keep the final displacement
+                                                if !dw.tab_drag.is_merge && dw.tab_drag.source_index.is_some() && target == completed_target {
+                                                    let tab_width = if dw.tab_drag.ghost_size.x > 0.0 {
+                                                        dw.tab_drag.ghost_size.x
+                                                    } else {
+                                                        150.0
+                                                    };
+                                                    Some(tab_width)
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            };
 
                                             for (ti, tab) in dw.tabs.iter().enumerate() {
                                                 let is_active = ti == dw.active_tab;
                                                 let is_drag_target = dw.tab_drag.source_index.is_some() && dw.tab_drag.target_index == Some(ti);
                                                 let tab_fill = if is_active { self.theme.bg_elevated } else { egui::Color32::TRANSPARENT };
+
+                                                // Apply smooth displacement animation to tabs that should move
+                                                if let (Some(target), Some(offset)) = (dw.tab_drag.target_index, displacement_offset) {
+                                                    // If this tab should be displaced, add space before it
+                                                    let should_displace = if dw.tab_drag.insert_before {
+                                                        // Displace target and all tabs after it
+                                                        ti >= target
+                                                    } else {
+                                                        // Displace only tabs after the target
+                                                        ti > target
+                                                    };
+                                                    if should_displace && dw.tab_drag.source_index != Some(ti) {
+                                                        ui.add_space(offset);
+                                                    }
+                                                }
 
                                                 let mut close_btn_rect: Option<egui::Rect> = None;
                                                 let tab_resp = egui::Frame {
@@ -340,18 +406,69 @@ impl eframe::App for PortalApp {
                                             // Draw drag ghost and handle reorder
                                             if let Some(src) = dw.tab_drag.source_index {
                                                 if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                                                    // Save previous target for animation reset logic
+                                                    let prev_target = dw.tab_drag.target_index;
+
                                                     dw.tab_drag.target_index = None;
                                                     dw.tab_drag.insert_before = true;
+                                                    dw.tab_drag.is_merge = false;
 
-                                                    // Check if hovering over a tab
+                                                    let mut new_target = None;
+
                                                     for (ti, rect) in tab_rects.iter().enumerate() {
-                                                        if rect.contains(pos) && Some(ti) != dw.tab_drag.source_index {
+                                                        if Some(ti) == dw.tab_drag.source_index {
+                                                            continue;
+                                                        }
+                                                        if rect.contains(pos) {
                                                             dw.tab_drag.target_index = Some(ti);
-                                                            // Determine insert position based on which side of the tab we're on
+                                                            new_target = Some(ti);
+                                                            // Check if in center region (merge) or edge region (reorder)
                                                             let center_x = rect.center().x;
-                                                            dw.tab_drag.insert_before = pos.x < center_x;
+                                                            let edge_threshold = rect.width() * 0.25;
+                                                            if pos.x >= rect.min.x + edge_threshold && pos.x <= rect.max.x - edge_threshold {
+                                                                // In center region → merge mode
+                                                                dw.tab_drag.is_merge = true;
+                                                            } else {
+                                                                // In edge region → reorder mode
+                                                                dw.tab_drag.insert_before = pos.x < center_x;
+                                                            }
                                                             break;
                                                         }
+                                                    }
+
+                                                    // If not hovering over any tab but still within tab bar area,
+                                                    // find the closest insertion point (reorder only)
+                                                    if dw.tab_drag.target_index.is_none() && full_tab_bar_rect.contains(pos) {
+                                                        let mut closest_idx = None;
+                                                        let mut closest_dist = f32::MAX;
+                                                        for (ti, rect) in tab_rects.iter().enumerate() {
+                                                            if Some(ti) == dw.tab_drag.source_index {
+                                                                continue;
+                                                            }
+                                                            let center_x = rect.center().x;
+                                                            let dist = (pos.x - center_x).abs();
+                                                            if dist < closest_dist {
+                                                                closest_dist = dist;
+                                                                closest_idx = Some(ti);
+                                                            }
+                                                        }
+                                                        if let Some(ti) = closest_idx {
+                                                            dw.tab_drag.target_index = Some(ti);
+                                                            new_target = Some(ti);
+                                                            let center_x = tab_rects[ti].center().x;
+                                                            dw.tab_drag.insert_before = pos.x < center_x;
+                                                        }
+                                                    }
+
+                                                    // Reset animation ONLY when target changes from Some(a) to Some(b) where a != b
+                                                    // Don't reset when going None -> Some or staying on same target (prevents looping)
+                                                    let should_reset = match (prev_target, new_target) {
+                                                        (Some(a), Some(b)) if a != b => true,
+                                                        _ => false,
+                                                    };
+                                                    if should_reset {
+                                                        dw.tab_drag.animation_start_time = Some(ctx.input(|i| i.time));
+                                                        dw.tab_drag.animation_completed_target = None;
                                                     }
 
                                                     // Draw ghost tab at cursor position
@@ -383,42 +500,116 @@ impl eframe::App for PortalApp {
                                                         egui::FontId::new(13.0, egui::FontFamily::Monospace),
                                                         egui::Color32::from_rgba_unmultiplied(220, 228, 255, 180)
                                                     );
+
+                                                    // Draw insertion indicator when in reorder mode
+                                                    if let Some(dst_idx) = dw.tab_drag.target_index {
+                                                        if !dw.tab_drag.is_merge && dst_idx < tab_rects.len() {
+                                                            let indicator_rect = tab_rects[dst_idx];
+                                                            let x_pos = if dw.tab_drag.insert_before {
+                                                                indicator_rect.min.x
+                                                            } else {
+                                                                indicator_rect.max.x
+                                                            };
+                                                            // Animated pulse effect using time
+                                                            let time = ctx.input(|i| i.time);
+                                                            let pulse = ((time * 3.0).sin() * 0.5 + 0.5) as f32; // 0.0 to 1.0
+                                                            let alpha = ((time * 2.0).sin() * 0.3 + 0.7) as u8; // pulsing alpha
+
+                                                            let line_width = 4.0 + pulse * 2.0; // 4.0 to 6.0
+                                                            let expand = pulse * 3.0; // 0.0 to 3.0
+
+                                                            let line_rect = egui::Rect::from_min_max(
+                                                                egui::pos2(x_pos - line_width / 2.0 - expand, indicator_rect.min.y - 4.0 - expand),
+                                                                egui::pos2(x_pos + line_width / 2.0 + expand, indicator_rect.max.y + 4.0 + expand),
+                                                            );
+
+                                                            // Draw outer glow with pulsing alpha
+                                                            painter.rect_filled(
+                                                                line_rect.expand(3.0),
+                                                                egui::Rounding::same(4.0),
+                                                                egui::Color32::from_rgba_unmultiplied(self.theme.accent.r(), self.theme.accent.g(), self.theme.accent.b(), (alpha as f32 / 255.0 * 80.0) as u8)
+                                                            );
+                                                            // Draw middle glow
+                                                            painter.rect_filled(
+                                                                line_rect.expand(1.0),
+                                                                egui::Rounding::same(3.0),
+                                                                egui::Color32::from_rgba_unmultiplied(self.theme.accent.r(), self.theme.accent.g(), self.theme.accent.b(), (alpha as f32 / 255.0 * 150.0) as u8)
+                                                            );
+                                                            // Draw main indicator line with full opacity
+                                                            painter.rect_filled(
+                                                                line_rect,
+                                                                egui::Rounding::same(2.0),
+                                                                egui::Color32::from_rgba_unmultiplied(self.theme.accent.r(), self.theme.accent.g(), self.theme.accent.b(), alpha)
+                                                            );
+                                                        }
+                                                    }
                                                 }
 
                                                 if ctx.input(|i| i.pointer.any_released()) {
                                                     if let Some(dst) = dw.tab_drag.target_index {
-                                                        // Dropping on/next to another tab → reorder
                                                         if src != dst && src < dw.tabs.len() && dst < dw.tabs.len() {
-                                                            let src_tab = dw.tabs.remove(src);
-                                                            // Calculate insertion index
-                                                            let insert_idx = if dw.tab_drag.insert_before {
-                                                                if src < dst { dst - 1 } else { dst }
+                                                            if dw.tab_drag.is_merge {
+                                                                // Merge mode: combine the two tabs
+                                                                let mut src_tab = dw.tabs.remove(src);
+                                                                let dst = if src < dst { dst - 1 } else { dst };
+                                                                let dst_tab = &mut dw.tabs[dst];
+                                                                let offset = dst_tab.sessions.len();
+                                                                src_tab.layout.offset_indices(offset);
+                                                                dst_tab.sessions.extend(src_tab.sessions);
+                                                                let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
+                                                                dst_tab.layout = PaneNode::Split {
+                                                                    direction: SplitDirection::Horizontal,
+                                                                    ratio: 0.5,
+                                                                    first: Box::new(old_layout),
+                                                                    second: Box::new(src_tab.layout),
+                                                                };
+                                                                if dw.active_tab == src {
+                                                                    dw.active_tab = dst;
+                                                                } else if dw.active_tab > src && dw.active_tab > 0 {
+                                                                    dw.active_tab -= 1;
+                                                                }
+                                                                if dw.active_tab >= dw.tabs.len() {
+                                                                    dw.active_tab = dw.tabs.len().saturating_sub(1);
+                                                                }
                                                             } else {
-                                                                if src < dst { dst } else { dst + 1 }
-                                                            };
-                                                            dw.tabs.insert(insert_idx, src_tab);
+                                                                // Reorder mode: move the tab
+                                                                let src_tab = dw.tabs.remove(src);
+                                                                let insert_idx = if dw.tab_drag.insert_before {
+                                                                    if src < dst {
+                                                                        dst.saturating_sub(1)
+                                                                    } else {
+                                                                        dst
+                                                                    }
+                                                                } else {
+                                                                    if src < dst {
+                                                                        dst
+                                                                    } else {
+                                                                        (dst + 1).min(dw.tabs.len())
+                                                                    }
+                                                                };
+                                                                dw.tabs.insert(insert_idx, src_tab);
 
-                                                            // Update active_tab if needed
-                                                            if dw.active_tab == src {
+                                                                // After reorder, set the dragged tab as active
                                                                 dw.active_tab = insert_idx;
-                                                            } else if src < dw.active_tab && insert_idx >= dw.active_tab {
-                                                                dw.active_tab += 1;
-                                                            } else if src > dw.active_tab && insert_idx <= dw.active_tab {
-                                                                dw.active_tab += 1;
                                                             }
                                                         }
                                                     } else {
                                                         // Dropped outside tab area → detach to new window
                                                         if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                                                            if !tab_bar_rect.contains(pos) && src < dw.tabs.len() {
+                                                            if !full_tab_bar_rect.contains(pos) && src < dw.tabs.len() {
                                                                 tab_to_detach = Some(src);
                                                             }
                                                         }
                                                     }
                                                     dw.tab_drag.source_index = None;
                                                     dw.tab_drag.target_index = None;
+                                                    dw.tab_drag.animation_start_time = None;
+                                                    dw.tab_drag.animation_completed_target = None;
                                                 }
                                             }
+
+                                            // Update last_tab_rects for next frame
+                                            dw.last_tab_rects = tab_rects.clone();
 
                                             if let Some(ti) = tab_to_activate { dw.active_tab = ti; }
                                             if let Some(ti) = tab_to_detach {
@@ -813,7 +1004,8 @@ impl eframe::App for PortalApp {
                         ime_preedit: String::new(),
                         next_id,
                         tab_drag: TabDragState::default(),
-            broadcast_state: BroadcastState::default(),
+                        broadcast_state: BroadcastState::default(),
+                        last_tab_rects: Vec::new(),
                     });
                 }
             }
@@ -862,6 +1054,9 @@ impl eframe::App for PortalApp {
                 ui.horizontal(|ui| {
                     ui.add_space(4.0);
 
+                    // Get the actual tab bar area after horizontal layout
+                    let full_tab_bar_rect = ui.max_rect(); // Full tab bar rect for drag-out detection
+
                     // Scrollable tab area - max_width ensures buttons won't be overlapped
                     let tab_area_width = (available_width - buttons_width).max(100.0);
 
@@ -878,12 +1073,75 @@ impl eframe::App for PortalApp {
                                 let mut tab_to_reconnect: Option<usize> = None;
                                 let mut tab_to_detach: Option<usize> = None;
                                 let mut tab_rects: Vec<egui::Rect> = Vec::with_capacity(self.tabs.len());
-                                let tab_bar_rect = ui.max_rect(); // Track tab bar area for drag-out detection
+
+                                // Calculate tab displacement offset with smooth easing
+                                let displacement_offset = if let (Some(target), Some(start_time)) = (self.tab_drag.target_index, self.tab_drag.animation_start_time) {
+                                    if !self.tab_drag.is_merge && self.tab_drag.source_index.is_some() {
+                                        let current_time = ctx.input(|i| i.time);
+                                        let elapsed = (current_time - start_time) as f32;
+                                        let animation_duration = 0.6; // 600ms for smooth animation
+                                        let progress = (elapsed / animation_duration).min(1.0);
+
+                                        // Enhanced ease-in-out (slow-fast-slow) for smooth tab displacement
+                                        // Using cubic easing for more pronounced slow-start and slow-end
+                                        let t = progress;
+                                        let eased = if t < 0.5 {
+                                            4.0 * t * t * t  // Ease in: slow → fast
+                                        } else {
+                                            1.0 - (-2.0 * t + 2.0).powi(3) / 2.0  // Ease out: fast → slow
+                                        };
+
+                                        // Use actual tab width
+                                        let tab_width = if self.tab_drag.ghost_size.x > 0.0 {
+                                            self.tab_drag.ghost_size.x
+                                        } else {
+                                            150.0
+                                        };
+
+                                        // Mark animation as completed for this target
+                                        if progress >= 1.0 {
+                                            self.tab_drag.animation_completed_target = Some(target);
+                                        }
+
+                                        Some(eased * tab_width)
+                                    } else {
+                                        None
+                                    }
+                                } else if let (Some(target), Some(completed_target)) = (self.tab_drag.target_index, self.tab_drag.animation_completed_target) {
+                                    // Animation completed, keep the final displacement
+                                    if !self.tab_drag.is_merge && self.tab_drag.source_index.is_some() && target == completed_target {
+                                        let tab_width = if self.tab_drag.ghost_size.x > 0.0 {
+                                            self.tab_drag.ghost_size.x
+                                        } else {
+                                            150.0
+                                        };
+                                        Some(tab_width)
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
 
                                 for (i, tab) in self.tabs.iter().enumerate() {
                                     let is_active = i == self.active_tab;
                                     let is_drag_target = self.tab_drag.source_index.is_some() && self.tab_drag.target_index == Some(i);
                                     let is_broadcasting = tab.broadcast_enabled;
+
+                                    // Apply smooth displacement animation to tabs that should move
+                                    if let (Some(target), Some(offset)) = (self.tab_drag.target_index, displacement_offset) {
+                                        // If this tab should be displaced, add space before it
+                                        let should_displace = if self.tab_drag.insert_before {
+                                            // Displace target and all tabs after it
+                                            i >= target
+                                        } else {
+                                            // Displace only tabs after the target
+                                            i > target
+                                        };
+                                        if should_displace && self.tab_drag.source_index != Some(i) {
+                                            ui.add_space(offset);
+                                        }
+                                    }
 
                                     let tab_fill = if is_active {
                                         self.theme.bg_elevated
@@ -1000,18 +1258,73 @@ impl eframe::App for PortalApp {
                                 // Draw drag ghost and handle reorder
                                 if let Some(src) = self.tab_drag.source_index {
                                     if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                                        // Save previous target for animation reset logic
+                                        let prev_target = self.tab_drag.target_index;
+
                                         self.tab_drag.target_index = None;
                                         self.tab_drag.insert_before = true;
+                                        self.tab_drag.is_merge = false;
 
-                                        // Check if hovering over a tab
+                                        let mut new_target = None;
+
                                         for (i, rect) in tab_rects.iter().enumerate() {
-                                            if rect.contains(pos) && Some(i) != self.tab_drag.source_index {
+                                            if Some(i) == self.tab_drag.source_index {
+                                                continue;
+                                            }
+                                            if rect.contains(pos) {
                                                 self.tab_drag.target_index = Some(i);
-                                                // Determine insert position based on which side of the tab we're on
+                                                new_target = Some(i);
+                                                // Check if in center region (merge) or edge region (reorder)
+                                                // Center 50% = merge, edges 25% each = reorder
                                                 let center_x = rect.center().x;
-                                                self.tab_drag.insert_before = pos.x < center_x;
+                                                let edge_threshold = rect.width() * 0.25;
+                                                if pos.x >= rect.min.x + edge_threshold && pos.x <= rect.max.x - edge_threshold {
+                                                    // In center region → merge mode
+                                                    self.tab_drag.is_merge = true;
+                                                } else {
+                                                    // In edge region → reorder mode
+                                                    self.tab_drag.insert_before = pos.x < center_x;
+                                                }
                                                 break;
                                             }
+                                        }
+
+                                        // If not hovering over any tab but still within tab bar area,
+                                        // find the closest insertion point (reorder only)
+                                        if self.tab_drag.target_index.is_none() && full_tab_bar_rect.contains(pos) {
+                                            // Find which tab is closest horizontally
+                                            let mut closest_idx = None;
+                                            let mut closest_dist = f32::MAX;
+                                            for (i, rect) in tab_rects.iter().enumerate() {
+                                                if Some(i) == self.tab_drag.source_index {
+                                                    continue;
+                                                }
+                                                // Calculate distance to tab center
+                                                let center_x = rect.center().x;
+                                                let dist = (pos.x - center_x).abs();
+                                                if dist < closest_dist {
+                                                    closest_dist = dist;
+                                                    closest_idx = Some(i);
+                                                }
+                                            }
+                                            if let Some(i) = closest_idx {
+                                                self.tab_drag.target_index = Some(i);
+                                                new_target = Some(i);
+                                                // Determine insert_before based on which side of center we're on
+                                                let center_x = tab_rects[i].center().x;
+                                                self.tab_drag.insert_before = pos.x < center_x;
+                                            }
+                                        }
+
+                                        // Reset animation ONLY when target changes from Some(a) to Some(b) where a != b
+                                        // Don't reset when going None -> Some or staying on same target (prevents looping)
+                                        let should_reset = match (prev_target, new_target) {
+                                            (Some(a), Some(b)) if a != b => true,
+                                            _ => false,
+                                        };
+                                        if should_reset {
+                                            self.tab_drag.animation_start_time = Some(ctx.input(|i| i.time));
+                                            self.tab_drag.animation_completed_target = None;
                                         }
 
                                         // Draw ghost tab at cursor position
@@ -1043,43 +1356,123 @@ impl eframe::App for PortalApp {
                                             egui::FontId::new(13.0, egui::FontFamily::Monospace),
                                             egui::Color32::from_rgba_unmultiplied(220, 228, 255, 180)
                                         );
+
+                                        // Draw insertion indicator (vertical line) when in reorder mode
+                                        if let Some(dst_idx) = self.tab_drag.target_index {
+                                            if !self.tab_drag.is_merge && dst_idx < tab_rects.len() {
+                                                let indicator_rect = tab_rects[dst_idx];
+                                                let x_pos = if self.tab_drag.insert_before {
+                                                    indicator_rect.min.x
+                                                } else {
+                                                    indicator_rect.max.x
+                                                };
+
+                                                // Animated pulse effect using time
+                                                let time = ctx.input(|i| i.time);
+                                                let pulse = ((time * 3.0).sin() * 0.5 + 0.5) as f32; // 0.0 to 1.0
+                                                let alpha = ((time * 2.0).sin() * 0.3 + 0.7) as u8; // pulsing alpha
+
+                                                let line_width = 4.0 + pulse * 2.0; // 4.0 to 6.0
+                                                let expand = pulse * 3.0; // 0.0 to 3.0
+
+                                                let line_rect = egui::Rect::from_min_max(
+                                                    egui::pos2(x_pos - line_width / 2.0 - expand, indicator_rect.min.y - 4.0 - expand),
+                                                    egui::pos2(x_pos + line_width / 2.0 + expand, indicator_rect.max.y + 4.0 + expand),
+                                                );
+
+                                                // Draw outer glow with pulsing alpha
+                                                painter.rect_filled(
+                                                    line_rect.expand(3.0),
+                                                    egui::Rounding::same(4.0),
+                                                    egui::Color32::from_rgba_unmultiplied(self.theme.accent.r(), self.theme.accent.g(), self.theme.accent.b(), (alpha as f32 / 255.0 * 80.0) as u8)
+                                                );
+                                                // Draw middle glow
+                                                painter.rect_filled(
+                                                    line_rect.expand(1.0),
+                                                    egui::Rounding::same(3.0),
+                                                    egui::Color32::from_rgba_unmultiplied(self.theme.accent.r(), self.theme.accent.g(), self.theme.accent.b(), (alpha as f32 / 255.0 * 150.0) as u8)
+                                                );
+                                                // Draw main indicator line with full opacity
+                                                painter.rect_filled(
+                                                    line_rect,
+                                                    egui::Rounding::same(2.0),
+                                                    egui::Color32::from_rgba_unmultiplied(self.theme.accent.r(), self.theme.accent.g(), self.theme.accent.b(), alpha)
+                                                );
+                                            }
+                                        }
                                     }
 
-                                    // Handle drop → reorder tabs, or detach to new window if outside
+                                    // Handle drop → merge, reorder, or detach to new window if outside
                                     if ctx.input(|i| i.pointer.any_released()) {
                                         if let Some(dst) = self.tab_drag.target_index {
-                                            // Dropping on/next to another tab → reorder
                                             if src != dst && src < self.tabs.len() && dst < self.tabs.len() {
-                                                let src_tab = self.tabs.remove(src);
-                                                // Calculate insertion index
-                                                let insert_idx = if self.tab_drag.insert_before {
-                                                    if src < dst { dst - 1 } else { dst }
+                                                if self.tab_drag.is_merge {
+                                                    // Merge mode: combine the two tabs into one with split panes
+                                                    let mut src_tab = self.tabs.remove(src);
+                                                    // Adjust dst index after removal
+                                                    let dst = if src < dst { dst - 1 } else { dst };
+                                                    let dst_tab = &mut self.tabs[dst];
+                                                    let offset = dst_tab.sessions.len();
+                                                    src_tab.layout.offset_indices(offset);
+                                                    dst_tab.sessions.extend(src_tab.sessions);
+                                                    let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
+                                                    dst_tab.layout = PaneNode::Split {
+                                                        direction: SplitDirection::Horizontal,
+                                                        ratio: 0.5,
+                                                        first: Box::new(old_layout),
+                                                        second: Box::new(src_tab.layout),
+                                                    };
+                                                    // Update active_tab
+                                                    if self.active_tab == src {
+                                                        self.active_tab = dst;
+                                                    } else if self.active_tab > src && self.active_tab > 0 {
+                                                        self.active_tab -= 1;
+                                                    }
+                                                    if self.active_tab >= self.tabs.len() {
+                                                        self.active_tab = self.tabs.len().saturating_sub(1);
+                                                    }
                                                 } else {
-                                                    if src < dst { dst } else { dst + 1 }
-                                                };
-                                                self.tabs.insert(insert_idx, src_tab);
+                                                    // Reorder mode: move the tab to a new position
+                                                    let src_tab = self.tabs.remove(src);
 
-                                                // Update active_tab if needed
-                                                if self.active_tab == src {
+                                                    // Calculate insertion index
+                                                    let insert_idx = if self.tab_drag.insert_before {
+                                                        if src < dst {
+                                                            dst.saturating_sub(1)
+                                                        } else {
+                                                            dst
+                                                        }
+                                                    } else {
+                                                        if src < dst {
+                                                            dst
+                                                        } else {
+                                                            (dst + 1).min(self.tabs.len())
+                                                        }
+                                                    };
+
+                                                    self.tabs.insert(insert_idx, src_tab);
+
+                                                    // After reorder, set the dragged tab as active
                                                     self.active_tab = insert_idx;
-                                                } else if src < self.active_tab && insert_idx >= self.active_tab {
-                                                    self.active_tab += 1;
-                                                } else if src > self.active_tab && insert_idx <= self.active_tab {
-                                                    self.active_tab += 1;
                                                 }
                                             }
                                         } else {
                                             // Dropped outside tab area → detach to new window
                                             if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                                                if !tab_bar_rect.contains(pos) && src < self.tabs.len() {
+                                                if !full_tab_bar_rect.contains(pos) && src < self.tabs.len() {
                                                     tab_to_detach = Some(src);
                                                 }
                                             }
                                         }
                                         self.tab_drag.source_index = None;
                                         self.tab_drag.target_index = None;
+                                        self.tab_drag.animation_start_time = None;
+                                        self.tab_drag.animation_completed_target = None;
                                     }
                                 }
+
+                                // Update last_tab_rects for next frame
+                                self.last_tab_rects = tab_rects.clone();
 
                                 // Apply deferred tab actions
                                 if let Some(i) = tab_to_activate {

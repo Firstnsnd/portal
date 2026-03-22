@@ -212,6 +212,12 @@ pub struct TabDragState {
     pub ghost_size: egui::Vec2,
     /// Insert position: true = insert before target, false = insert after target
     pub insert_before: bool,
+    /// true = merge tabs, false = reorder tabs
+    pub is_merge: bool,
+    /// Animation start time for smooth tab displacement
+    pub animation_start_time: Option<f64>,
+    /// Target index for which animation has completed (to prevent looping)
+    pub animation_completed_target: Option<usize>,
 }
 
 /// A tab that has been detached into its own OS window (full UI)
@@ -227,6 +233,7 @@ pub struct DetachedWindow {
     pub ime_preedit: String,
     pub next_id: usize,
     pub tab_drag: TabDragState,
-#[allow(dead_code)]
+    #[allow(dead_code)]
     pub broadcast_state: BroadcastState,
+    pub last_tab_rects: Vec<egui::Rect>,  // Store previous frame's tab rects for drag animation
 }

@@ -59,6 +59,7 @@ pub struct PortalApp {
     // Tab drag state
     pub tab_drag: TabDragState,
     // Status bar pickers
+    pub last_tab_rects: Vec<egui::Rect>,  // Store previous frame's tab rects for drag animation
     pub selected_shell: String,
     pub selected_encoding: String,
     // Detached tab windows
@@ -227,6 +228,7 @@ impl PortalApp {
             sftp_left_remote_refresh_start: None,
             sftp_active_panel_is_local: true,  // Track which panel has focus
             tab_drag: TabDragState::default(),
+            last_tab_rects: Vec::new(),
 
             selected_shell,
             selected_encoding: "UTF-8".to_string(),
