@@ -11,6 +11,7 @@ mod ui;
 use app::PortalApp;
 use std::time::Duration;
 
+use config::ShortcutAction;
 use ui::*;
 use ssh::SshConnectionState;
 
@@ -30,6 +31,8 @@ impl eframe::App for PortalApp {
             AppView::Hosts => self.language.t("hosts").to_string(),
             AppView::Sftp => self.language.t("sftp").to_string(),
             AppView::Keychain => self.language.t("keychain").to_string(),
+            AppView::Snippets => self.language.t("snippets").to_string(),
+            AppView::Tunnels => self.language.t("tunnels").to_string(),
             AppView::Settings => self.language.t("settings").to_string(),
             AppView::Batch => "Batch".to_string(),
         };
@@ -80,6 +83,8 @@ impl eframe::App for PortalApp {
                     AppView::Hosts => self.language.t("hosts").to_string(),
                     AppView::Sftp => self.language.t("sftp").to_string(),
                     AppView::Keychain => self.language.t("keychain").to_string(),
+                    AppView::Snippets => self.language.t("snippets").to_string(),
+                    AppView::Tunnels => self.language.t("tunnels").to_string(),
                     AppView::Settings => self.language.t("settings").to_string(),
                     AppView::Batch => "Batch".to_string(),
                 };
@@ -91,12 +96,20 @@ impl eframe::App for PortalApp {
                     self.detached_windows[i].close_requested = true;
                 }
 
+                // Pre-resolve jump host info before mutable borrow of detached_windows
+                let dw_jump_host = {
+                    let dw = &self.detached_windows[i];
+                    let active = dw.active_tab;
+                    dw.tabs.get(active)
+                        .and_then(|tab| tab.sessions.get(tab.focused_session))
+                        .and_then(|s| s.ssh_host.as_ref())
+                        .and_then(|h| self.resolve_jump_host(h))
+                };
                 let dw = &mut self.detached_windows[i];
 
                 // ── Keyboard shortcuts ──
                 if dw.current_view == AppView::Terminal {
-                    if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && !i.modifiers.shift) {
-                        // Split horizontal in detached window
+                    if self.shortcut_resolver.matches(ShortcutAction::SplitHorizontal, ctx) {
                         let active = dw.active_tab;
                         let tab = &dw.tabs[active];
                         let old_idx = tab.focused_session;
@@ -104,7 +117,7 @@ impl eframe::App for PortalApp {
                         let resolved_auth = tab.sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                         let new_session = if let Some(host) = &ssh_host {
                             let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                            TerminalSession::new_ssh(host, auth, &self.runtime)
+                            TerminalSession::new_ssh(host, auth, &self.runtime, dw_jump_host.clone())
                         } else {
                             let id = dw.next_id;
                             dw.next_id += 1;
@@ -121,8 +134,7 @@ impl eframe::App for PortalApp {
                         });
                         tab.focused_session = new_idx;
                     }
-                    if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && i.modifiers.shift) {
-                        // Split vertical in detached window
+                    if self.shortcut_resolver.matches(ShortcutAction::SplitVertical, ctx) {
                         let active = dw.active_tab;
                         let tab = &dw.tabs[active];
                         let old_idx = tab.focused_session;
@@ -130,7 +142,7 @@ impl eframe::App for PortalApp {
                         let resolved_auth = tab.sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                         let new_session = if let Some(host) = &ssh_host {
                             let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                            TerminalSession::new_ssh(host, auth, &self.runtime)
+                            TerminalSession::new_ssh(host, auth, &self.runtime, dw_jump_host.clone())
                         } else {
                             let id = dw.next_id;
                             dw.next_id += 1;
@@ -146,6 +158,78 @@ impl eframe::App for PortalApp {
                             second: Box::new(PaneNode::Terminal(new_idx)),
                         });
                         tab.focused_session = new_idx;
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::Search, ctx) {
+                        let active = dw.active_tab;
+                        if let Some(tab) = dw.tabs.get_mut(active) {
+                            if let Some(session) = tab.sessions.get_mut(tab.focused_session) {
+                                if session.search_state.is_some() {
+                                    session.search_state = None;
+                                } else {
+                                    session.search_state = Some(SearchState {
+                                        query: String::new(),
+                                        matches: Vec::new(),
+                                        current_index: 0,
+                                        case_sensitive: false,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::NewTab, ctx) {
+                        let id = dw.next_id;
+                        dw.next_id += 1;
+                        let new_tab = Tab {
+                            title: format!("Terminal {}", id),
+                            sessions: vec![TerminalSession::new_local(id, &self.selected_shell)],
+                            layout: PaneNode::Terminal(0),
+                            focused_session: 0,
+                            broadcast_enabled: false,
+                        };
+                        dw.tabs.push(new_tab);
+                        dw.active_tab = dw.tabs.len() - 1;
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::ClosePane, ctx) {
+                        let active = dw.active_tab;
+                        let tab = &dw.tabs[active];
+                        if tab.sessions.len() > 1 {
+                            let idx = tab.focused_session;
+                            let tab = &mut dw.tabs[active];
+                            let old_layout = tab.layout.clone();
+                            if let Some(new_layout) = old_layout.remove(idx) {
+                                tab.layout = new_layout;
+                            }
+                            tab.layout.decrement_indices_above(idx);
+                            tab.sessions.remove(idx);
+                            if tab.focused_session >= tab.sessions.len() {
+                                tab.focused_session = tab.sessions.len().saturating_sub(1);
+                            } else if tab.focused_session == idx && idx > 0 {
+                                tab.focused_session = idx - 1;
+                            }
+                        }
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::CloseTab, ctx) {
+                        if dw.tabs.len() > 1 {
+                            let active = dw.active_tab;
+                            dw.tabs.remove(active);
+                            if dw.active_tab >= dw.tabs.len() {
+                                dw.active_tab = dw.tabs.len().saturating_sub(1);
+                            }
+                        }
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::NextTab, ctx) {
+                        if !dw.tabs.is_empty() {
+                            dw.active_tab = (dw.active_tab + 1) % dw.tabs.len();
+                        }
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::PrevTab, ctx) {
+                        if !dw.tabs.is_empty() {
+                            dw.active_tab = if dw.active_tab == 0 { dw.tabs.len() - 1 } else { dw.active_tab - 1 };
+                        }
+                    }
+                    if self.shortcut_resolver.matches(ShortcutAction::ToggleBroadcast, ctx) {
+                        let active = dw.active_tab;
+                        dw.tabs[active].broadcast_enabled = !dw.tabs[active].broadcast_enabled;
                     }
                 }
 
@@ -206,6 +290,12 @@ impl eframe::App for PortalApp {
                         }
                         if nav_btn(ui, "\u{1f511}", self.language.t("keychain"), dw.current_view == AppView::Keychain) {
                             dw.current_view = AppView::Keychain;
+                        }
+                        if nav_btn(ui, "\u{2318}", self.language.t("snippets"), dw.current_view == AppView::Snippets) {
+                            dw.current_view = AppView::Snippets;
+                        }
+                        if nav_btn(ui, "\u{1f310}", self.language.t("tunnels"), dw.current_view == AppView::Tunnels) {
+                            dw.current_view = AppView::Tunnels;
                         }
 
                         // Settings button at bottom - fill remaining space to reach window bottom
@@ -339,12 +429,36 @@ impl eframe::App for PortalApp {
 
                                             // Draw drag ghost and handle reorder
                                             if let Some(src) = dw.tab_drag.source_index {
+                                                let alt_held = ctx.input(|i| i.modifiers.alt);
                                                 if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                                                     dw.tab_drag.target_index = None;
+                                                    dw.tab_drag.insert_position = None;
                                                     for (ti, rect) in tab_rects.iter().enumerate() {
                                                         if rect.contains(pos) && Some(ti) != dw.tab_drag.source_index {
-                                                            dw.tab_drag.target_index = Some(ti);
+                                                            if alt_held {
+                                                                dw.tab_drag.target_index = Some(ti);
+                                                            } else {
+                                                                let mid_x = rect.center().x;
+                                                                let insert_pos = if pos.x < mid_x { ti } else { ti + 1 };
+                                                                dw.tab_drag.insert_position = Some(insert_pos);
+                                                            }
                                                             break;
+                                                        }
+                                                    }
+
+                                                    if !alt_held {
+                                                        if let Some(insert_pos) = dw.tab_drag.insert_position {
+                                                            let line_x = if insert_pos < tab_rects.len() {
+                                                                tab_rects[insert_pos].min.x - 1.0
+                                                            } else {
+                                                                tab_rects[tab_rects.len() - 1].max.x + 1.0
+                                                            };
+                                                            let top = tab_rects[0].min.y;
+                                                            let bottom = tab_rects[0].max.y;
+                                                            ui.painter().line_segment(
+                                                                [egui::pos2(line_x, top), egui::pos2(line_x, bottom)],
+                                                                egui::Stroke::new(2.0, self.theme.accent),
+                                                            );
                                                         }
                                                     }
 
@@ -380,34 +494,50 @@ impl eframe::App for PortalApp {
                                                 }
 
                                                 if ctx.input(|i| i.pointer.any_released()) {
-                                                    if let Some(dst) = dw.tab_drag.target_index {
-                                                        // Dropping on another tab → merge
-                                                        if src != dst && src < dw.tabs.len() && dst < dw.tabs.len() {
-                                                            let mut src_tab = dw.tabs.remove(src);
-                                                            let dst = if src < dst { dst - 1 } else { dst };
-                                                            let dst_tab = &mut dw.tabs[dst];
-                                                            let offset = dst_tab.sessions.len();
-                                                            src_tab.layout.offset_indices(offset);
-                                                            dst_tab.sessions.extend(src_tab.sessions);
-                                                            let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
-                                                            dst_tab.layout = PaneNode::Split {
-                                                                direction: SplitDirection::Horizontal,
-                                                                ratio: 0.5,
-                                                                first: Box::new(old_layout),
-                                                                second: Box::new(src_tab.layout),
-                                                            };
-                                                            // Update active_tab
-                                                            if dw.active_tab == src {
-                                                                dw.active_tab = dst;
-                                                            } else if dw.active_tab > src && dw.active_tab > 0 {
-                                                                dw.active_tab -= 1;
+                                                    if alt_held {
+                                                        if let Some(dst) = dw.tab_drag.target_index {
+                                                            if src != dst && src < dw.tabs.len() && dst < dw.tabs.len() {
+                                                                let mut src_tab = dw.tabs.remove(src);
+                                                                let dst = if src < dst { dst - 1 } else { dst };
+                                                                let dst_tab = &mut dw.tabs[dst];
+                                                                let offset = dst_tab.sessions.len();
+                                                                src_tab.layout.offset_indices(offset);
+                                                                dst_tab.sessions.extend(src_tab.sessions);
+                                                                let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
+                                                                dst_tab.layout = PaneNode::Split {
+                                                                    direction: SplitDirection::Horizontal,
+                                                                    ratio: 0.5,
+                                                                    first: Box::new(old_layout),
+                                                                    second: Box::new(src_tab.layout),
+                                                                };
+                                                                if dw.active_tab == src {
+                                                                    dw.active_tab = dst;
+                                                                } else if dw.active_tab > src && dw.active_tab > 0 {
+                                                                    dw.active_tab -= 1;
+                                                                }
+                                                                if dw.active_tab >= dw.tabs.len() {
+                                                                    dw.active_tab = dw.tabs.len().saturating_sub(1);
+                                                                }
                                                             }
-                                                            if dw.active_tab >= dw.tabs.len() {
-                                                                dw.active_tab = dw.tabs.len().saturating_sub(1);
+                                                        }
+                                                    } else if let Some(insert_pos) = dw.tab_drag.insert_position {
+                                                        if src < dw.tabs.len() {
+                                                            let tab = dw.tabs.remove(src);
+                                                            let new_pos = if src < insert_pos {
+                                                                (insert_pos - 1).min(dw.tabs.len())
+                                                            } else {
+                                                                insert_pos.min(dw.tabs.len())
+                                                            };
+                                                            dw.tabs.insert(new_pos, tab);
+                                                            if dw.active_tab == src {
+                                                                dw.active_tab = new_pos;
+                                                            } else if src < dw.active_tab && new_pos >= dw.active_tab {
+                                                                dw.active_tab -= 1;
+                                                            } else if src > dw.active_tab && new_pos <= dw.active_tab {
+                                                                dw.active_tab += 1;
                                                             }
                                                         }
                                                     } else {
-                                                        // Dropped outside tab area → detach to new window
                                                         if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                                                             if !tab_bar_rect.contains(pos) && src < dw.tabs.len() {
                                                                 tab_to_detach = Some(src);
@@ -416,6 +546,7 @@ impl eframe::App for PortalApp {
                                                     }
                                                     dw.tab_drag.source_index = None;
                                                     dw.tab_drag.target_index = None;
+                                                    dw.tab_drag.insert_position = None;
                                                 }
                                             }
 
@@ -629,6 +760,15 @@ impl eframe::App for PortalApp {
 
                 // ── Central Panel ──
                 let dw_view = self.detached_windows[i].current_view;
+                // Pre-resolve jump host info for splits/reconnects in detached windows
+                let dw_jump2 = {
+                    let dw = &self.detached_windows[i];
+                    let active = dw.active_tab;
+                    dw.tabs.get(active)
+                        .and_then(|tab| tab.sessions.get(tab.focused_session))
+                        .and_then(|s| s.ssh_host.as_ref())
+                        .and_then(|h| self.resolve_jump_host(h))
+                };
                 egui::CentralPanel::default()
                     .frame(egui::Frame {
                         fill: self.theme.bg_primary,
@@ -663,6 +803,7 @@ impl eframe::App for PortalApp {
                                         &self.theme,
                                         self.font_size,
                                         &self.language,
+                                        &self.shortcut_resolver,
                                     )
                                 };
                                 if let Some((idx, action, input_bytes)) = pane_result {
@@ -689,7 +830,7 @@ impl eframe::App for PortalApp {
                                             let resolved_auth = dw.tabs[active].sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                                             let new_session = if let Some(host) = &ssh_host {
                                                 let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                                                TerminalSession::new_ssh(host, auth, &self.runtime)
+                                                TerminalSession::new_ssh(host, auth, &self.runtime, dw_jump2.clone())
                                             } else {
                                                 let id = dw.next_id;
                                                 dw.next_id += 1;
@@ -711,7 +852,7 @@ impl eframe::App for PortalApp {
                                             let resolved_auth = dw.tabs[active].sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                                             let new_session = if let Some(host) = &ssh_host {
                                                 let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                                                TerminalSession::new_ssh(host, auth, &self.runtime)
+                                                TerminalSession::new_ssh(host, auth, &self.runtime, dw_jump2.clone())
                                             } else {
                                                 let id = dw.next_id;
                                                 dw.next_id += 1;
@@ -757,8 +898,7 @@ impl eframe::App for PortalApp {
                                             // Remove old SSH host key and reconnect
                                             if let Some(host) = dw.tabs[active].sessions.get(idx).and_then(|s| s.ssh_host.clone()) {
                                                 let _ = crate::ssh::remove_known_hosts_key(&host.host, host.port);
-                                                // Reconnect the SSH session
-                                                dw.tabs[active].sessions[idx].reconnect_ssh(&self.runtime);
+                                                dw.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, dw_jump2.clone());
                                             }
                                         }
                                     }
@@ -772,6 +912,12 @@ impl eframe::App for PortalApp {
                             }
                             AppView::Keychain => {
                                 self.show_keychain_view(ctx, ui);
+                            }
+                            AppView::Snippets => {
+                                self.show_snippets_view(ctx, ui);
+                            }
+                            AppView::Tunnels => {
+                                self.show_tunnels_view(ctx, ui);
                             }
                             AppView::Settings => {
                                 self.show_settings_view(ctx, ui);
@@ -829,15 +975,63 @@ impl eframe::App for PortalApp {
             return;
         }
 
-        // ── Split keyboard shortcuts (terminal view only) ─────────────────────
-        // Cmd+D  → split horizontally (left | right)
-        // Cmd+Shift+D → split vertically (top / bottom)
+        // ── Keyboard shortcuts (terminal view only) ─────────────────────
         if self.current_view == AppView::Terminal {
-            if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && !i.modifiers.shift) {
+            if self.shortcut_resolver.matches(ShortcutAction::SplitHorizontal, ctx) {
                 self.split_focused_pane(SplitDirection::Horizontal);
             }
-            if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && i.modifiers.shift) {
+            if self.shortcut_resolver.matches(ShortcutAction::SplitVertical, ctx) {
                 self.split_focused_pane(SplitDirection::Vertical);
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::Search, ctx) {
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    if let Some(session) = tab.sessions.get_mut(tab.focused_session) {
+                        if session.search_state.is_some() {
+                            session.search_state = None;
+                        } else {
+                            session.search_state = Some(SearchState {
+                                query: String::new(),
+                                matches: Vec::new(),
+                                current_index: 0,
+                                case_sensitive: false,
+                            });
+                        }
+                    }
+                }
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::NewTab, ctx) {
+                self.add_tab_local();
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::ClosePane, ctx) {
+                let active = self.active_tab;
+                if self.tabs[active].sessions.len() > 1 {
+                    let idx = self.tabs[active].focused_session;
+                    self.close_pane(idx);
+                }
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::CloseTab, ctx) {
+                if self.tabs.len() > 1 {
+                    let active = self.active_tab;
+                    self.tabs.remove(active);
+                    if self.active_tab >= self.tabs.len() {
+                        self.active_tab = self.tabs.len().saturating_sub(1);
+                    }
+                }
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::NextTab, ctx) {
+                if !self.tabs.is_empty() {
+                    self.active_tab = (self.active_tab + 1) % self.tabs.len();
+                }
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::PrevTab, ctx) {
+                if !self.tabs.is_empty() {
+                    self.active_tab = if self.active_tab == 0 { self.tabs.len() - 1 } else { self.active_tab - 1 };
+                }
+            }
+            if self.shortcut_resolver.matches(ShortcutAction::ToggleBroadcast, ctx) {
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    tab.broadcast_enabled = !tab.broadcast_enabled;
+                }
             }
         }
 
@@ -998,12 +1192,36 @@ impl eframe::App for PortalApp {
 
                                 // Draw drag ghost and handle reorder
                                 if let Some(src) = self.tab_drag.source_index {
+                                    let alt_held = ctx.input(|i| i.modifiers.alt);
                                     if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                                         self.tab_drag.target_index = None;
+                                        self.tab_drag.insert_position = None;
                                         for (i, rect) in tab_rects.iter().enumerate() {
                                             if rect.contains(pos) && Some(i) != self.tab_drag.source_index {
-                                                self.tab_drag.target_index = Some(i);
+                                                if alt_held {
+                                                    self.tab_drag.target_index = Some(i);
+                                                } else {
+                                                    let mid_x = rect.center().x;
+                                                    let insert_pos = if pos.x < mid_x { i } else { i + 1 };
+                                                    self.tab_drag.insert_position = Some(insert_pos);
+                                                }
                                                 break;
+                                            }
+                                        }
+
+                                        if !alt_held {
+                                            if let Some(insert_pos) = self.tab_drag.insert_position {
+                                                let line_x = if insert_pos < tab_rects.len() {
+                                                    tab_rects[insert_pos].min.x - 1.0
+                                                } else {
+                                                    tab_rects[tab_rects.len() - 1].max.x + 1.0
+                                                };
+                                                let top = tab_rects[0].min.y;
+                                                let bottom = tab_rects[0].max.y;
+                                                ui.painter().line_segment(
+                                                    [egui::pos2(line_x, top), egui::pos2(line_x, bottom)],
+                                                    egui::Stroke::new(2.0, self.theme.accent),
+                                                );
                                             }
                                         }
 
@@ -1038,37 +1256,51 @@ impl eframe::App for PortalApp {
                                         );
                                     }
 
-                                    // Handle drop → merge source tab into target tab, or detach to new window
                                     if ctx.input(|i| i.pointer.any_released()) {
-                                        if let Some(dst) = self.tab_drag.target_index {
-                                            // Dropping on another tab → merge
-                                            if src != dst && src < self.tabs.len() && dst < self.tabs.len() {
-                                                let mut src_tab = self.tabs.remove(src);
-                                                // Adjust dst index after removal
-                                                let dst = if src < dst { dst - 1 } else { dst };
-                                                let dst_tab = &mut self.tabs[dst];
-                                                let offset = dst_tab.sessions.len();
-                                                src_tab.layout.offset_indices(offset);
-                                                dst_tab.sessions.extend(src_tab.sessions);
-                                                let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
-                                                dst_tab.layout = PaneNode::Split {
-                                                    direction: SplitDirection::Horizontal,
-                                                    ratio: 0.5,
-                                                    first: Box::new(old_layout),
-                                                    second: Box::new(src_tab.layout),
-                                                };
-                                                // Update active_tab
-                                                if self.active_tab == src {
-                                                    self.active_tab = dst;
-                                                } else if self.active_tab > src && self.active_tab > 0 {
-                                                    self.active_tab -= 1;
+                                        if alt_held {
+                                            if let Some(dst) = self.tab_drag.target_index {
+                                                if src != dst && src < self.tabs.len() && dst < self.tabs.len() {
+                                                    let mut src_tab = self.tabs.remove(src);
+                                                    let dst = if src < dst { dst - 1 } else { dst };
+                                                    let dst_tab = &mut self.tabs[dst];
+                                                    let offset = dst_tab.sessions.len();
+                                                    src_tab.layout.offset_indices(offset);
+                                                    dst_tab.sessions.extend(src_tab.sessions);
+                                                    let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
+                                                    dst_tab.layout = PaneNode::Split {
+                                                        direction: SplitDirection::Horizontal,
+                                                        ratio: 0.5,
+                                                        first: Box::new(old_layout),
+                                                        second: Box::new(src_tab.layout),
+                                                    };
+                                                    if self.active_tab == src {
+                                                        self.active_tab = dst;
+                                                    } else if self.active_tab > src && self.active_tab > 0 {
+                                                        self.active_tab -= 1;
+                                                    }
+                                                    if self.active_tab >= self.tabs.len() {
+                                                        self.active_tab = self.tabs.len().saturating_sub(1);
+                                                    }
                                                 }
-                                                if self.active_tab >= self.tabs.len() {
-                                                    self.active_tab = self.tabs.len().saturating_sub(1);
+                                            }
+                                        } else if let Some(insert_pos) = self.tab_drag.insert_position {
+                                            if src < self.tabs.len() {
+                                                let tab = self.tabs.remove(src);
+                                                let new_pos = if src < insert_pos {
+                                                    (insert_pos - 1).min(self.tabs.len())
+                                                } else {
+                                                    insert_pos.min(self.tabs.len())
+                                                };
+                                                self.tabs.insert(new_pos, tab);
+                                                if self.active_tab == src {
+                                                    self.active_tab = new_pos;
+                                                } else if src < self.active_tab && new_pos >= self.active_tab {
+                                                    self.active_tab -= 1;
+                                                } else if src > self.active_tab && new_pos <= self.active_tab {
+                                                    self.active_tab += 1;
                                                 }
                                             }
                                         } else {
-                                            // Dropped outside tab area → detach to new window
                                             if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                                                 if !tab_bar_rect.contains(pos) && src < self.tabs.len() {
                                                     tab_to_detach = Some(src);
@@ -1077,6 +1309,7 @@ impl eframe::App for PortalApp {
                                         }
                                         self.tab_drag.source_index = None;
                                         self.tab_drag.target_index = None;
+                                        self.tab_drag.insert_position = None;
                                     }
                                 }
 
@@ -1086,7 +1319,9 @@ impl eframe::App for PortalApp {
                                 }
                                 if let Some(i) = tab_to_reconnect {
                                     let si = self.tabs[i].focused_session;
-                                    self.tabs[i].sessions[si].reconnect_ssh(&self.runtime);
+                                    let jump = self.tabs[i].sessions[si].ssh_host.as_ref()
+                                        .and_then(|h| self.resolve_jump_host(h));
+                                    self.tabs[i].sessions[si].reconnect_ssh(&self.runtime, jump);
                                 }
                                 if let Some(i) = tab_to_detach {
                                     self.detach_tab(i);
@@ -1502,6 +1737,7 @@ impl eframe::App for PortalApp {
                                 &self.theme,
                                 self.font_size,
                                 &self.language,
+                                &self.shortcut_resolver,
                             )
                         };
                         if let Some((idx, action, input_bytes)) = pane_result {
@@ -1532,8 +1768,8 @@ impl eframe::App for PortalApp {
                                     // Remove old SSH host key and reconnect
                                     if let Some(host) = self.tabs[active].sessions.get(idx).and_then(|s| s.ssh_host.clone()) {
                                         let _ = crate::ssh::remove_known_hosts_key(&host.host, host.port);
-                                        // Reconnect the SSH session
-                                        self.tabs[active].sessions[idx].reconnect_ssh(&self.runtime);
+                                        let jump = self.resolve_jump_host(&host);
+                                        self.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, jump);
                                     }
                                 }
                             }
@@ -1546,6 +1782,13 @@ impl eframe::App for PortalApp {
 
                     AppView::Keychain => {
                         self.show_keychain_view(ctx, ui);
+                    }
+
+                    AppView::Snippets => {
+                        self.show_snippets_view(ctx, ui);
+                    }
+                    AppView::Tunnels => {
+                        self.show_tunnels_view(ctx, ui);
                     }
 
                     AppView::Settings => {

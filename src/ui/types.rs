@@ -63,7 +63,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::config::{HostEntry, ResolvedAuth};
-use crate::ssh::{SshSession, SshConnectionState};
+use crate::ssh::{SshSession, SshConnectionState, JumpHostInfo};
 use crate::terminal::{TerminalGrid, RealPtySession};
 
 /// Broadcast state - for Tab-internal continuous interactive batch operations
@@ -244,12 +244,22 @@ pub struct AddHostDialog {
     pub key_passphrase: String,
     pub key_in_keychain: bool,
     pub startup_commands: String,
+    pub agent_forwarding: bool,
     pub test_conn_state: TestConnState,
     pub test_conn_result: Option<Arc<Mutex<Option<Result<String, String>>>>>,
     /// Show "Remove old key" button when host key verification fails
     pub show_remove_key_button: bool,
     /// Message to display after removing a key
     pub remove_key_message: String,
+    pub jump_host: Option<String>,
+    /// Port forward rules configured for this host
+    pub port_forwards: Vec<crate::config::PortForwardConfig>,
+    /// Editing state for a new port forward being added
+    pub new_forward_kind: crate::config::ForwardKind,
+    pub new_forward_local_host: String,
+    pub new_forward_local_port: String,
+    pub new_forward_remote_host: String,
+    pub new_forward_remote_port: String,
 }
 
 /// Key source choice for SSH key authentication
@@ -282,10 +292,18 @@ impl Default for AddHostDialog {
             key_passphrase: String::new(),
             key_in_keychain: false,
             startup_commands: String::new(),
+            agent_forwarding: false,
             test_conn_state: TestConnState::Idle,
             test_conn_result: None,
             show_remove_key_button: false,
             remove_key_message: String::new(),
+            jump_host: None,
+            port_forwards: Vec::new(),
+            new_forward_kind: crate::config::ForwardKind::Local,
+            new_forward_local_host: "127.0.0.1".to_owned(),
+            new_forward_local_port: String::new(),
+            new_forward_remote_host: "127.0.0.1".to_owned(),
+            new_forward_remote_port: String::new(),
         }
     }
 }
@@ -310,6 +328,9 @@ impl AddHostDialog {
         self.group = host.group.clone();
         self.tags = host.tags.join(", ");
         self.startup_commands = host.startup_commands.join("\n");
+        self.agent_forwarding = host.agent_forwarding;
+        self.jump_host = host.jump_host.clone();
+        self.port_forwards = host.port_forwards.clone();
         self.error = String::new();
 
         // Set credential mode based on host state
@@ -344,6 +365,29 @@ impl AddHostDialog {
             self.selected_credential_id = None;
         }
     }
+}
+
+/// Search match position in terminal content
+#[derive(Clone, Debug)]
+pub struct SearchMatch {
+    /// Global row index (scrollback + grid unified)
+    pub row: usize,
+    /// Start column (inclusive)
+    pub col_start: usize,
+    /// End column (exclusive)
+    pub col_end: usize,
+}
+
+/// Search state for terminal content
+pub struct SearchState {
+    /// Current search query
+    pub query: String,
+    /// All matches found
+    pub matches: Vec<SearchMatch>,
+    /// Index of the currently highlighted match
+    pub current_index: usize,
+    /// Whether search is case-sensitive
+    pub case_sensitive: bool,
 }
 
 /// Text selection state in terminal
@@ -406,6 +450,8 @@ pub struct TerminalSession {
     pub last_non_ascii_input: bool,
     /// Current working directory (updated via OSC 7 or initial cwd)
     pub cwd: Option<String>,
+    /// Search state (active when Some)
+    pub search_state: Option<SearchState>,
 }
 
 impl TerminalSession {
@@ -438,6 +484,7 @@ impl TerminalSession {
             pty_resize_deadline: Instant::now(),
             last_non_ascii_input: false,
             cwd,
+            search_state: None,
         }
     }
 
@@ -456,9 +503,21 @@ impl TerminalSession {
         }
     }
 
-    pub fn new_ssh(host: &HostEntry, auth: ResolvedAuth, runtime: &tokio::runtime::Runtime) -> Self {
+    pub fn new_ssh(host: &HostEntry, auth: ResolvedAuth, runtime: &tokio::runtime::Runtime, jump_host: Option<JumpHostInfo>) -> Self {
         // Use current system user if username is empty
         let username = Self::get_effective_username(&host.username);
+
+        crate::config::append_history(crate::config::ConnectionRecord {
+            host_name: host.name.clone(),
+            host: host.host.clone(),
+            port: host.port,
+            username: username.clone(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            success: true,
+        });
 
         // Load settings to get scrollback limit
         let settings = crate::config::load_settings();
@@ -474,6 +533,10 @@ impl TerminalSession {
             24,
             host.startup_commands.clone(),
             scrollback_bytes,
+            settings.ssh_keepalive_interval,
+            host.agent_forwarding,
+            host.port_forwards.clone(),
+            jump_host,
         );
         let grid = ssh.get_grid();
         Self {
@@ -491,6 +554,7 @@ impl TerminalSession {
             pty_resize_deadline: Instant::now(),
             last_non_ascii_input: false,
             cwd: None, // SSH sessions start without known cwd
+            search_state: None,
         }
     }
 
@@ -519,8 +583,9 @@ impl TerminalSession {
     }
 
     /// Reconnect a disconnected SSH session
-    pub fn reconnect_ssh(&mut self, runtime: &tokio::runtime::Runtime) {
+    pub fn reconnect_ssh(&mut self, runtime: &tokio::runtime::Runtime, jump_host: Option<JumpHostInfo>) {
         if let (Some(ref host), Some(ref auth)) = (&self.ssh_host, &self.resolved_auth) {
+            let settings = crate::config::load_settings();
             let ssh = SshSession::connect(
                 runtime,
                 host.host.clone(),
@@ -530,6 +595,9 @@ impl TerminalSession {
                 self.last_cols as u16,
                 self.last_rows as u16,
                 host.startup_commands.clone(),
+                settings.ssh_keepalive_interval,
+                host.agent_forwarding,
+                jump_host,
             );
             self.grid = ssh.get_grid();
             self.session = Some(SessionBackend::Ssh(ssh));
@@ -716,9 +784,48 @@ pub enum AppView {
     Terminal,
     Sftp,
     Keychain,
+    Snippets,
+    Tunnels,
     Settings,
     #[allow(dead_code)]
     Batch,
+}
+
+/// State for the "Add Tunnel" dialog
+pub struct AddTunnelDialog {
+    pub open: bool,
+    /// Index of the selected tab (in app.tabs)
+    pub selected_tab_idx: Option<usize>,
+    /// Index of the selected session within that tab
+    pub selected_session_idx: Option<usize>,
+    pub forward_kind: crate::config::ForwardKind,
+    pub local_host: String,
+    pub local_port: String,
+    pub remote_host: String,
+    pub remote_port: String,
+    pub error: String,
+}
+
+impl Default for AddTunnelDialog {
+    fn default() -> Self {
+        Self {
+            open: false,
+            selected_tab_idx: None,
+            selected_session_idx: None,
+            forward_kind: crate::config::ForwardKind::Local,
+            local_host: "127.0.0.1".to_owned(),
+            local_port: String::new(),
+            remote_host: "127.0.0.1".to_owned(),
+            remote_port: String::new(),
+            error: String::new(),
+        }
+    }
+}
+
+impl AddTunnelDialog {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 /// Pending keychain credential deletion (awaiting user confirmation).
@@ -813,6 +920,37 @@ pub enum CredentialTypeChoice {
 }
 
 
+
+/// Snippet view state for Command Snippets feature
+pub struct SnippetViewState {
+    pub search_query: String,
+    pub editing: Option<String>,  // id of snippet being edited
+    pub edit_name: String,
+    pub edit_command: String,
+    pub edit_group: String,
+    pub show_new: bool,
+    pub new_name: String,
+    pub new_command: String,
+    pub new_group: String,
+    pub confirm_delete: Option<String>,  // id of snippet pending delete confirmation
+}
+
+impl Default for SnippetViewState {
+    fn default() -> Self {
+        Self {
+            search_query: String::new(),
+            editing: None,
+            edit_name: String::new(),
+            edit_command: String::new(),
+            edit_group: String::new(),
+            show_new: false,
+            new_name: String::new(),
+            new_command: String::new(),
+            new_group: String::new(),
+            confirm_delete: None,
+        }
+    }
+}
 
 /// Host filter state for the hosts list view
 #[derive(Default, Clone)]

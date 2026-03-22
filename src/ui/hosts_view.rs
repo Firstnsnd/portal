@@ -6,6 +6,9 @@ use crate::app::PortalApp;
 use crate::config::HostEntry;
 use crate::ssh::test_connection;
 use crate::ui::types::{AuthMethodChoice, TestConnState, AppView, KeySourceChoice, BatchTarget, BatchStatus, BatchResult, BatchUpdate};
+use crate::ui::i18n::format_time_ago;
+use crate::ui::tokens::*;
+use crate::ui::widgets;
 
 impl PortalApp {
     /// Navigation strip on the left (always visible)
@@ -87,6 +90,12 @@ impl PortalApp {
                 if nav_btn(ui, "\u{1f511}", language.t("keychain"), self.current_view == AppView::Keychain) {
                     self.current_view = AppView::Keychain;
                 }
+                if nav_btn(ui, "\u{2318}", language.t("snippets"), self.current_view == AppView::Snippets) {
+                    self.current_view = AppView::Snippets;
+                }
+                if nav_btn(ui, "\u{1f310}", language.t("tunnels"), self.current_view == AppView::Tunnels) {
+                    self.current_view = AppView::Tunnels;
+                }
 
                 // Settings button at bottom - fill remaining space to reach window bottom
                 let available_size = ui.available_size();
@@ -113,6 +122,8 @@ impl PortalApp {
         let mut new_local_session = false;
         let mut connect_ssh_host: Option<usize> = None;
         let mut edit_host_index: Option<usize> = None;
+        let mut connect_history_host: Option<HostEntry> = None;
+        let mut clear_history = false;
 
         // Collect all unique groups and tags
         let mut all_groups: Vec<String> = Vec::new();
@@ -147,10 +158,7 @@ impl PortalApp {
 
                     // Right side: New Host button
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(
-                            egui::Button::new(egui::RichText::new(self.language.t("new_host")).color(self.theme.accent).size(12.0))
-                                .frame(false)
-                        ).clicked() {
+                        if ui.add(widgets::text_button(self.language.t("new_host"), self.theme.accent)).clicked() {
                             self.add_host_dialog.open_new();
                         }
                     });
@@ -172,11 +180,11 @@ impl PortalApp {
                         ui.horizontal(|ui| {
                             // Match ComboBox closed-state background to New Host TextEdit input
                             let input_bg = ui.visuals().extreme_bg_color;
-                            let border = crate::ui::theme::brighter(self.theme.bg_elevated, 20);
+                            let border = self.theme.input_border;
                             ui.style_mut().visuals.widgets.inactive.bg_fill = input_bg;
                             ui.style_mut().visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, border);
                             ui.style_mut().visuals.widgets.hovered.bg_fill = input_bg;
-                            ui.style_mut().visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, self.theme.accent_alpha(120));
+                            ui.style_mut().visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, self.theme.focus_ring);
                             ui.style_mut().visuals.widgets.active.bg_fill = input_bg;
                             ui.style_mut().visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, self.theme.accent);
                             ui.style_mut().visuals.widgets.open.bg_fill = input_bg;
@@ -195,12 +203,7 @@ impl PortalApp {
                                 .selected_text(egui::RichText::new(group_label).color(self.theme.accent).size(12.0))
                                 .width(90.0)
                                 .show_ui(ui, |ui| {
-                                    ui.style_mut().visuals.window_fill = ui.visuals().extreme_bg_color;
-                                    ui.style_mut().visuals.widgets.inactive.bg_fill = self.theme.bg_elevated;
-                                    ui.style_mut().visuals.widgets.hovered.bg_fill = self.theme.bg_primary;
-                                    ui.style_mut().visuals.selection.bg_fill = self.theme.accent_alpha(30);
-                                    // Hide checkbox for selected items
-                                    ui.style_mut().visuals.selection.stroke = egui::Stroke::NONE;
+                                    widgets::style_dropdown(ui, &self.theme);
 
                                     // All option
                                     if egui::Button::new(
@@ -236,12 +239,7 @@ impl PortalApp {
                                 .selected_text(egui::RichText::new(tag_label).color(self.theme.accent).size(12.0))
                                 .width(90.0)
                                 .show_ui(ui, |ui| {
-                                    ui.style_mut().visuals.window_fill = ui.visuals().extreme_bg_color;
-                                    ui.style_mut().visuals.widgets.inactive.bg_fill = self.theme.bg_elevated;
-                                    ui.style_mut().visuals.widgets.hovered.bg_fill = self.theme.bg_primary;
-                                    ui.style_mut().visuals.selection.bg_fill = self.theme.accent_alpha(30);
-                                    // Hide checkbox for selected items
-                                    ui.style_mut().visuals.selection.stroke = egui::Stroke::NONE;
+                                    widgets::style_dropdown(ui, &self.theme);
 
                                     // All option
                                     if egui::Button::new(
@@ -269,16 +267,143 @@ impl PortalApp {
 
                             // Clear button
                             if self.host_filter.is_active() {
-                                if ui.add(
-                                    egui::Button::new(egui::RichText::new("Clear").color(self.theme.accent).size(12.0))
-                                        .frame(false)
-                                ).clicked() {
+                                if ui.add(widgets::text_button("Clear", self.theme.accent)).clicked() {
                                     self.host_filter.clear();
                                 }
                             }
                         });
 
                         ui.add_space(12.0);
+
+            // RECENT CONNECTIONS section
+            {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let history = &self.connection_history;
+                let mut seen = std::collections::HashSet::new();
+                let recent: Vec<_> = history.iter().rev()
+                    .filter(|r| {
+                        let key = (r.host.clone(), r.port, r.username.clone());
+                        seen.insert(key)
+                    })
+                    .take(10)
+                    .collect();
+
+                if !recent.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.add_space(24.0);
+                        ui.label(egui::RichText::new(self.language.t("recent_connections")).color(self.theme.fg_dim).size(10.0).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_space(24.0);
+                            if ui.add(
+                                egui::Button::new(egui::RichText::new(self.language.t("clear_history")).color(self.theme.fg_dim).size(10.0))
+                                    .frame(false)
+                            ).clicked() {
+                                clear_history = true;
+                            }
+                        });
+                    });
+                    ui.add_space(4.0);
+
+                    for record in &recent {
+                        let row_h = 44.0;
+                        let width = ui.available_width();
+                        let (rect, resp) = ui.allocate_exact_size(
+                            egui::vec2(width, row_h),
+                            egui::Sense::click(),
+                        );
+                        let hovered = resp.hovered();
+                        if hovered {
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - 1.0), rect.max),
+                                0.0, self.theme.hover_shadow,
+                            );
+                            ui.painter().rect_filled(rect, 0.0, self.theme.hover_bg);
+                        }
+                        let display_name = if record.host_name.is_empty() {
+                            format!("{}:{}", record.host, record.port)
+                        } else {
+                            record.host_name.clone()
+                        };
+                        ui.painter().text(
+                            egui::pos2(rect.min.x + 24.0, rect.min.y + 14.0),
+                            egui::Align2::LEFT_CENTER,
+                            "@",
+                            egui::FontId::proportional(12.0),
+                            self.theme.accent,
+                        );
+                        ui.painter().text(
+                            egui::pos2(rect.min.x + 46.0, rect.min.y + 14.0),
+                            egui::Align2::LEFT_CENTER,
+                            &display_name,
+                            egui::FontId::proportional(13.0),
+                            self.theme.fg_primary,
+                        );
+                        let detail = format!("{}@{}:{}", record.username, record.host, record.port);
+                        ui.painter().text(
+                            egui::pos2(rect.min.x + 46.0, rect.min.y + 30.0),
+                            egui::Align2::LEFT_CENTER,
+                            &detail,
+                            egui::FontId::proportional(10.0),
+                            self.theme.fg_dim,
+                        );
+                        let secs_ago = now.saturating_sub(record.timestamp);
+                        let time_text = format_time_ago(secs_ago, &self.language);
+                        let visible_right = ui.clip_rect().max.x;
+                        ui.painter().text(
+                            egui::pos2(visible_right - 24.0, rect.min.y + 14.0),
+                            egui::Align2::RIGHT_CENTER,
+                            &time_text,
+                            egui::FontId::proportional(10.0),
+                            self.theme.fg_dim,
+                        );
+                        if hovered {
+                            let btn_rect = egui::Rect::from_center_size(
+                                egui::pos2(visible_right - 40.0, rect.min.y + 30.0),
+                                egui::vec2(56.0, 20.0),
+                            );
+                            let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
+                            let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
+                            let btn_bg = if over_btn { self.theme.accent } else { self.theme.bg_elevated };
+                            let btn_text_color = if over_btn { self.theme.bg_primary } else { self.theme.accent };
+                            ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, self.theme.accent));
+                            ui.painter().text(
+                                btn_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                self.language.t("connect"),
+                                egui::FontId::proportional(10.0),
+                                btn_text_color,
+                            );
+                            if resp.clicked() && over_btn {
+                                connect_history_host = Some(HostEntry::new_ssh(
+                                    record.host_name.clone(),
+                                    record.host.clone(),
+                                    record.port,
+                                    record.username.clone(),
+                                    String::new(),
+                                    None,
+                                    Vec::new(),
+                                ));
+                            }
+                        }
+                        if resp.double_clicked() {
+                            connect_history_host = Some(HostEntry::new_ssh(
+                                record.host_name.clone(),
+                                record.host.clone(),
+                                record.port,
+                                record.username.clone(),
+                                String::new(),
+                                None,
+                                Vec::new(),
+                            ));
+                        }
+                    }
+
+                    ui.add_space(20.0);
+                }
+            }
 
             // LOCAL section
             ui.horizontal(|ui| {
@@ -658,6 +783,13 @@ impl PortalApp {
             let host = self.hosts[idx].clone();
             self.add_host_dialog.open_edit(idx, &host);
         }
+        if let Some(host) = connect_history_host {
+            self.add_tab_ssh(&host);
+        }
+        if clear_history {
+            self.connection_history.clear();
+            crate::config::save_history(&[]);
+        }
     }
 
     /// Right-side drawer for adding / editing a host (shown in Hosts view)
@@ -701,7 +833,7 @@ impl PortalApp {
         let mut test_clicked = false;
 
         egui::SidePanel::right("add_host_drawer")
-            .exact_width(340.0)
+            .exact_width(ctx.screen_rect().width().min(DRAWER_WIDTH).max(280.0))
             .resizable(false)
             .frame(egui::Frame {
                 fill: theme.bg_secondary,
@@ -752,7 +884,7 @@ impl PortalApp {
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 8.0;
 
-                        ui.label(egui::RichText::new(lang.t("label")).color(theme.fg_dim).size(12.0));
+                        ui.label(widgets::field_label(lang.t("label"), &theme));
                         ui.add(
                             egui::TextEdit::singleline(&mut self.add_host_dialog.name)
                                 .hint_text(egui::RichText::new("My Server").color(theme.hint_color()).italics())
@@ -762,7 +894,7 @@ impl PortalApp {
 
                         ui.add_space(4.0);
 
-                        ui.label(egui::RichText::new(lang.t("host_ip")).color(theme.fg_dim).size(12.0));
+                        ui.label(widgets::field_label(lang.t("host_ip"), &theme));
                         ui.add(
                             egui::TextEdit::singleline(&mut self.add_host_dialog.host)
                                 .hint_text(egui::RichText::new("192.168.1.1").color(theme.hint_color()).italics())
@@ -774,7 +906,7 @@ impl PortalApp {
 
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(lang.t("port")).color(theme.fg_dim).size(12.0));
+                                ui.label(widgets::field_label(lang.t("port"), &theme));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.add_host_dialog.port)
                                         .desired_width(70.0)
@@ -783,7 +915,7 @@ impl PortalApp {
                             });
                             ui.add_space(8.0);
                             ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(lang.t("group")).color(theme.fg_dim).size(12.0));
+                                ui.label(widgets::field_label(lang.t("group"), &theme));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.add_host_dialog.group)
                                         .hint_text(egui::RichText::new("Production").color(theme.hint_color()).italics())
@@ -796,7 +928,7 @@ impl PortalApp {
                         ui.add_space(8.0);
 
                         ui.vertical(|ui| {
-                            ui.label(egui::RichText::new("Tags").color(theme.fg_dim).size(12.0));
+                            ui.label(widgets::field_label("Tags", &theme));
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.add_host_dialog.tags)
                                     .hint_text(egui::RichText::new("web, database, production").color(theme.hint_color()).italics())
@@ -810,11 +942,11 @@ impl PortalApp {
                         ui.add_space(8.0);
 
                         // ── Credential selection ──
-                        ui.label(egui::RichText::new(lang.t("authentication")).color(theme.fg_dim).size(12.0));
+                        ui.label(widgets::field_label(lang.t("authentication"), &theme));
                         ui.add_space(4.0);
 
                         // Username (always visible for SSH login)
-                        ui.label(egui::RichText::new(lang.t("username")).color(theme.fg_dim).size(12.0));
+                        ui.label(widgets::field_label(lang.t("username"), &theme));
                         ui.add(
                             egui::TextEdit::singleline(&mut self.add_host_dialog.username)
                                 .hint_text(egui::RichText::new("root").color(theme.hint_color()).italics())
@@ -851,7 +983,7 @@ impl PortalApp {
                             }
                             crate::ui::types::CredentialMode::Existing => {
                                 // Dropdown to pick an existing credential
-                                ui.label(egui::RichText::new(lang.t("select_credential")).color(theme.fg_dim).size(12.0));
+                                ui.label(widgets::field_label(lang.t("select_credential"), &theme));
                                 ui.add_space(4.0);
                                 let current_label = self.add_host_dialog.selected_credential_id.as_ref()
                                     .and_then(|id| self.credentials.iter().find(|c| c.id == *id))
@@ -891,7 +1023,7 @@ impl PortalApp {
 
                                 match self.add_host_dialog.auth_method {
                                     AuthMethodChoice::Password => {
-                                        ui.label(egui::RichText::new(lang.t("password")).color(theme.fg_dim).size(12.0));
+                                        ui.label(widgets::field_label(lang.t("password"), &theme));
                                         ui.add(
                                             egui::TextEdit::singleline(&mut self.add_host_dialog.password)
                                                 .password(true)
@@ -922,7 +1054,7 @@ impl PortalApp {
 
                                         match self.add_host_dialog.key_source {
                                             KeySourceChoice::LocalFile => {
-                                                ui.label(egui::RichText::new(lang.t("key_path")).color(theme.fg_dim).size(12.0));
+                                                ui.label(widgets::field_label(lang.t("key_path"), &theme));
                                                 ui.add(
                                                     egui::TextEdit::singleline(&mut self.add_host_dialog.key_path)
                                                         .hint_text(egui::RichText::new("~/.ssh/id_rsa").color(theme.hint_color()).italics())
@@ -931,7 +1063,7 @@ impl PortalApp {
                                                 );
                                             }
                                             KeySourceChoice::ImportContent => {
-                                                ui.label(egui::RichText::new("Private Key:").color(theme.fg_dim).size(12.0));
+                                                ui.label(widgets::field_label("Private Key:", &theme));
                                                 ui.add(
                                                     egui::TextEdit::multiline(&mut self.add_host_dialog.key_content)
                                                         .id(egui::Id::new("import_private_key"))
@@ -949,7 +1081,7 @@ impl PortalApp {
                                             ui.label(egui::RichText::new(lang.t("key_stored_in_keychain")).color(theme.green).size(11.0));
                                         }
                                         ui.add_space(4.0);
-                                        ui.label(egui::RichText::new(lang.t("key_passphrase")).color(theme.fg_dim).size(12.0));
+                                        ui.label(widgets::field_label(lang.t("key_passphrase"), &theme));
                                         ui.add(
                                             egui::TextEdit::singleline(&mut self.add_host_dialog.key_passphrase)
                                                 .password(true)
@@ -965,7 +1097,7 @@ impl PortalApp {
                         ui.add_space(8.0);
 
                         // Startup commands
-                        ui.label(egui::RichText::new(lang.t("startup_commands")).color(theme.fg_dim).size(12.0));
+                        ui.label(widgets::field_label(lang.t("startup_commands"), &theme));
                         ui.add(
                             egui::TextEdit::multiline(&mut self.add_host_dialog.startup_commands)
                                 .desired_rows(3)
@@ -974,6 +1106,156 @@ impl PortalApp {
                                 .hint_text(egui::RichText::new(format!("{}\nexport PATH=/usr/local/bin:$PATH\nsource ~/.profile", lang.t("startup_commands_hint"))).color(theme.hint_color()).italics())
                                 .text_color(theme.fg_primary)
                         );
+
+                        ui.add_space(8.0);
+
+                        // Agent forwarding
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut self.add_host_dialog.agent_forwarding, egui::RichText::new(lang.t("agent_forwarding")).color(theme.fg_primary));
+                        });
+                        ui.label(egui::RichText::new(lang.t("agent_forwarding_desc")).color(theme.fg_dim).size(11.0));
+
+                        ui.add_space(8.0);
+
+                        // Jump Host
+                        ui.label(widgets::field_label(lang.t("jump_host"), &theme));
+                        let current_label = self.add_host_dialog.jump_host
+                            .as_deref()
+                            .unwrap_or(lang.t("jump_host_none"));
+                        let editing_name = self.add_host_dialog.name.clone();
+                        egui::ComboBox::from_id_salt("jump_host_combo")
+                            .selected_text(current_label)
+                            .width(ui.available_width() - 8.0)
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(self.add_host_dialog.jump_host.is_none(), lang.t("jump_host_none")).clicked() {
+                                    self.add_host_dialog.jump_host = None;
+                                }
+                                for h in &self.hosts {
+                                    if h.is_local || h.name == editing_name {
+                                        continue;
+                                    }
+                                    let selected = self.add_host_dialog.jump_host.as_deref() == Some(&h.name);
+                                    if ui.selectable_label(selected, &h.name).clicked() {
+                                        self.add_host_dialog.jump_host = Some(h.name.clone());
+                                    }
+                                }
+                            });
+                        ui.label(egui::RichText::new(lang.t("jump_host_desc")).color(theme.fg_dim).size(11.0));
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        // Port forwards section
+                        ui.label(widgets::field_label(lang.t("port_forwards"), &theme));
+                        ui.add_space(4.0);
+
+                        // List existing port forwards
+                        let mut remove_fwd_idx = None;
+                        for (fi, fwd) in self.add_host_dialog.port_forwards.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                let kind_label = match fwd.kind {
+                                    crate::config::ForwardKind::Local => "L",
+                                    crate::config::ForwardKind::Remote => "R",
+                                };
+                                ui.label(egui::RichText::new(kind_label).color(theme.accent).size(11.0).strong());
+                                ui.label(egui::RichText::new(format!(
+                                    "{}:{} -> {}:{}",
+                                    fwd.local_host, fwd.local_port,
+                                    fwd.remote_host, fwd.remote_port
+                                )).color(theme.fg_primary).size(11.0));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.add(
+                                        egui::Button::new(egui::RichText::new("✕").color(theme.red).size(11.0))
+                                            .frame(false)
+                                    ).clicked() {
+                                        remove_fwd_idx = Some(fi);
+                                    }
+                                });
+                            });
+                        }
+                        if let Some(idx) = remove_fwd_idx {
+                            self.add_host_dialog.port_forwards.remove(idx);
+                        }
+
+                        ui.add_space(4.0);
+
+                        // Add new forward form
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut self.add_host_dialog.new_forward_kind,
+                                crate::config::ForwardKind::Local,
+                                egui::RichText::new(lang.t("local_forward")).size(11.0),
+                            );
+                            ui.selectable_value(
+                                &mut self.add_host_dialog.new_forward_kind,
+                                crate::config::ForwardKind::Remote,
+                                egui::RichText::new(lang.t("remote_forward")).size(11.0),
+                            );
+                        });
+                        ui.add_space(4.0);
+
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(lang.t("forward_local_host")).color(theme.fg_dim).size(10.0));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_local_host)
+                                        .desired_width(100.0)
+                                        .text_color(theme.fg_primary)
+                                        .font(egui::TextStyle::Small)
+                                );
+                            });
+                            ui.add_space(4.0);
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(lang.t("forward_local_port")).color(theme.fg_dim).size(10.0));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_local_port)
+                                        .desired_width(50.0)
+                                        .text_color(theme.fg_primary)
+                                        .font(egui::TextStyle::Small)
+                                );
+                            });
+                        });
+                        ui.add_space(2.0);
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(lang.t("forward_remote_host")).color(theme.fg_dim).size(10.0));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_remote_host)
+                                        .desired_width(100.0)
+                                        .text_color(theme.fg_primary)
+                                        .font(egui::TextStyle::Small)
+                                );
+                            });
+                            ui.add_space(4.0);
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(lang.t("forward_remote_port")).color(theme.fg_dim).size(10.0));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_remote_port)
+                                        .desired_width(50.0)
+                                        .text_color(theme.fg_primary)
+                                        .font(egui::TextStyle::Small)
+                                );
+                            });
+                        });
+                        ui.add_space(4.0);
+                        if ui.add(widgets::text_button(lang.t("add_forward"), theme.accent)).clicked() {
+                            let lp: u16 = self.add_host_dialog.new_forward_local_port.trim().parse().unwrap_or(0);
+                            let rp: u16 = self.add_host_dialog.new_forward_remote_port.trim().parse().unwrap_or(0);
+                            if lp > 0 && rp > 0 {
+                                self.add_host_dialog.port_forwards.push(
+                                    crate::config::PortForwardConfig {
+                                        kind: self.add_host_dialog.new_forward_kind.clone(),
+                                        local_host: self.add_host_dialog.new_forward_local_host.trim().to_owned(),
+                                        local_port: lp,
+                                        remote_host: self.add_host_dialog.new_forward_remote_host.trim().to_owned(),
+                                        remote_port: rp,
+                                    }
+                                );
+                                self.add_host_dialog.new_forward_local_port.clear();
+                                self.add_host_dialog.new_forward_remote_port.clear();
+                            }
+                        }
 
                         ui.add_space(8.0);
 
@@ -1131,8 +1413,10 @@ impl PortalApp {
                 self.add_host_dialog.test_conn_state = TestConnState::Testing;
                 self.add_host_dialog.error.clear();
 
+                let agent_fwd = self.add_host_dialog.agent_forwarding;
                 self.runtime.spawn(async move {
-                    let result = test_connection(host, port, username, resolved).await;
+                    let settings = crate::config::load_settings();
+                    let result = test_connection(host, port, username, resolved, settings.ssh_keepalive_interval, agent_fwd).await;
                     if let Ok(mut guard) = result_arc.lock() {
                         *guard = Some(result);
                     }
@@ -1245,6 +1529,10 @@ impl PortalApp {
                     .filter(|l| !l.is_empty())
                     .collect(),
             );
+
+            entry.agent_forwarding = self.add_host_dialog.agent_forwarding;
+            entry.jump_host = self.add_host_dialog.jump_host.clone();
+            entry.port_forwards = self.add_host_dialog.port_forwards.clone();
 
             // Parse tags from comma-separated string
             let tags: Vec<String> = self.add_host_dialog.tags
@@ -1821,7 +2109,7 @@ impl PortalApp {
             return;
         }
 
-        let drawer_width = 320.0;
+        let drawer_width = ctx.screen_rect().width().min(320.0).max(280.0);
         egui::SidePanel::right("batch_hosts_drawer")
             .exact_width(drawer_width)
             .resizable(false)
