@@ -167,7 +167,7 @@ pub fn render_terminal_session(
     let font_id = egui::FontId::monospace(font_size);
     let pad_x = 8.0_f32;
     let pad_y_top = 6.0_f32;
-    let pad_y_bottom = 6.0_f32;
+    let pad_y_bottom = 0.0_f32;
     let mut input_bytes: Vec<u8> = Vec::new();
 
     // ── FIX 1: measure char_width via galley composition, not glyph_width ──
@@ -196,16 +196,15 @@ pub fn render_terminal_session(
     // new_rows by 1 tells the PTY "your terminal is one row shorter", so
     // every program — including the shell prompt — naturally stays above the
     // reserved bottom line.
-    let total_rows = (((pane_rect.height() - pad_y_top - pad_y_bottom) / line_height) as usize).max(4);
-    let new_rows = total_rows.saturating_sub(1).max(3); // VTE rows (one less than pixel rows)
+    let available_height = pane_rect.height() - pad_y_top - pad_y_bottom;
+    let total_rows = ((available_height / line_height) as usize).max(4);
+    let new_rows = total_rows;
     session.resize(new_cols, new_rows);
 
-    // rect covers exactly new_rows lines — the remaining line_height pixels at
-    // the bottom of the pane become implicit padding (no background is skipped;
-    // pane background is drawn over the full pane_rect below).
+    // Make rect fill the full available height (pane adjacent to status bar)
     let rect = egui::Rect::from_min_size(
         egui::pos2(pane_rect.min.x + pad_x, pane_rect.min.y + pad_y_top),
-        egui::vec2(char_width * new_cols as f32, line_height * new_rows as f32),
+        egui::vec2(char_width * new_cols as f32, available_height),
     );
 
     // Close button rect (used for hit-testing, not as a separate widget)
