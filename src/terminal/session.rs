@@ -459,9 +459,7 @@ impl TerminalGrid {
             let mut r = self.cursor_row;
             while r > 0 && self.line_wrapped[r - 1] {
                 r -= 1;
-                for c in 0..self.cols {
-                    self.cells[r][c] = TerminalCell::default();
-                }
+                self.clear_row(r);
                 self.line_wrapped[r] = false;
             }
             if r > 0 {
@@ -470,14 +468,10 @@ impl TerminalGrid {
         }
 
         // Erase from cursor to end of current line
-        for c in self.cursor_col..self.cols {
-            self.cells[self.cursor_row][c] = TerminalCell::default();
-        }
+        self.clear_row_range(self.cursor_row, self.cursor_col, self.cols);
         // Erase all lines below
         for r in (self.cursor_row + 1)..self.rows {
-            for c in 0..self.cols {
-                self.cells[r][c] = TerminalCell::default();
-            }
+            self.clear_row(r);
         }
         // Clear line_wrapped flags for erased rows
         for r in self.cursor_row..self.rows {
@@ -489,40 +483,26 @@ impl TerminalGrid {
     pub fn erase_above(&mut self) {
         // Erase all lines above
         for r in 0..self.cursor_row {
-            for c in 0..self.cols {
-                self.cells[r][c] = TerminalCell::default();
-            }
+            self.clear_row(r);
         }
         // Erase from start of current line to cursor
-        for c in 0..=self.cursor_col.min(self.cols - 1) {
-            self.cells[self.cursor_row][c] = TerminalCell::default();
-        }
+        self.clear_row_range(self.cursor_row, 0, self.cursor_col + 1);
     }
 
     /// Erase from cursor to end of line
     pub fn erase_line_right(&mut self) {
-        if self.cursor_row < self.rows {
-            for c in self.cursor_col..self.cols {
-                self.cells[self.cursor_row][c] = TerminalCell::default();
-            }
-        }
+        self.clear_row_range(self.cursor_row, self.cursor_col, self.cols);
     }
 
     /// Erase from start of line to cursor
     pub fn erase_line_left(&mut self) {
-        if self.cursor_row < self.rows {
-            for c in 0..=self.cursor_col.min(self.cols - 1) {
-                self.cells[self.cursor_row][c] = TerminalCell::default();
-            }
-        }
+        self.clear_row_range(self.cursor_row, 0, self.cursor_col + 1);
     }
 
     /// Erase entire current line
     pub fn erase_line_all(&mut self) {
         if self.cursor_row < self.rows {
-            for c in 0..self.cols {
-                self.cells[self.cursor_row][c] = TerminalCell::default();
-            }
+            self.clear_row(self.cursor_row);
             self.line_wrapped[self.cursor_row] = false;
             // If previous row was wrapped into this one, clear its flag too
             if self.cursor_row > 0 {
@@ -537,6 +517,38 @@ impl TerminalGrid {
     /// Each TerminalCell contains: char (4 bytes) + colors + attributes
     fn row_memory_usage(row: &[TerminalCell]) -> usize {
         row.len() * std::mem::size_of::<TerminalCell>()
+    }
+
+    /// Helper: Clear a row to default cells
+    fn clear_row(&mut self, row: usize) {
+        if row < self.rows {
+            for c in 0..self.cols {
+                self.cells[row][c] = TerminalCell::default();
+            }
+        }
+    }
+
+    /// Helper: Clear a range of columns in a row
+    fn clear_row_range(&mut self, row: usize, col_start: usize, col_end: usize) {
+        if row < self.rows {
+            let end = col_end.min(self.cols);
+            for c in col_start..end {
+                self.cells[row][c] = TerminalCell::default();
+            }
+        }
+    }
+
+    /// Helper: Remove a row at one index and insert a blank row at another
+    /// (Updates both cells and line_wrapped arrays)
+    fn remove_and_insert_row(&mut self, remove_idx: usize, insert_idx: usize) {
+        if remove_idx < self.cells.len() {
+            self.cells.remove(remove_idx);
+            self.line_wrapped.remove(remove_idx);
+        }
+        if insert_idx <= self.cells.len() {
+            self.cells.insert(insert_idx, vec![TerminalCell::default(); self.cols]);
+            self.line_wrapped.insert(insert_idx, false);
+        }
     }
 
     /// Scroll up within a region: remove top line, add blank at bottom
@@ -670,10 +682,7 @@ impl TerminalGrid {
     /// Scroll down within a region: remove bottom line, add blank at top
     pub fn scroll_down(&mut self, top: usize, bottom: usize) {
         if top < bottom && bottom < self.rows {
-            self.cells.remove(bottom);
-            self.line_wrapped.remove(bottom);
-            self.cells.insert(top, vec![TerminalCell::default(); self.cols]);
-            self.line_wrapped.insert(top, false);
+            self.remove_and_insert_row(bottom, top);
         }
     }
 
@@ -683,10 +692,7 @@ impl TerminalGrid {
         let bottom = self.scroll_bottom;
         for _ in 0..n {
             if top <= bottom && bottom < self.rows {
-                self.cells.remove(bottom);
-                self.line_wrapped.remove(bottom);
-                self.cells.insert(top, vec![TerminalCell::default(); self.cols]);
-                self.line_wrapped.insert(top, false);
+                self.remove_and_insert_row(bottom, top);
             }
         }
     }
@@ -697,10 +703,7 @@ impl TerminalGrid {
         let bottom = self.scroll_bottom;
         for _ in 0..n {
             if top <= bottom && bottom < self.rows {
-                self.cells.remove(top);
-                self.line_wrapped.remove(top);
-                self.cells.insert(bottom, vec![TerminalCell::default(); self.cols]);
-                self.line_wrapped.insert(bottom, false);
+                self.remove_and_insert_row(top, bottom);
             }
         }
     }
@@ -753,6 +756,54 @@ impl TerminalGrid {
     }
 }
 
+/// Helper: Get CSI parameter value, defaulting to 1 if 0
+#[inline]
+fn param_or_one(p: u16) -> usize {
+    if p == 0 { 1 } else { p as usize }
+}
+
+/// Helper: Get CSI parameter value, defaulting to 1 if 0 (usize version)
+#[inline]
+fn param_or_one_usize(p: usize) -> usize {
+    if p == 0 { 1 } else { p }
+}
+
+/// Helper: Parse extended color from SGR parameters (38 or 48)
+/// Returns the RGB color tuple
+fn parse_extended_color<'b, I>(param: &[u16], iter: &mut I, default: (u8, u8, u8)) -> (u8, u8, u8)
+where
+    I: Iterator<Item = &'b [u16]>,
+{
+    // Check subparam form first: 38:5:n or 38:2:r:g:b
+    if param.len() >= 3 && param[1] == 5 {
+        // 256-color mode: 38:5:n
+        return color_256_to_rgb(param[2]);
+    }
+    if param.len() >= 5 && param[1] == 2 {
+        // RGB mode: 38:2:r:g:b
+        return (param[2] as u8, param[3] as u8, param[4] as u8);
+    }
+
+    // Try next-params form: 38 ; 5 ; n or 38 ; 2 ; r ; g ; b
+    if let Some(mode) = iter.next() {
+        let mode_val = mode.first().copied().unwrap_or(0);
+        if mode_val == 5 {
+            // 256-color mode
+            if let Some(color) = iter.next() {
+                return color_256_to_rgb(color.first().copied().unwrap_or(0));
+            }
+        } else if mode_val == 2 {
+            // RGB mode
+            let r = iter.next().and_then(|p| p.first().copied()).unwrap_or(0) as u8;
+            let g = iter.next().and_then(|p| p.first().copied()).unwrap_or(0) as u8;
+            let b = iter.next().and_then(|p| p.first().copied()).unwrap_or(0) as u8;
+            return (r, g, b);
+        }
+    }
+
+    default
+}
+
 /// VTE handler that implements vte::Perform
 pub struct VteHandler<'a> {
     pub grid: &'a mut TerminalGrid,
@@ -802,26 +853,7 @@ impl<'a> VteHandler<'a> {
                 self.attrs.fg_color = ANSI_COLORS[(val - 30) as usize];
             }
             38 => {
-                // Extended foreground: check subparams first, then next params
-                if param.len() >= 3 && param[1] == 5 {
-                    // Subparam form: 38:5:n
-                    self.attrs.fg_color = color_256_to_rgb(param[2]);
-                } else if param.len() >= 5 && param[1] == 2 {
-                    // Subparam form: 38:2:r:g:b
-                    self.attrs.fg_color = (param[2] as u8, param[3] as u8, param[4] as u8);
-                } else if let Some(mode) = iter.next() {
-                    let mode_val = mode.first().copied().unwrap_or(0);
-                    if mode_val == 5 {
-                        if let Some(color) = iter.next() {
-                            self.attrs.fg_color = color_256_to_rgb(color.first().copied().unwrap_or(0));
-                        }
-                    } else if mode_val == 2 {
-                        let r = iter.next().and_then(|p| p.first().copied()).unwrap_or(0) as u8;
-                        let g = iter.next().and_then(|p| p.first().copied()).unwrap_or(0) as u8;
-                        let b = iter.next().and_then(|p| p.first().copied()).unwrap_or(0) as u8;
-                        self.attrs.fg_color = (r, g, b);
-                    }
-                }
+                self.attrs.fg_color = parse_extended_color(param, iter, DEFAULT_FG);
             }
             39 => self.attrs.fg_color = DEFAULT_FG,
             // Standard background colors
@@ -829,24 +861,7 @@ impl<'a> VteHandler<'a> {
                 self.attrs.bg_color = ANSI_COLORS[(val - 40) as usize];
             }
             48 => {
-                // Extended background
-                if param.len() >= 3 && param[1] == 5 {
-                    self.attrs.bg_color = color_256_to_rgb(param[2]);
-                } else if param.len() >= 5 && param[1] == 2 {
-                    self.attrs.bg_color = (param[2] as u8, param[3] as u8, param[4] as u8);
-                } else if let Some(mode) = iter.next() {
-                    let mode_val = mode.first().copied().unwrap_or(0);
-                    if mode_val == 5 {
-                        if let Some(color) = iter.next() {
-                            self.attrs.bg_color = color_256_to_rgb(color.first().copied().unwrap_or(0));
-                        }
-                    } else if mode_val == 2 {
-                        let r = iter.next().and_then(|p| p.first().copied()).unwrap_or(0) as u8;
-                        let g = iter.next().and_then(|p| p.first().copied()).unwrap_or(0) as u8;
-                        let b = iter.next().and_then(|p| p.first().copied()).unwrap_or(0) as u8;
-                        self.attrs.bg_color = (r, g, b);
-                    }
-                }
+                self.attrs.bg_color = parse_extended_color(param, iter, DEFAULT_BG);
             }
             49 => self.attrs.bg_color = DEFAULT_BG,
             // Bright foreground colors
@@ -922,6 +937,29 @@ impl<'a> Perform for VteHandler<'a> {
         eprintln!("VTE execute: byte=0x{:02X} cursor_col after={}", byte, self.grid.cursor_col);
     }
 
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        // Parse OSC sequences
+        // OSC 7: file://hostname/path - current directory (used by shell integration)
+        if params.len() >= 2 {
+            let cmd = params[0];
+            if cmd == b"7" || cmd == b"7;" {
+                // OSC 7: set current directory
+                if let Ok(url) = std::str::from_utf8(params[1]) {
+                    // Parse file://hostname/path
+                    if let Some(path) = url.strip_prefix("file://") {
+                        // Skip hostname part
+                        if let Some(slash_pos) = path.find('/') {
+                            let path = &path[slash_pos..];
+                            // URL decode the path
+                            let decoded = urlencoding_decode(path);
+                            self.grid.cwd = Some(decoded);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
         let is_private = intermediates.first() == Some(&b'?');
 
@@ -939,45 +977,39 @@ impl<'a> Perform for VteHandler<'a> {
             // Cursor movement
             'A' => {
                 // CUU - Cursor Up
-                let n = if p1 == 0 { 1 } else { p1 as usize };
-                self.grid.cursor_row = self.grid.cursor_row.saturating_sub(n);
+                self.grid.cursor_row = self.grid.cursor_row.saturating_sub(param_or_one(p1));
             }
             'B' => {
                 // CUD - Cursor Down
-                let n = if p1 == 0 { 1 } else { p1 as usize };
-                self.grid.cursor_row = (self.grid.cursor_row + n).min(self.grid.rows.saturating_sub(1));
+                self.grid.cursor_row = (self.grid.cursor_row + param_or_one(p1)).min(self.grid.rows.saturating_sub(1));
             }
             'C' => {
                 // CUF - Cursor Forward
-                let n = if p1 == 0 { 1 } else { p1 as usize };
-                self.grid.cursor_col = (self.grid.cursor_col + n).min(self.grid.cols.saturating_sub(1));
+                self.grid.cursor_col = (self.grid.cursor_col + param_or_one(p1)).min(self.grid.cols.saturating_sub(1));
             }
             'D' => {
                 // CUB - Cursor Back
-                let n = if p1 == 0 { 1 } else { p1 as usize };
-                self.grid.cursor_col = self.grid.cursor_col.saturating_sub(n);
+                self.grid.cursor_col = self.grid.cursor_col.saturating_sub(param_or_one(p1));
             }
             'E' => {
                 // CNL - Cursor Next Line
-                let n = if p1 == 0 { 1 } else { p1 as usize };
                 self.grid.cursor_col = 0;
-                self.grid.cursor_row = (self.grid.cursor_row + n).min(self.grid.rows.saturating_sub(1));
+                self.grid.cursor_row = (self.grid.cursor_row + param_or_one(p1)).min(self.grid.rows.saturating_sub(1));
             }
             'F' => {
                 // CPL - Cursor Previous Line
-                let n = if p1 == 0 { 1 } else { p1 as usize };
                 self.grid.cursor_col = 0;
-                self.grid.cursor_row = self.grid.cursor_row.saturating_sub(n);
+                self.grid.cursor_row = self.grid.cursor_row.saturating_sub(param_or_one(p1));
             }
             'G' => {
                 // CHA - Cursor Horizontal Absolute
-                let col = if p1 == 0 { 1 } else { p1 as usize };
+                let col = param_or_one_usize(p1 as usize);
                 self.grid.cursor_col = (col - 1).min(self.grid.cols.saturating_sub(1));
             }
             'H' | 'f' => {
                 // CUP/HVP - Cursor Position
-                let row = if p1 == 0 { 1 } else { p1 as usize };
-                let col = param_list.get(1).copied().unwrap_or(1).max(1) as usize;
+                let row = param_or_one_usize(p1 as usize);
+                let col = param_or_one_usize(param_list.get(1).copied().unwrap_or(1) as usize);
                 self.grid.cursor_row = (row - 1).min(self.grid.rows.saturating_sub(1));
                 self.grid.cursor_col = (col - 1).min(self.grid.cols.saturating_sub(1));
             }
@@ -1001,42 +1033,35 @@ impl<'a> Perform for VteHandler<'a> {
             }
             'L' => {
                 // IL - Insert Lines
-                let n = if p1 == 0 { 1 } else { p1 as usize };
-                self.grid.insert_lines(n);
+                self.grid.insert_lines(param_or_one(p1));
             }
             'M' => {
                 // DL - Delete Lines
-                let n = if p1 == 0 { 1 } else { p1 as usize };
-                self.grid.delete_lines(n);
+                self.grid.delete_lines(param_or_one(p1));
             }
             '@' => {
                 // ICH - Insert Characters
-                let n = if p1 == 0 { 1 } else { p1 as usize };
-                self.grid.insert_chars(n);
+                self.grid.insert_chars(param_or_one(p1));
             }
             'P' => {
                 // DCH - Delete Characters
-                let n = if p1 == 0 { 1 } else { p1 as usize };
-                self.grid.delete_chars(n);
+                self.grid.delete_chars(param_or_one(p1));
             }
             'S' => {
                 // SU - Scroll Up
-                let n = if p1 == 0 { 1 } else { p1 as usize };
-                for _ in 0..n {
+                for _ in 0..param_or_one(p1) {
                     self.grid.scroll_up(self.grid.scroll_top, self.grid.scroll_bottom);
                 }
             }
             'T' => {
                 // SD - Scroll Down
-                let n = if p1 == 0 { 1 } else { p1 as usize };
-                for _ in 0..n {
+                for _ in 0..param_or_one(p1) {
                     self.grid.scroll_down(self.grid.scroll_top, self.grid.scroll_bottom);
                 }
             }
             'X' => {
                 // ECH - Erase Characters
-                let n = if p1 == 0 { 1 } else { p1 as usize };
-                for i in 0..n {
+                for i in 0..param_or_one(p1) {
                     let col = self.grid.cursor_col + i;
                     if col < self.grid.cols && self.grid.cursor_row < self.grid.rows {
                         self.grid.cells[self.grid.cursor_row][col] = TerminalCell::default();
@@ -1045,7 +1070,7 @@ impl<'a> Perform for VteHandler<'a> {
             }
             'd' => {
                 // VPA - Vertical Position Absolute
-                let row = if p1 == 0 { 1 } else { p1 as usize };
+                let row = param_or_one_usize(p1 as usize);
                 self.grid.cursor_row = (row - 1).min(self.grid.rows.saturating_sub(1));
             }
             'm' => {
@@ -1068,8 +1093,8 @@ impl<'a> Perform for VteHandler<'a> {
             'r' => {
                 // DECSTBM - Set Scrolling Region
                 if !is_private {
-                    let top = if p1 == 0 { 1 } else { p1 as usize };
-                    let bottom = param_list.get(1).copied().unwrap_or(self.grid.rows as u16).max(1) as usize;
+                    let top = param_or_one_usize(p1 as usize);
+                    let bottom = param_or_one_usize(param_list.get(1).copied().unwrap_or(self.grid.rows as u16) as usize).max(1);
                     self.grid.scroll_top = (top - 1).min(self.grid.rows.saturating_sub(1));
                     self.grid.scroll_bottom = (bottom - 1).min(self.grid.rows.saturating_sub(1));
                     // Move cursor to home after setting scroll region
@@ -1146,29 +1171,6 @@ impl<'a> Perform for VteHandler<'a> {
                 }
             }
             _ => {}
-        }
-    }
-
-    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
-        // Parse OSC sequences
-        // OSC 7: file://hostname/path - current directory (used by shell integration)
-        if params.len() >= 2 {
-            let cmd = params[0];
-            if cmd == b"7" || cmd == b"7;" {
-                // OSC 7: set current directory
-                if let Ok(url) = std::str::from_utf8(params[1]) {
-                    // Parse file://hostname/path
-                    if let Some(path) = url.strip_prefix("file://") {
-                        // Skip hostname part
-                        if let Some(slash_pos) = path.find('/') {
-                            let path = &path[slash_pos..];
-                            // URL decode the path
-                            let decoded = urlencoding_decode(path);
-                            self.grid.cwd = Some(decoded);
-                        }
-                    }
-                }
-            }
         }
     }
 }
