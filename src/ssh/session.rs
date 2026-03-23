@@ -157,6 +157,7 @@ pub async fn connect_and_authenticate(
     let config = Arc::new(config);
     let addr = format!("{}:{}", host, port);
 
+    let remote_forwards = Arc::new(Mutex::new(Vec::new()));
     let client = SshClient {
         host: host.to_string(),
         port,
@@ -434,9 +435,8 @@ impl SshSession {
                 }
             }
         } else {
-            match connect_and_authenticate_with_forwards(
+            match connect_and_authenticate(
                 &host, port, &username, &auth, keepalive_interval, agent_forwarding,
-                Arc::clone(&remote_fwd_arc),
             ).await {
                 Ok(h) => h,
                 Err(e) => {

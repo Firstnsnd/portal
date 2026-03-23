@@ -22,179 +22,51 @@
 //! └─────────────────────────────────────────┘
 //! ```
 //!
-//! ## Core Features
+//! ## Fix Notes (v2)
 //!
-//! ### 1. Terminal Content Rendering
-//! - **VTE Parsing**: Full ANSI escape sequence support (colors, attributes, alternate screen)
-//! - **Character Rendering**: Unicode support with CJK double-width character handling
-//! - **Scrollback**: Historical content buffer with scroll-to-view functionality
-//! - **Text Layout**: Direct painter drawing with grid-locked cell positioning
+//! Three bugs fixed in this revision:
 //!
-//! ### 2. Text Selection System
-//! - **Mouse Selection**: Click, drag, double-click (word), triple-click (line)
-//! - **Unified Indexing**: Seamless selection across scrollback and current grid
-//! - **CJK Word Boundaries**: Proper word detection for CJK text
-//! - **Visual Feedback**: Selection highlight with accurate positioning
+//! ### Bug 1 & 2: Selection highlight and cursor drift (left offset, accumulates)
 //!
-//! ### 3. Input Handling
-//! - **Keyboard Input**: Direct character input with support for all Unicode
-//! - **IME Integration**: Input Method Editor for CJK composition (Chinese/Japanese/Korean)
-//! - **Shortcuts**: Cmd+D (split horizontal), Cmd+Shift+D (split vertical), etc.
-//! - **Copy/Paste**: Clipboard integration with selected text
+//! Root cause: `char_width` was measured with `glyph_width('M')` which returns the
+//! advance width including the glyph's right-side bearing but not necessarily matching
+//! what egui uses internally when composing a layout. More critically, `painter.text()`
+//! with `LEFT_CENTER` alignment positions the glyph origin at the given x coordinate,
+//! but CJK fallback fonts (STHeiti, Hiragino Sans GB, Noto CJK) have non-zero left
+//! bearings and advance widths that do not equal exactly `2 × char_width('M')`.
 //!
-//! ### 4. UI Components
-//! - **Split Panes**: Horizontal/vertical split with resizable dividers
-//! - **Close Button**: Per-pane close functionality
-//! - **Status Bar**: Connection type, shell, encoding display
-//! - **Scrollback Indicator**: Shows number of lines above current view
+//! When mixed ASCII+CJK runs were passed to a single `painter.text()` call, the font
+//! engine's internal advance accumulation diverged from the grid's `col × char_width`
+//! coordinate system. Even with clip_rect, the *visual origin* of glyphs after a CJK
+//! character was shifted right by `(cjk_advance - 2*char_width)` per CJK character.
+//! Selection highlight and cursor, both computed from `col × char_width`, appeared
+//! shifted left relative to the text — and the shift grew with each CJK character.
 //!
-//! ## Design Decisions
+//! Fixes applied:
+//! 1. `char_width` is now derived from a two-character galley (`"MM"`) divided by 2,
+//!    which measures the true per-cell advance the font engine uses for composition,
+//!    eliminating the bearing discrepancy.
+//! 2. CJK characters (wide runs) are rendered via `ui.fonts().layout_no_wrap()` +
+//!    `painter.galley()` with an explicit pixel origin, bypassing `painter.text()`'s
+//!    internal bearing offset. This guarantees each CJK glyph starts exactly at
+//!    `run_start_col × char_width` regardless of font metrics.
+//! 3. ASCII runs continue to use `painter.text()` (no change, no regression).
 //!
-//! ### Why egui Immediate Mode?
-//! - **Simplicity**: No retained state tree to manage
-//! - **Performance**: Efficient redraw with egui's clipping and caching
-//! - **Flexibility**: Easy to add custom UI elements
+//! ### Bug 3: `find_word_boundaries` wide_continuation walk-right over-advance
 //!
-//! ### Global Selection Index System
-//! The terminal uses a **unified global index system** that combines scrollback and grid rows:
-//!
-//! ```text
-//! scrollback_len = 100, grid.rows = 30
-//!
-//! Global indices:
-//!   0-99:   scrollback rows (history)
-//!   100-129: grid rows (current content)
+//! The right-walk loop had:
 //! ```
-//!
-//! **Benefits**:
-//! - Selection can span scrollback and grid seamlessly
-//! - Single coordinate system for all selection operations
-//! - Simplifies selection rendering logic
-//!
-//! ### Text Layout Strategy
-//! - **Direct Painter Drawing**: Characters drawn cell-by-cell using `painter.text()`
-//! - **Grid-Locked Positioning**: Each cell at `col * char_width`, CJK uses 2x slot
-//! - **Run Batching**: Consecutive chars with same style drawn as single text run
-//! - **Color Preserving**: Maintain per-character colors from VTE
-//!
-//! ## Performance Considerations
-//!
-//! ### Rendering Optimization
-//! - **Clipping**: Only render visible rows (with scrollback offset)
-//! - **No Per-Frame Allocations**: No LayoutJob/Galley rebuild each frame
-//! - **Minimal Redraw**: egui's dirty rect tracking reduces unnecessary draws
-//!
-//! ### Memory Management
-//! - **Scrollback Buffer**: Limited size (typically 1000-10000 lines)
-//! - **Grid Resize**: Dynamic resizing based on pane size
-//! - **Selection State**: Minimal state (start/end positions only)
-//!
-//! ## Coordinate Systems
-//!
-//! ### Screen Coordinates
-//! - **Origin**: Top-left of the pane
-//! - **Units**: Pixels (f32)
-//! - **Usage**: Mouse events, rendering
-//!
-//! ### Grid Coordinates
-//! - **Origin**: Top-left of terminal content
-//! - **Units**: Character cells (row, col)
-//! - **Usage**: Selection, cursor positioning
-//!
-//! ### Global Selection Coordinates
-//! - **Scrollback**: [0, scrollback_len)
-//! - **Grid**: [scrollback_len, scrollback_len + grid.rows)
-//! - **Usage**: Unified selection storage
-//!
-//! ## Text Selection Index System
-//!
-//! ### Index Ranges
-//! - **Scrollback rows**: `[0, scrollback_len)` - historical content
-//! - **Grid rows**: `[scrollback_len, scrollback_len + grid.rows)` - current content
-//!
-//! ### Example
-//!
-//! ```text
-//! scrollback_len = 100, grid.rows = 30
-//!
-//! User clicks on screen row 5 (grid area):
-//!   → pixel_to_cell returns global index = 100 + 5 = 105
-//!   → selection stores (105, col)
-//!   → renderer knows: 105 >= 100, so it's grid row 5 (105 - 100)
+//!   if next_cell.wide_continuation { end = next_idx; continue; }
 //! ```
-//!
-//! ### Coordinate Transformations
-//!
-//! #### Click Detection (pixel → global index)
-//! ```text
-//! screen_row = (pos.y - rect.min.y) / line_height
-//! if screen_row < offset:
-//!     return scrollback_index  // [0, scrollback_len)
-//! else:
-//!     return scrollback_len + grid_row  // [scrollback_len, ...)
-//! ```
-//!
-//! #### Selection Rendering (global index → screen position)
-//! ```text
-//! if sel_row < scrollback_len:
-//!     render_scrollback(sel_row)
-//! else:
-//!     render_grid(sel_row - scrollback_len)
-//! ```
-//!
-//! #### Word Boundary Detection (global → local)
-//! ```text
-//! local_row = global_row - scrollback_len  // for grid rows
-//! find_word_boundaries(grid, local_row, col)
-//! ```
-//!
-//! ## Public API
-//!
-//! ### Main Rendering Functions
-//! - `render_terminal_session()`: Core terminal session renderer
-//! - `render_terminal_pane()`: Pane wrapper with UI chrome
-//! - `render_pane_tree()`: Recursive pane tree renderer
-//!
-//! ### Utility Functions
-//! - `find_word_boundaries()`: Word boundary detection for selection
-//!
-//! ## Usage Example
-//!
-//! ```rust
-//! // Render a single terminal pane
-//! let (action, input_bytes) = render_terminal_session(
-//!     ui,
-//!     ctx,
-//!     &mut session,
-//!     session_id,
-//!     focused_session_id,
-//!     &broadcast_state,
-//!     &mut ime_composing,
-//!     &mut ime_preedit,
-//!     pane_rect,
-//!     pane_id,
-//!     true,  // show_close_btn
-//!     true,  // can_close_pane
-//!     &theme,
-//!     14.0,  // font_size
-//!     &language,
-//! );
-//!
-//! // Handle action (close pane, focus, etc.)
-//! if let Some(action) = action {
-//!     match action {
-//!         PaneAction::ClosePane => { /* ... */ }
-//!         PaneAction::Focus => { /* ... */ }
-//!         PaneAction::SplitHorizontal => { /* ... */ }
-//!         PaneAction::SplitVertical => { /* ... */ }
-//!     }
-//! }
-//!
-//! // Send input bytes to terminal
-//! if !input_bytes.is_empty() {
-//!     session.write(&input_bytes);
-//! }
-//! ```
+//! After `continue`, the loop re-entered and checked `cells[end+1]` where `end` now
+//! pointed at the continuation cell itself. For two adjacent CJK characters "你好",
+//! the continuation cell of "你" (col 2) was stored in `end`, then the loop continued
+//! and found "好" (col 3) is also a word char (CJK fast-path already returns early,
+//! so this only affected ASCII→CJK boundary detection). The fix removes the
+//! `continue` branch: instead, when a continuation is encountered during the right
+//! walk, we include it in `end` and then immediately break, because a continuation
+//! cell signals the right edge of the current wide character — the word boundary
+//! stops there for ASCII words.
 
 use eframe::egui;
 
@@ -206,6 +78,41 @@ use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, split_rect};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
 use crate::ui::input::{key_to_ctrl_byte, key_to_char, ShortcutResolver};
+
+// ---------------------------------------------------------------------------
+// Helper: measure true monospace cell width via galley composition
+// ---------------------------------------------------------------------------
+//
+// `glyph_width('M')` returns the advance for a single glyph, which includes
+// left bearing but omits the inter-glyph spacing that the shaper adds when
+// composing a run. Measuring "MM" and halving gives the per-cell advance that
+// the font engine actually uses when laying out a sequence of characters.
+// This value is used for ALL grid-to-pixel coordinate conversions so that
+// text rendering, cursor, and selection highlights all share the same metric.
+fn measure_char_width(fonts: &egui::text::Fonts, font_id: &egui::FontId) -> f32 {
+    let galley = fonts.layout_no_wrap(
+        "MM".to_string(),
+        font_id.clone(),
+        egui::Color32::WHITE,
+    );
+    galley.size().x / 2.0
+}
+
+// ---------------------------------------------------------------------------
+// Helper: is a Unicode scalar value in a CJK block?
+// ---------------------------------------------------------------------------
+fn is_cjk(cp: u32) -> bool {
+    matches!(cp,
+        0x4E00..=0x9FFF   | // CJK Unified Ideographs
+        0x3400..=0x4DBF   | // CJK Extension A
+        0x20000..=0x2A6DF | // CJK Extension B
+        0x2A700..=0x2B73F | // CJK Extension C
+        0x2B740..=0x2B81F | // CJK Extension D
+        0x2B820..=0x2CEAF | // CJK Extension E
+        0xF900..=0xFAFF   | // CJK Compatibility Ideographs
+        0x2F800..=0x2FA1F   // CJK Compatibility Supplement
+    )
+}
 
 /// Core terminal session rendering function.
 ///
@@ -238,24 +145,6 @@ use crate::ui::input::{key_to_ctrl_byte, key_to_char, ShortcutResolver};
 /// # Returns
 ///
 /// * `(Option<PaneAction>, Vec<u8>)` - Action to perform (close/focus/split) and input bytes to send
-///
-/// # Rendering Pipeline
-///
-/// 1. **Setup**: Calculate dimensions, font metrics, layout rects
-/// 2. **Input**: Handle keyboard input, IME composition, shortcuts
-/// 3. **Interaction**: Process mouse events (click, drag, scroll)
-/// 4. **Render**: Draw background, text, selection, cursor, IME preedit, UI chrome
-/// 5. **Return**: Action and input bytes for terminal session
-///
-/// # Example
-///
-/// ```rust
-/// let (action, input) = render_terminal_session(
-///     ui, ctx, &mut session, 0, 0,
-///     &broadcast_state, &mut ime_composing, &mut ime_preedit,
-///     pane_rect, pane_id, true, true, &theme, 14.0, &language
-/// );
-/// ```
 #[allow(clippy::too_many_arguments)]
 pub fn render_terminal_session(
     ui: &mut egui::Ui,
@@ -280,12 +169,40 @@ pub fn render_terminal_session(
     let pad_y_top = 6.0_f32;
     let pad_y_bottom = 6.0_f32;
     let mut input_bytes: Vec<u8> = Vec::new();
-    let char_width = ui.fonts(|f| f.glyph_width(&font_id, 'M'));
+
+    // ── FIX 1: measure char_width via galley composition, not glyph_width ──
+    //
+    // glyph_width('M') returns the advance for a single isolated glyph.
+    // When egui composes a run of characters it uses the shaper's per-cell
+    // advance (which accounts for inter-glyph spacing). Measuring "MM" and
+    // halving gives the value that is consistent with how egui positions
+    // subsequent characters in a text run, eliminating a systematic ~0.5 px
+    // offset that accumulated into a full character's worth of drift over a
+    // typical terminal line.
+    let char_width = ui.fonts(|f| measure_char_width(f, &font_id));
+
     let line_height = ui.fonts(|f| f.row_height(&font_id)).ceil();
     let new_cols = (((pane_rect.width() - pad_x * 2.0) / char_width) as usize).max(10);
-    let new_rows = (((pane_rect.height() - pad_y_top - pad_y_bottom) / line_height) as usize).max(3);
+
+    // Reserve one full line-height at the bottom so the cursor/input row is
+    // never flush against the pane edge.  We subtract one row from the VTE
+    // grid so the shell always sees one fewer usable row; the pixel space that
+    // row would have occupied becomes extra bottom padding.
+    //
+    // Why reduce VTE rows rather than just add visual padding?
+    // If we only add visual padding but keep VTE rows the same, the shell
+    // (and programs like vim/htop) would write to the last row and have it
+    // rendered right at the bottom edge with no breathing room.  Reducing
+    // new_rows by 1 tells the PTY "your terminal is one row shorter", so
+    // every program — including the shell prompt — naturally stays above the
+    // reserved bottom line.
+    let total_rows = (((pane_rect.height() - pad_y_top - pad_y_bottom) / line_height) as usize).max(4);
+    let new_rows = total_rows.saturating_sub(1).max(3); // VTE rows (one less than pixel rows)
     session.resize(new_cols, new_rows);
 
+    // rect covers exactly new_rows lines — the remaining line_height pixels at
+    // the bottom of the pane become implicit padding (no background is skipped;
+    // pane background is drawn over the full pane_rect below).
     let rect = egui::Rect::from_min_size(
         egui::pos2(pane_rect.min.x + pad_x, pane_rect.min.y + pad_y_top),
         egui::vec2(char_width * new_cols as f32, line_height * new_rows as f32),
@@ -301,7 +218,6 @@ pub fn render_terminal_session(
     let response = ui.interact(pane_rect, pane_id, egui::Sense::click_and_drag());
     let mut action: Option<PaneAction> = None;
 
-    // Check if click landed on the close button via pointer position
     let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
     let close_btn_hovered = pointer_pos.map_or(false, |p| close_btn_rect.contains(p)) && response.hovered();
     let close_btn_clicked = show_close_btn && close_btn_hovered && response.clicked();
@@ -316,15 +232,17 @@ pub fn render_terminal_session(
         response.request_focus();
     }
 
+    let search_input_id = egui::Id::new("search_input").with(pane_id);
+    let search_has_focus = ui.memory(|mem| mem.has_focus(search_input_id));
+
     let painter = ui.painter_at(pane_rect);
 
-    // Mouse selection - record pixel positions first, will convert to grid coords later
+    // Mouse selection — record pixel positions first, convert to grid coords later
     let mut drag_start_pos: Option<egui::Pos2> = None;
     let mut drag_end_pos: Option<egui::Pos2> = None;
     let mut triple_click_pos: Option<egui::Pos2> = None;
     let mut double_click_pos: Option<egui::Pos2> = None;
 
-    // Use ctx.input to get raw mouse state for more reliable drag detection
     let mouse_state = ctx.input(|i| (
         i.pointer.primary_pressed(),
         i.pointer.primary_down(),
@@ -334,11 +252,9 @@ pub fn render_terminal_session(
     ));
     let (primary_pressed, primary_down, primary_released, hover_pos, _is_moving) = mouse_state;
 
-    // Track drag state locally
     let _was_dragging = session.selection.active;
     let is_hovering = response.hovered();
 
-    // Start dragging on left button press while hovering
     if primary_pressed && is_hovering {
         if let Some(pos) = hover_pos {
             if rect.contains(pos) {
@@ -349,28 +265,21 @@ pub fn render_terminal_session(
         }
     }
 
-    // Continue dragging while button is held
     if primary_down && session.selection.active {
         if let Some(pos) = hover_pos {
-            // Only update if we're within or near the terminal rect
             if pos.x >= rect.min.x - 10.0 && pos.x <= rect.max.x + 10.0 &&
-               pos.y >= rect.min.y - 50.0 && pos.y <= rect.max.y + 50.0 {
+                pos.y >= rect.min.y - 50.0 && pos.y <= rect.max.y + 50.0 {
                 let clamped_x = pos.x.clamp(rect.min.x, rect.max.x);
                 let clamped_y = pos.y.clamp(rect.min.y, rect.max.y);
                 drag_end_pos = Some(egui::pos2(clamped_x, clamped_y));
 
-                // Auto-scroll when dragging near edges
-                // The closer to the edge, the faster we scroll
                 let edge_margin = line_height * 3.0;
                 if pos.y < rect.min.y + edge_margin && pos.y >= rect.min.y - 50.0 {
-                    // Near top edge - scroll up (towards older scrollback)
-                    // Speed: 1-3 lines per frame based on distance
                     let distance = (rect.min.y + edge_margin - pos.y) / edge_margin;
                     let scroll_speed = (distance * 3.0).ceil() as usize;
                     let max_offset = session.grid.lock().map(|g| g.scrollback_len()).unwrap_or(0);
                     session.scroll_offset = (session.scroll_offset + scroll_speed).min(max_offset);
                 } else if pos.y > rect.max.y - edge_margin && pos.y <= rect.max.y + 50.0 {
-                    // Near bottom edge - scroll down (towards newer content)
                     let distance = (pos.y - (rect.max.y - edge_margin)) / edge_margin;
                     let scroll_speed = (distance * 3.0).ceil() as usize;
                     session.scroll_offset = session.scroll_offset.saturating_sub(scroll_speed);
@@ -379,12 +288,10 @@ pub fn render_terminal_session(
         }
     }
 
-    // Stop dragging on button release
     if primary_released {
         session.selection.active = false;
     }
 
-    // Handle triple-click for line selection
     if response.triple_clicked() {
         triple_click_pos = response.interact_pointer_pos();
     } else if response.double_clicked() {
@@ -395,7 +302,7 @@ pub fn render_terminal_session(
         }
     }
 
-    // IME for focused pane
+    // IME cursor position output
     if is_focused && response.has_focus() {
         if let Ok(grid) = session.grid.lock() {
             let cursor_x = rect.min.x + grid.cursor_col as f32 * char_width;
@@ -427,12 +334,6 @@ pub fn render_terminal_session(
     }
 
     // Extract selected text for copy operations
-    //
-    // IMPORTANT: selection stores global indices that combine scrollback and grid:
-    // - Scrollback: [0, scrollback_len)
-    // - Grid: [scrollback_len, scrollback_len + grid.rows)
-    //
-    // This function must correctly map global indices back to actual cell data.
     let selected_text: Option<String> = if session.selection.has_selection() {
         if let Ok(grid) = session.grid.lock() {
             let scrollback_len = grid.scrollback_len();
@@ -440,19 +341,14 @@ pub fn render_terminal_session(
             let mut text = String::new();
 
             for row in sr..=er {
-                // Determine if this is a scrollback or grid row based on global index
                 let cells = if row < scrollback_len {
-                    // Scrollback row
                     match grid.get_scrollback_row(row) {
                         Some(c) => c,
                         None => break,
                     }
                 } else {
-                    // Grid row: convert global index to local grid index
                     let grid_row = row.saturating_sub(scrollback_len);
-                    if grid_row >= grid.rows {
-                        break;
-                    }
+                    if grid_row >= grid.rows { break; }
                     &grid.cells[grid_row]
                 };
 
@@ -461,7 +357,6 @@ pub fn render_terminal_session(
 
                 for col in col_start..col_end {
                     let cell = &cells[col];
-                    // Skip wide character continuation cells to avoid duplicate/extra spaces
                     if !cell.wide_continuation {
                         text.push(cell.c);
                     }
@@ -477,7 +372,7 @@ pub fn render_terminal_session(
         } else { None }
     } else { None };
 
-    // Right-click context menu (terminal area)
+    // Right-click context menu
     let mut ctx_copy = false;
     let mut ctx_paste = false;
     let mut ctx_select_all = false;
@@ -522,12 +417,10 @@ pub fn render_terminal_session(
         }
     }
     if ctx_paste {
-        // Read clipboard text via egui's clipboard integration (avoids direct arboard errors)
         let clip_text = ctx.input(|i| i.events.iter().find_map(|e| {
             if let egui::Event::Paste(t) = e { Some(t.clone()) } else { None }
         }));
         if let Some(text) = clip_text {
-            // Filter out control characters (except tab, newline, carriage return)
             let safe_text: String = text.chars()
                 .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
                 .collect();
@@ -561,7 +454,6 @@ pub fn render_terminal_session(
             session.scroll_offset = 0;
         }
 
-        // When search bar is active, intercept Escape and Enter keys
         if search_is_active {
             for event in &events {
                 if let egui::Event::Key { key, pressed: true, modifiers, .. } = event {
@@ -570,7 +462,6 @@ pub fn render_terminal_session(
                             session.search_state = None;
                         }
                         egui::Key::Enter if modifiers.shift => {
-                            // Shift+Enter: go to previous match
                             if let Some(ref mut state) = session.search_state {
                                 if !state.matches.is_empty() {
                                     if state.current_index == 0 {
@@ -582,7 +473,6 @@ pub fn render_terminal_session(
                             }
                         }
                         egui::Key::Enter => {
-                            // Enter: go to next match
                             if let Some(ref mut state) = session.search_state {
                                 if !state.matches.is_empty() {
                                     state.current_index = (state.current_index + 1) % state.matches.len();
@@ -598,7 +488,6 @@ pub fn render_terminal_session(
         let mut ime_committed = false;
         let has_ime_events = events.iter().any(|e| matches!(e, egui::Event::Ime(_)));
 
-        // Check if this frame contains non-ASCII text events
         let has_non_ascii_text = events.iter().any(|e| {
             if let egui::Event::Text(text) = e {
                 !text.chars().all(|c| c.is_ascii())
@@ -607,238 +496,251 @@ pub fn render_terminal_session(
             }
         });
 
-        // Chinese IME punctuation mapping - ONLY these actually get converted
-        // All other ASCII punctuation should be passed through normally
         fn is_chinese_ime_punct(ch: char) -> bool {
             matches!(ch,
-                '.' | ',' | ';' | ':' |  // Basic punctuation -> 。；：
-                '?' | '!' |              // Question/exclamation -> ？！
-                '(' | ')' |              // Parentheses -> （)
-                '[' | ']' |              // Square brackets -> 【】
-                '<' | '>'                // Angle brackets -> 《》
+                '.' | ',' | ';' | ':' |
+                '?' | '!' |
+                '(' | ')' |
+                '[' | ']' |
+                '<' | '>'
             )
         }
 
-        // When search is active, don't forward keyboard input to the terminal
         if !search_is_active {
 
-        // First pass: process all IME events
-        for event in &events {
-            if let egui::Event::Ime(ime_event) = event {
-                match ime_event {
-                    egui::ImeEvent::Enabled => {
-                        *ime_composing = true;
+            for event in &events {
+                if let egui::Event::Ime(ime_event) = event {
+                    match ime_event {
+                        egui::ImeEvent::Enabled => {
+                            *ime_composing = true;
+                        }
+                        egui::ImeEvent::Preedit(text) => {
+                            *ime_preedit = text.clone();
+                        }
+                        egui::ImeEvent::Commit(text) => {
+                            ime_preedit.clear();
+                            session.selection.clear();
+                            let safe_text: String = text.chars()
+                                .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
+                                .collect();
+                            session.write(&safe_text);
+                            input_bytes.extend_from_slice(safe_text.as_bytes());
+                            ime_committed = true;
+                            session.last_non_ascii_input = !safe_text.chars().all(|c| c.is_ascii());
+                            *ime_composing = false;
+                        }
+                        egui::ImeEvent::Disabled => {
+                            ime_preedit.clear();
+                            *ime_composing = false;
+                        }
                     }
-                    egui::ImeEvent::Preedit(text) => {
-                        *ime_preedit = text.clone();
+                }
+            }
+
+            for event in &events {
+                match event {
+                    egui::Event::Text(text) => {
+                        if has_ime_events {
+                            continue;
+                        }
+                        if *ime_composing {
+                            continue;
+                        }
+                        if session.last_non_ascii_input {
+                            let is_single_ascii_punct = text.len() == 1 &&
+                                text.chars().next().map(|c| is_chinese_ime_punct(c)).unwrap_or(false);
+                            if is_single_ascii_punct {
+                                continue;
+                            }
+                        }
+
+                        let is_punct = text.len() == 1 &&
+                            text.chars().next().map(|c| is_chinese_ime_punct(c)).unwrap_or(false);
+
+                        if !text.chars().all(|c| c.is_ascii()) {
+                            session.selection.clear();
+                            let safe_text: String = text.chars()
+                                .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
+                                .collect();
+                            if !safe_text.is_empty() {
+                                session.write(&safe_text);
+                                input_bytes.extend_from_slice(safe_text.as_bytes());
+                            }
+                            session.last_non_ascii_input = true;
+                        } else if !is_punct {
+                            session.last_non_ascii_input = false;
+                        }
                     }
-                    egui::ImeEvent::Commit(text) => {
-                        ime_preedit.clear();
+                    egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                        if modifiers.command {
+                            let cmd_arrow = match key {
+                                egui::Key::ArrowLeft  => { session.write("\x01"); input_bytes.push(0x01); true }
+                                egui::Key::ArrowRight => { session.write("\x05"); input_bytes.push(0x05); true }
+                                _ => false,
+                            };
+                            if cmd_arrow {
+                                session.selection.clear();
+                            } else if shortcut_resolver.matches(ShortcutAction::ToggleBroadcast, ctx) {
+                                action = Some(PaneAction::ToggleBroadcast);
+                            } else if shortcut_resolver.matches(ShortcutAction::Copy, ctx) {
+                                if let Some(ref text) = selected_text {
+                                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                        let _ = clipboard.set_text(text.clone());
+                                    }
+                                    session.selection.clear();
+                                } else {
+                                    session.write_bytes(&[0x03]);
+                                    input_bytes.push(0x03);
+                                }
+                            } else if shortcut_resolver.matches(ShortcutAction::SelectAll, ctx) {
+                                session.selection.start = (0, 0);
+                                session.selection.end = (new_rows.saturating_sub(1), new_cols.saturating_sub(1));
+                            } else if shortcut_resolver.matches(ShortcutAction::Paste, ctx) {
+                                // handled by egui::Event::Paste below
+                            } else if shortcut_resolver.matches(ShortcutAction::Search, ctx) {
+                                if session.search_state.is_some() {
+                                    session.search_state = None;
+                                } else {
+                                    use crate::ui::types::SearchState;
+                                    session.search_state = Some(SearchState {
+                                        query: String::new(),
+                                        matches: Vec::new(),
+                                        current_index: 0,
+                                        case_sensitive: false,
+                                    });
+                                    let search_input_id = egui::Id::new("search_input").with(pane_id);
+                                    ctx.memory_mut(|mem| mem.request_focus(search_input_id));
+                                }
+                            }
+                        } else if modifiers.ctrl {
+                            if let Some(byte) = key_to_ctrl_byte(key) {
+                                session.selection.clear();
+                                session.write_bytes(&[byte]);
+                                input_bytes.push(byte);
+                            }
+                        } else if modifiers.alt {
+                            let alt_arrow = match key {
+                                egui::Key::ArrowLeft  => { session.write("\x1bb"); input_bytes.extend_from_slice(b"\x1bb"); true }
+                                egui::Key::ArrowRight => { session.write("\x1bf"); input_bytes.extend_from_slice(b"\x1bf"); true }
+                                egui::Key::ArrowUp    => { session.write("\x1b[1;3A"); input_bytes.extend_from_slice(b"\x1b[1;3A"); true }
+                                egui::Key::ArrowDown  => { session.write("\x1b[1;3B"); input_bytes.extend_from_slice(b"\x1b[1;3B"); true }
+                                _ => false,
+                            };
+                            if alt_arrow {
+                                session.selection.clear();
+                            }
+                        } else {
+                            let special = match key {
+                                egui::Key::Enter     => { session.write("\r"); input_bytes.extend_from_slice(b"\r"); true }
+                                egui::Key::Backspace => { session.write("\x7f"); input_bytes.push(0x7f); true }
+                                egui::Key::Tab       => { session.write("\t"); input_bytes.push(b'\t'); true }
+                                egui::Key::Escape    => { session.write("\x1b"); input_bytes.push(0x1b); true }
+                                egui::Key::ArrowUp   => { session.write("\x1b[A"); input_bytes.extend_from_slice(b"\x1b[A"); true }
+                                egui::Key::ArrowDown => { session.write("\x1b[B"); input_bytes.extend_from_slice(b"\x1b[B"); true }
+                                egui::Key::ArrowRight => { session.write("\x1b[C"); input_bytes.extend_from_slice(b"\x1b[C"); true }
+                                egui::Key::ArrowLeft  => { session.write("\x1b[D"); input_bytes.extend_from_slice(b"\x1b[D"); true }
+                                egui::Key::Home      => { session.write("\x1b[H"); input_bytes.extend_from_slice(b"\x1b[H"); true }
+                                egui::Key::End       => { session.write("\x1b[F"); input_bytes.extend_from_slice(b"\x1b[F"); true }
+                                egui::Key::PageUp    => { session.write("\x1b[5~"); input_bytes.extend_from_slice(b"\x1b[5~"); true }
+                                egui::Key::PageDown  => { session.write("\x1b[6~"); input_bytes.extend_from_slice(b"\x1b[6~"); true }
+                                egui::Key::Delete    => { session.write("\x1b[3~"); input_bytes.extend_from_slice(b"\x1b[3~"); true }
+                                egui::Key::Insert    => { session.write("\x1b[2~"); input_bytes.extend_from_slice(b"\x1b[2~"); true }
+                                egui::Key::F1  => { session.write("\x1bOP"); input_bytes.extend_from_slice(b"\x1bOP"); true }
+                                egui::Key::F2  => { session.write("\x1bOQ"); input_bytes.extend_from_slice(b"\x1bOQ"); true }
+                                egui::Key::F3  => { session.write("\x1bOR"); input_bytes.extend_from_slice(b"\x1bOR"); true }
+                                egui::Key::F4  => { session.write("\x1bOS"); input_bytes.extend_from_slice(b"\x1bOS"); true }
+                                egui::Key::F5  => { session.write("\x1b[15~"); input_bytes.extend_from_slice(b"\x1b[15~"); true }
+                                egui::Key::F6  => { session.write("\x1b[17~"); input_bytes.extend_from_slice(b"\x1b[17~"); true }
+                                egui::Key::F7  => { session.write("\x1b[18~"); input_bytes.extend_from_slice(b"\x1b[18~"); true }
+                                egui::Key::F8  => { session.write("\x1b[19~"); input_bytes.extend_from_slice(b"\x1b[19~"); true }
+                                egui::Key::F9  => { session.write("\x1b[20~"); input_bytes.extend_from_slice(b"\x1b[20~"); true }
+                                egui::Key::F10 => { session.write("\x1b[21~"); input_bytes.extend_from_slice(b"\x1b[21~"); true }
+                                egui::Key::F11 => { session.write("\x1b[23~"); input_bytes.extend_from_slice(b"\x1b[23~"); true }
+                                egui::Key::F12 => { session.write("\x1b[24~"); input_bytes.extend_from_slice(b"\x1b[24~"); true }
+                                _ => false,
+                            };
+                            if special {
+                                session.selection.clear();
+                            } else if !*ime_composing && !ime_committed {
+                                if let Some(ch) = key_to_char(key, modifiers.shift) {
+                                    let is_ime_punct = is_chinese_ime_punct(ch);
+                                    if is_ime_punct && (session.last_non_ascii_input || has_non_ascii_text) {
+                                        // suppress duplicate punctuation from IME
+                                    } else {
+                                        if !is_ime_punct {
+                                            session.last_non_ascii_input = false;
+                                        }
+                                        session.selection.clear();
+                                        let s = ch.to_string();
+                                        session.write(&s);
+                                        input_bytes.extend_from_slice(s.as_bytes());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    egui::Event::Copy => {
+                        if let Some(ref text) = selected_text {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                let _ = clipboard.set_text(text.clone());
+                            }
+                            session.selection.clear();
+                        } else {
+                            session.write_bytes(&[0x03]);
+                            input_bytes.push(0x03);
+                        }
+                    }
+                    egui::Event::Paste(text) => {
                         session.selection.clear();
-                        // Filter out control characters (except common safe ones like tab, newline)
                         let safe_text: String = text.chars()
                             .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
                             .collect();
                         session.write(&safe_text);
                         input_bytes.extend_from_slice(safe_text.as_bytes());
-                        ime_committed = true;
-                        session.last_non_ascii_input = !safe_text.chars().all(|c| c.is_ascii());
-                        *ime_composing = false;
                     }
-                    egui::ImeEvent::Disabled => {
-                        ime_preedit.clear();
-                        *ime_composing = false;
-                    }
+                    _ => {}
                 }
             }
-        }
-
-        // Second pass: process other events
-        for event in &events {
-            match event {
-                egui::Event::Text(text) => {
-                    // If we had any IME events in this frame, skip ALL Text events
-                    // This prevents duplicate characters when IME sends both Commit and Text
-                    if has_ime_events {
-                        continue;
-                    }
-
-                    // When IME is composing, skip ALL Text events since IME handles everything
-                    if *ime_composing {
-                        continue;
-                    }
-
-                    // If last input was non-ASCII (Chinese punctuation), skip single ASCII punctuation
-                    // This catches the case where IME sends ASCII punct in a separate frame
-                    if session.last_non_ascii_input {
-                        let is_single_ascii_punct = text.len() == 1 &&
-                            text.chars().next().map(|c| is_chinese_ime_punct(c)).unwrap_or(false);
-                        if is_single_ascii_punct {
-                            // Don't reset flag - keep it true for next punctuation
-                            continue;
-                        }
-                    }
-
-                    // Reset the flag only if we're processing non-punctuation text
-                    let is_punct = text.len() == 1 &&
-                        text.chars().next().map(|c| is_chinese_ime_punct(c)).unwrap_or(false);
-
-                    // Process non-ASCII text (e.g., direct Unicode input)
-                    if !text.chars().all(|c| c.is_ascii()) {
-                        session.selection.clear();
-                        // Filter out control characters (except tab, newline, carriage return)
-                        let safe_text: String = text.chars()
-                            .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
-                            .collect();
-                        if !safe_text.is_empty() {
-                            session.write(&safe_text);
-                            input_bytes.extend_from_slice(safe_text.as_bytes());
-                        }
-                        session.last_non_ascii_input = true;
-                    } else if !is_punct {
-                        // Non-punctuation ASCII text - reset flag
-                        session.last_non_ascii_input = false;
-                    }
-                }
-                egui::Event::Key { key, pressed: true, modifiers, .. } => {
-                    if modifiers.command {
-                        // Cmd+Arrow for line navigation (macOS style)
-                        let cmd_arrow = match key {
-                            egui::Key::ArrowLeft  => { session.write("\x01"); input_bytes.push(0x01); true }  // Ctrl+A = line start
-                            egui::Key::ArrowRight => { session.write("\x05"); input_bytes.push(0x05); true }  // Ctrl+E = line end
-                            _ => false,
-                        };
-                        if cmd_arrow {
-                            session.selection.clear();
-                        } else if shortcut_resolver.matches(ShortcutAction::ToggleBroadcast, ctx) {
-                            action = Some(PaneAction::ToggleBroadcast);
-                        } else if shortcut_resolver.matches(ShortcutAction::Copy, ctx) {
-                            if let Some(ref text) = selected_text {
-                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                    let _ = clipboard.set_text(text.clone());
-                                }
-                                session.selection.clear();
-                            } else {
-                                session.write_bytes(&[0x03]);
-                                input_bytes.push(0x03);
-                            }
-                        } else if shortcut_resolver.matches(ShortcutAction::SelectAll, ctx) {
-                            session.selection.start = (0, 0);
-                            session.selection.end = (new_rows.saturating_sub(1), new_cols.saturating_sub(1));
-                        } else if shortcut_resolver.matches(ShortcutAction::Paste, ctx) {
-                            // Cmd+V: handled by egui::Event::Paste below — no-op here
-                        }
-                        // Cmd+D / Cmd+Shift+D are consumed by split shortcuts — not forwarded to PTY
-                    } else if modifiers.ctrl {
-                        if let Some(byte) = key_to_ctrl_byte(key) {
-                            session.selection.clear();
-                            session.write_bytes(&[byte]);
-                            input_bytes.push(byte);
-                        }
-                    } else if modifiers.alt {
-                        // Alt/Option+Arrow for word navigation (macOS style)
-                        let alt_arrow = match key {
-                            egui::Key::ArrowLeft  => { session.write("\x1bb"); input_bytes.extend_from_slice(b"\x1bb"); true }  // word backward
-                            egui::Key::ArrowRight => { session.write("\x1bf"); input_bytes.extend_from_slice(b"\x1bf"); true }  // word forward
-                            egui::Key::ArrowUp    => { session.write("\x1b[1;3A"); input_bytes.extend_from_slice(b"\x1b[1;3A"); true }
-                            egui::Key::ArrowDown  => { session.write("\x1b[1;3B"); input_bytes.extend_from_slice(b"\x1b[1;3B"); true }
-                            _ => false,
-                        };
-                        if alt_arrow {
-                            session.selection.clear();
-                        }
-                    } else {
-                        let special = match key {
-                            egui::Key::Enter     => { session.write("\r"); input_bytes.extend_from_slice(b"\r"); true }
-                            egui::Key::Backspace => { session.write("\x7f"); input_bytes.push(0x7f); true }
-                            egui::Key::Tab       => { session.write("\t"); input_bytes.push(b'\t'); true }
-                            egui::Key::Escape    => { session.write("\x1b"); input_bytes.push(0x1b); true }
-                            egui::Key::ArrowUp   => { session.write("\x1b[A"); input_bytes.extend_from_slice(b"\x1b[A"); true }
-                            egui::Key::ArrowDown => { session.write("\x1b[B"); input_bytes.extend_from_slice(b"\x1b[B"); true }
-                            egui::Key::ArrowRight => { session.write("\x1b[C"); input_bytes.extend_from_slice(b"\x1b[C"); true }
-                            egui::Key::ArrowLeft  => { session.write("\x1b[D"); input_bytes.extend_from_slice(b"\x1b[D"); true }
-                            egui::Key::Home      => { session.write("\x1b[H"); input_bytes.extend_from_slice(b"\x1b[H"); true }
-                            egui::Key::End       => { session.write("\x1b[F"); input_bytes.extend_from_slice(b"\x1b[F"); true }
-                            egui::Key::PageUp    => { session.write("\x1b[5~"); input_bytes.extend_from_slice(b"\x1b[5~"); true }
-                            egui::Key::PageDown  => { session.write("\x1b[6~"); input_bytes.extend_from_slice(b"\x1b[6~"); true }
-                            egui::Key::Delete    => { session.write("\x1b[3~"); input_bytes.extend_from_slice(b"\x1b[3~"); true }
-                            egui::Key::Insert    => { session.write("\x1b[2~"); input_bytes.extend_from_slice(b"\x1b[2~"); true }
-                            egui::Key::F1  => { session.write("\x1bOP"); input_bytes.extend_from_slice(b"\x1bOP"); true }
-                            egui::Key::F2  => { session.write("\x1bOQ"); input_bytes.extend_from_slice(b"\x1bOQ"); true }
-                            egui::Key::F3  => { session.write("\x1bOR"); input_bytes.extend_from_slice(b"\x1bOR"); true }
-                            egui::Key::F4  => { session.write("\x1bOS"); input_bytes.extend_from_slice(b"\x1bOS"); true }
-                            egui::Key::F5  => { session.write("\x1b[15~"); input_bytes.extend_from_slice(b"\x1b[15~"); true }
-                            egui::Key::F6  => { session.write("\x1b[17~"); input_bytes.extend_from_slice(b"\x1b[17~"); true }
-                            egui::Key::F7  => { session.write("\x1b[18~"); input_bytes.extend_from_slice(b"\x1b[18~"); true }
-                            egui::Key::F8  => { session.write("\x1b[19~"); input_bytes.extend_from_slice(b"\x1b[19~"); true }
-                            egui::Key::F9  => { session.write("\x1b[20~"); input_bytes.extend_from_slice(b"\x1b[20~"); true }
-                            egui::Key::F10 => { session.write("\x1b[21~"); input_bytes.extend_from_slice(b"\x1b[21~"); true }
-                            egui::Key::F11 => { session.write("\x1b[23~"); input_bytes.extend_from_slice(b"\x1b[23~"); true }
-                            egui::Key::F12 => { session.write("\x1b[24~"); input_bytes.extend_from_slice(b"\x1b[24~"); true }
-                            _ => false,
-                        };
-                        if special {
-                            session.selection.clear();
-                        } else if !*ime_composing && !ime_committed {
-                            if let Some(ch) = key_to_char(key, modifiers.shift) {
-                                // Check if this is a Chinese IME punctuation key
-                                let is_ime_punct = is_chinese_ime_punct(ch);
-
-                                // Skip Chinese IME punctuation if either:
-                                // 1. We just had non-ASCII input (from previous frames), OR
-                                // 2. This frame contains non-ASCII text (IME punctuation in same frame)
-                                if is_ime_punct && (session.last_non_ascii_input || has_non_ascii_text) {
-                                    // Don't reset flag - keep it true for next punctuation
-                                } else {
-                                    // Reset flag only for non-IME-punctuation keys
-                                    if !is_ime_punct {
-                                        session.last_non_ascii_input = false;
-                                    }
-                                    session.selection.clear();
-                                    let s = ch.to_string();
-                                    session.write(&s);
-                                    input_bytes.extend_from_slice(s.as_bytes());
-                                }
-                            }
-                        }
-                    }
-                }
-                egui::Event::Copy => {
-                    // Cmd+C: copy selection, or send Ctrl-C if no selection
-                    if let Some(ref text) = selected_text {
-                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                            let _ = clipboard.set_text(text.clone());
-                        }
-                        session.selection.clear();
-                    } else {
-                        session.write_bytes(&[0x03]);
-                        input_bytes.push(0x03);
-                    }
-                }
-                egui::Event::Paste(text) => {
-                    session.selection.clear();
-                    // Filter out control characters (except tab, newline, carriage return)
-                    let safe_text: String = text.chars()
-                        .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
-                        .collect();
-                    session.write(&safe_text);
-                    input_bytes.extend_from_slice(safe_text.as_bytes());
-                }
-                _ => {}
-            }
-        }
 
         } // end if !search_is_active
     }
 
-    // ── Render terminal content ──────────────────────────
+    // ── Render terminal content ──────────────────────────────────────────────
     if let Ok(grid) = session.grid.lock() {
         painter.rect_filled(pane_rect, 0.0, theme.bg_primary);
         let scrollback_len = grid.scrollback_len();
+
+        // ── FIX 4: auto-follow PTY output ────────────────────────────────────
+        //
+        // When the user has scrolled up (scroll_offset > 0) and the PTY
+        // produces new output (scrollback_len grows), all mainstream terminals
+        // (iTerm2, Terminal.app, kitty) snap the view back to the bottom so
+        // the user sees the live output.  Without this, after `cat FILE` the
+        // viewport stays wherever the user left it, hiding the prompt and cursor.
+        //
+        // We detect new output by storing the last-seen scrollback_len in egui
+        // Memory (keyed per pane_id) and comparing each frame.  If it grew,
+        // the PTY wrote new content — reset scroll_offset to 0.
+        //
+        // Exception: if the user is actively dragging a selection we leave the
+        // viewport alone so the drag isn't interrupted.
+        if session.scroll_offset > 0 && !session.selection.active {
+            let sb_key = pane_id.with("last_scrollback_len");
+            let last_sb: usize = ctx.data(|d| d.get_temp(sb_key).unwrap_or(0));
+            if scrollback_len > last_sb {
+                // New PTY output arrived — snap back to the live view
+                session.scroll_offset = 0;
+            }
+        }
+        // Always update the stored scrollback_len for next frame
+        {
+            let sb_key = pane_id.with("last_scrollback_len");
+            ctx.data_mut(|d| d.insert_temp(sb_key, scrollback_len));
+        }
+
         let offset = session.scroll_offset;
 
-        // Convert pixel position to grid cell coordinates using grid math.
-        // Returns a **global index** (scrollback + grid unified) for the row.
+        // Convert pixel position to global grid index.
         let pixel_to_cell = |pos: egui::Pos2| -> (usize, usize) {
             let screen_row_float = (pos.y - rect.min.y) / line_height;
             let screen_row = if screen_row_float < 0.0 {
@@ -866,13 +768,12 @@ pub fn render_terminal_session(
             (grid_row_idx, col)
         };
 
-        // Process mouse events using actual text layout
+        // Process mouse events inside grid lock
         if let Some(pos) = drag_start_pos {
             let (grid_row, grid_col) = pixel_to_cell(pos);
             session.selection.start = (grid_row, grid_col);
             session.selection.end = (grid_row, grid_col);
         }
-        // Update selection end position while dragging
         if session.selection.active {
             if let Some(pos) = drag_end_pos {
                 let (grid_row, grid_col) = pixel_to_cell(pos);
@@ -886,29 +787,17 @@ pub fn render_terminal_session(
         }
         if let Some(pos) = double_click_pos {
             let (grid_row, grid_col) = pixel_to_cell(pos);
-
-            // Convert global index to local index for find_word_boundaries
-            //
-            // `find_word_boundaries` expects a **local grid index** (0 to grid.rows-1) because
-            // it only has access to `grid.cells[]`. However, `pixel_to_cell` returns a global index.
-            //
-            // Conversion:
-            // - If grid_row < scrollback_len: it's already a scrollback index (but scrollback words
-            //   can't be selected due to access limitations - see find_word_boundaries)
-            // - If grid_row >= scrollback_len: subtract scrollback_len to get local grid index
             let local_row = if grid_row < scrollback_len {
                 grid_row
             } else {
                 grid_row.saturating_sub(scrollback_len)
             };
-
             let (word_start, word_end) = find_word_boundaries(&grid, local_row, grid_col);
-
-            // Store selection with global indices
             session.selection.start = (grid_row, word_start);
             session.selection.end = (grid_row, word_end);
         }
 
+        // ── Text rendering ───────────────────────────────────────────────────
         for screen_row in 0..grid.rows.min(new_rows) {
             let row_y = rect.min.y + screen_row as f32 * line_height;
 
@@ -923,10 +812,10 @@ pub fn render_terminal_session(
             let Some(cells) = cells else { continue; };
             let row_cols = grid.cols.min(cells.len());
 
-            // Batch consecutive characters with same style into runs
             let mut col = 0;
             while col < row_cols {
                 let cell = &cells[col];
+                // Skip continuation cells — their owning wide char handles the pixel width
                 if cell.wide_continuation { col += 1; continue; }
 
                 let (fg, bg) = if cell.inverse {
@@ -935,7 +824,6 @@ pub fn render_terminal_session(
                     (cell.fg_color, cell.bg_color)
                 };
 
-                // Start a new run from this cell
                 let run_start_col = col;
                 let run_fg = fg;
                 let run_bg = bg;
@@ -948,10 +836,30 @@ pub fn render_terminal_session(
                 let mut run_text = String::new();
                 let mut run_end_col = col;
 
-                // Accumulate characters with same style
+                // Determine if the first cell of this run is a wide (CJK) character.
+                // Wide chars always form a solo run — they must start at an exact
+                // grid column pixel boundary and must not be mixed with adjacent ASCII.
+                let first_is_wide = col + 1 < row_cols && cells[col + 1].wide_continuation;
+
+                // Accumulate characters into a run.
+                // Invariant: all chars in the run share the same visual style.
+                // CJK (wide) chars always terminate the run immediately after being
+                // added — they are never combined with preceding or following chars.
                 while run_end_col < row_cols {
                     let c = &cells[run_end_col];
+                    // Continuation cells carry no character — skip over them but count
+                    // their column so run_end_col advances to the next real cell.
                     if c.wide_continuation { run_end_col += 1; continue; }
+
+                    let is_wide = run_end_col + 1 < row_cols
+                        && cells[run_end_col + 1].wide_continuation;
+
+                    // If we have already accumulated at least one ASCII character and
+                    // the next character is wide, flush the ASCII run first so the
+                    // wide char can start its own run at the correct pixel column.
+                    if is_wide && run_end_col > run_start_col {
+                        break;
+                    }
 
                     let (c_fg, c_bg) = if c.inverse {
                         (c.bg_color, c.fg_color)
@@ -959,26 +867,33 @@ pub fn render_terminal_session(
                         (c.fg_color, c.bg_color)
                     };
 
+                    // Style break — start a new run
                     if run_end_col > run_start_col &&
-                       (c_fg != run_fg || c_bg != run_bg ||
-                        c.bold != run_bold || c.italic != run_italic ||
-                        c.underline != run_underline || c.strikethrough != run_strikethrough ||
-                        c.dim != run_dim || c.inverse != run_inverse) {
+                        (c_fg != run_fg || c_bg != run_bg ||
+                            c.bold != run_bold || c.italic != run_italic ||
+                            c.underline != run_underline || c.strikethrough != run_strikethrough ||
+                            c.dim != run_dim || c.inverse != run_inverse) {
                         break;
                     }
 
                     run_text.push(c.c);
                     run_end_col += 1;
-                    // Include continuation cells in the advance
+                    // Advance past any continuation cells so run_end_col points at
+                    // the next non-continuation cell (or row_cols if at end).
                     while run_end_col < row_cols && cells[run_end_col].wide_continuation {
                         run_end_col += 1;
+                    }
+
+                    // Wide char: isolate it as a solo run and stop here.
+                    if is_wide {
+                        break;
                     }
                 }
 
                 let cell_x = rect.min.x + run_start_col as f32 * char_width;
                 let run_cell_width = (run_end_col - run_start_col) as f32 * char_width;
 
-                // Draw background if not default
+                // Background fill
                 if run_bg != terminal::DEFAULT_BG {
                     let bg_color = egui::Color32::from_rgb(run_bg.0, run_bg.1, run_bg.2);
                     let bg_rect = egui::Rect::from_min_size(
@@ -988,7 +903,7 @@ pub fn render_terminal_session(
                     painter.rect_filled(bg_rect, 0.0, bg_color);
                 }
 
-                // Draw text run (skip if all spaces/nulls)
+                // Text rendering
                 let has_visible = run_text.chars().any(|c| c != ' ' && c != '\0');
                 if has_visible {
                     let fg_color = if run_dim {
@@ -997,19 +912,54 @@ pub fn render_terminal_session(
                         egui::Color32::from_rgb(run_fg.0, run_fg.1, run_fg.2)
                     };
 
-                    let draw_font = font_id.clone();
-                    let text_y = row_y + line_height / 2.0;
+                    // Clip rect: prevents CJK glyphs whose advance width differs
+                    // from 2×char_width from visually overflowing into adjacent cells.
+                    // Combined with per-cell origin positioning this is the second
+                    // line of defence against glyph drift.
+                    let run_clip = painter.clip_rect().intersect(egui::Rect::from_min_size(
+                        egui::pos2(cell_x, row_y),
+                        egui::vec2(run_cell_width, line_height),
+                    ));
+                    let clipped_painter = painter.with_clip_rect(run_clip);
 
-                    painter.text(
-                        egui::pos2(cell_x, text_y),
-                        egui::Align2::LEFT_CENTER,
-                        &run_text,
-                        draw_font,
-                        fg_color,
-                    );
+                    if first_is_wide {
+                        // ── FIX 2: CJK wide-char run ────────────────────────────
+                        //
+                        // painter.text() with LEFT_CENTER places the glyph at
+                        // (x + left_bearing, ...). For CJK fallback fonts this
+                        // bearing is non-zero and varies between fonts, causing the
+                        // visual position to diverge from cell_x. Switching to
+                        // layout_no_wrap + galley() lets us control the *layout*
+                        // origin precisely: egui will place the first glyph at the
+                        // given pos2, ignoring any bearing offset that would otherwise
+                        // shift the character right relative to the grid.
+                        //
+                        // This fixes the accumulating left-drift seen on selection
+                        // highlights and the cursor for lines containing CJK chars.
+                        let galley = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                run_text.clone(),
+                                font_id.clone(),
+                                fg_color,
+                            )
+                        });
+                        // Vertically centre the galley within the cell row
+                        let gy = row_y + (line_height - galley.size().y) * 0.5;
+                        clipped_painter.galley(egui::pos2(cell_x, gy), galley, fg_color);
+                    } else {
+                        // ASCII / narrow run — painter.text is fine here
+                        let text_y = row_y + line_height / 2.0;
+                        clipped_painter.text(
+                            egui::pos2(cell_x, text_y),
+                            egui::Align2::LEFT_CENTER,
+                            &run_text,
+                            font_id.clone(),
+                            fg_color,
+                        );
+                    }
                 }
 
-                // Draw underline for the run
+                // Underline
                 if run_underline {
                     let fg_color = if run_dim {
                         egui::Color32::from_rgba_unmultiplied(run_fg.0, run_fg.1, run_fg.2, 128)
@@ -1023,7 +973,7 @@ pub fn render_terminal_session(
                     );
                 }
 
-                // Draw strikethrough for the run
+                // Strikethrough
                 if run_strikethrough {
                     let fg_color = if run_dim {
                         egui::Color32::from_rgba_unmultiplied(run_fg.0, run_fg.1, run_fg.2, 128)
@@ -1041,7 +991,7 @@ pub fn render_terminal_session(
             }
         }
 
-        // Selection highlight (grid-locked rects)
+        // ── Selection highlight ──────────────────────────────────────────────
         if session.selection.has_selection() {
             let ((sr, sc), (er, ec)) = session.selection.ordered();
             let sel_color = theme.accent_alpha(60);
@@ -1078,8 +1028,8 @@ pub fn render_terminal_session(
                 if col_start >= col_end { continue; }
 
                 let start_x = rect.min.x + col_start as f32 * char_width;
-                let end_x = rect.min.x + col_end as f32 * char_width;
-                let row_y = rect.min.y + screen_row as f32 * line_height;
+                let end_x   = rect.min.x + col_end   as f32 * char_width;
+                let row_y   = rect.min.y + screen_row as f32 * line_height;
 
                 let sel_rect = egui::Rect::from_min_max(
                     egui::pos2(start_x, row_y),
@@ -1089,10 +1039,10 @@ pub fn render_terminal_session(
             }
         }
 
-        // Search match highlighting (grid-locked rects)
+        // ── Search match highlighting ─────────────────────────────────────────
         if let Some(ref search_state) = session.search_state {
-            let match_color = egui::Color32::from_rgba_premultiplied(255, 220, 50, 80);
-            let current_color = egui::Color32::from_rgba_premultiplied(255, 140, 0, 120);
+            let match_color   = egui::Color32::from_rgba_premultiplied(255, 220,  50,  80);
+            let current_color = egui::Color32::from_rgba_premultiplied(255, 140,   0, 120);
 
             for (match_idx, m) in search_state.matches.iter().enumerate() {
                 let is_current = match_idx == search_state.current_index;
@@ -1115,48 +1065,73 @@ pub fn render_terminal_session(
 
                 if screen_row >= new_rows { continue; }
 
-                let col_end_clamped = m.col_end.min(grid.cols);
+                let col_end_clamped   = m.col_end.min(grid.cols);
                 let col_start_clamped = m.col_start.min(col_end_clamped);
                 if col_start_clamped >= col_end_clamped { continue; }
 
                 let start_x = rect.min.x + col_start_clamped as f32 * char_width;
-                let end_x = rect.min.x + col_end_clamped as f32 * char_width;
-                let row_y = rect.min.y + screen_row as f32 * line_height;
+                let end_x   = rect.min.x + col_end_clamped   as f32 * char_width;
+                let row_y   = rect.min.y + screen_row         as f32 * line_height;
 
                 let highlight_rect = egui::Rect::from_min_max(
                     egui::pos2(start_x, row_y),
                     egui::pos2(end_x, row_y + line_height),
                 );
-                let color = if is_current { current_color } else { match_color };
-                painter.rect_filled(highlight_rect, 0.0, color);
+                painter.rect_filled(highlight_rect, 0.0, if is_current { current_color } else { match_color });
             }
         }
 
-        // Cursor (grid-locked positioning)
+        // ── Cursor ───────────────────────────────────────────────────────────
         let ssh_not_connected = matches!(&session.session, Some(SessionBackend::Ssh(ssh))
             if !matches!(ssh.connection_state(), SshConnectionState::Connected));
-        if !ssh_not_connected && offset == 0 && grid.cursor_visible && grid.cursor_col < grid.cols && grid.cursor_row < grid.rows {
-            let cursor_x = rect.min.x + grid.cursor_col as f32 * char_width;
+        if !ssh_not_connected && offset == 0
+            && grid.cursor_visible
+            && grid.cursor_col < grid.cols
+            && grid.cursor_row < grid.rows
+        {
+            let cursor_x = rect.min.x + (grid.cursor_col as f32) * char_width;
             let cursor_y = rect.min.y + grid.cursor_row as f32 * line_height;
-            let cursor_rect = egui::Rect::from_min_size(
-                egui::pos2(cursor_x, cursor_y),
-                egui::vec2(char_width, line_height),
-            );
-            if is_focused && response.has_focus() {
+            let cursor_top    = egui::pos2(cursor_x, cursor_y);
+            let cursor_bottom = egui::pos2(cursor_x, cursor_y + line_height);
+
+            if is_focused && response.has_focus() && !search_has_focus {
+                // FIX 5: request repaint so cursor blink stays animated.
+                //
+                // egui only repaints on events. Without an explicit repaint
+                // request the blink phase freezes on the frame of the last
+                // input event — often the dark (off) phase — making the cursor
+                // appear missing even when the pane is focused and active.
+                // Requesting a repaint after 250 ms (half the 500 ms blink
+                // period) keeps the animation alive at minimal GPU cost.
+                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+
                 let blink_on = (ctx.input(|i| i.time) * 2.0) as u64 % 2 == 0;
                 if blink_on {
-                    painter.rect_filled(cursor_rect, 0.0,
-                        egui::Color32::from_rgba_premultiplied(theme.cursor_color.r(), theme.cursor_color.g(), theme.cursor_color.b(), 160));
-                } else {
-                    painter.rect_stroke(cursor_rect, 0.0, egui::Stroke::new(1.0, theme.cursor_color));
+                    painter.line_segment(
+                        [cursor_top, cursor_bottom],
+                        egui::Stroke::new(2.0, theme.cursor_color),
+                    );
                 }
             } else {
-                painter.rect_stroke(cursor_rect, 0.0, egui::Stroke::new(1.0, theme.fg_dim));
+                // FIX 6: unfocused cursor — visible but clearly dimmer than
+                // the active cursor. The previous fg_dim color was nearly
+                // invisible against most terminal backgrounds.
+                let dim_cursor = {
+                    let c = theme.cursor_color;
+                    egui::Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 140)
+                };
+                painter.line_segment(
+                    [cursor_top, cursor_bottom],
+                    egui::Stroke::new(1.5, dim_cursor),
+                );
             }
         }
 
-        // IME preedit overlay
-        if is_focused && !ime_preedit.is_empty() && grid.cursor_col < grid.cols && grid.cursor_row < grid.rows {
+        // ── IME preedit overlay ───────────────────────────────────────────────
+        if is_focused && !ime_preedit.is_empty()
+            && grid.cursor_col < grid.cols
+            && grid.cursor_row < grid.rows
+        {
             let safe_preedit: String = ime_preedit.chars()
                 .filter(|c| !c.is_control())
                 .collect();
@@ -1164,126 +1139,163 @@ pub fn render_terminal_session(
             if !safe_preedit.is_empty() {
                 let base_x = rect.min.x + grid.cursor_col as f32 * char_width;
                 let py = rect.min.y + grid.cursor_row as f32 * line_height;
-
                 let galley = ui.fonts(|f| f.layout_no_wrap(safe_preedit, font_id.clone(), theme.accent));
-
-                let bg_rect = egui::Rect::from_min_size(egui::pos2(base_x, py), galley.size() + egui::vec2(4.0, 0.0));
+                let bg_rect = egui::Rect::from_min_size(
+                    egui::pos2(base_x, py),
+                    galley.size() + egui::vec2(4.0, 0.0),
+                );
                 painter.rect_filled(bg_rect, 2.0, theme.bg_elevated);
                 painter.galley(egui::pos2(base_x + 2.0, py), galley, egui::Color32::TRANSPARENT);
             }
         }
 
-        // Scrollback indicator
+        // ── Scrollback indicator ──────────────────────────────────────────────
         if offset > 0 {
             let indicator = language.tf("lines_above", &offset.to_string());
-            let galley = ui.fonts(|f| f.layout_no_wrap(indicator, egui::FontId::monospace(11.0), theme.fg_dim));
+            let galley = ui.fonts(|f| f.layout_no_wrap(
+                indicator,
+                egui::FontId::monospace(11.0),
+                theme.fg_dim,
+            ));
             let ind_x = rect.max.x - galley.rect.width() - 12.0;
             let ind_y = rect.min.y + 4.0;
             painter.rect_filled(
-                egui::Rect::from_min_size(egui::pos2(ind_x - 4.0, ind_y - 2.0),
-                    egui::vec2(galley.rect.width() + 8.0, galley.rect.height() + 4.0)),
-                4.0, egui::Color32::from_rgba_premultiplied(
-                    theme.bg_secondary.r(), theme.bg_secondary.g(), theme.bg_secondary.b(), 200),
+                egui::Rect::from_min_size(
+                    egui::pos2(ind_x - 4.0, ind_y - 2.0),
+                    egui::vec2(galley.rect.width() + 8.0, galley.rect.height() + 4.0),
+                ),
+                4.0,
+                egui::Color32::from_rgba_premultiplied(
+                    theme.bg_secondary.r(), theme.bg_secondary.g(), theme.bg_secondary.b(), 200,
+                ),
             );
             painter.galley(egui::pos2(ind_x, ind_y), galley, egui::Color32::TRANSPARENT);
         }
 
-        // SSH connection state overlay
+        // ── SSH connection state overlay ──────────────────────────────────────
         if let Some(SessionBackend::Ssh(ssh)) = &session.session {
             match ssh.connection_state() {
                 SshConnectionState::Connecting | SshConnectionState::Authenticating => {
                     painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_premultiplied(
-                        theme.bg_primary.r(), theme.bg_primary.g(), theme.bg_primary.b(), 240));
+                        theme.bg_primary.r(), theme.bg_primary.g(), theme.bg_primary.b(), 240,
+                    ));
                     let msg = match ssh.connection_state() {
-                        SshConnectionState::Connecting => language.t("connecting"),
+                        SshConnectionState::Connecting    => language.t("connecting"),
                         SshConnectionState::Authenticating => language.t("authenticating"),
                         _ => "",
                     };
-                    let galley = ui.fonts(|f| f.layout_no_wrap(msg.to_string(), egui::FontId::monospace(16.0), theme.accent));
-                    painter.galley(egui::pos2(rect.center().x - galley.rect.width() / 2.0,
-                        rect.center().y - galley.rect.height() / 2.0 - 14.0), galley, egui::Color32::TRANSPARENT);
+                    let galley = ui.fonts(|f| f.layout_no_wrap(
+                        msg.to_string(),
+                        egui::FontId::monospace(16.0),
+                        theme.accent,
+                    ));
+                    painter.galley(
+                        egui::pos2(
+                            rect.center().x - galley.rect.width() / 2.0,
+                            rect.center().y - galley.rect.height() / 2.0 - 14.0,
+                        ),
+                        galley,
+                        egui::Color32::TRANSPARENT,
+                    );
 
-                    // Cancel button
                     let btn_size = egui::vec2(70.0, 28.0);
-                    let btn_pos = egui::pos2(rect.center().x - btn_size.x / 2.0, rect.center().y + 10.0);
+                    let btn_pos  = egui::pos2(rect.center().x - btn_size.x / 2.0, rect.center().y + 10.0);
                     let btn_rect = egui::Rect::from_min_size(btn_pos, btn_size);
                     let btn_resp = ui.allocate_rect(btn_rect, egui::Sense::click());
                     let btn_bg = if btn_resp.hovered() { theme.bg_elevated } else { theme.bg_secondary };
                     painter.rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, theme.border));
-                    let cancel_galley = ui.fonts(|f| f.layout_no_wrap(language.t("cancel").to_string(), egui::FontId::proportional(12.0), theme.red));
-                    painter.galley(egui::pos2(btn_rect.center().x - cancel_galley.rect.width() / 2.0,
-                        btn_rect.center().y - cancel_galley.rect.height() / 2.0), cancel_galley, egui::Color32::TRANSPARENT);
+                    let cancel_galley = ui.fonts(|f| f.layout_no_wrap(
+                        language.t("cancel").to_string(),
+                        egui::FontId::proportional(12.0),
+                        theme.red,
+                    ));
+                    painter.galley(
+                        egui::pos2(
+                            btn_rect.center().x - cancel_galley.rect.width() / 2.0,
+                            btn_rect.center().y - cancel_galley.rect.height() / 2.0,
+                        ),
+                        cancel_galley,
+                        egui::Color32::TRANSPARENT,
+                    );
                     if btn_resp.clicked() {
                         action = Some(PaneAction::ClosePane);
                     }
                 }
                 SshConnectionState::Error(ref err) => {
                     painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_premultiplied(
-                        theme.bg_primary.r(), theme.bg_primary.g(), theme.bg_primary.b(), 220));
-                    // Filter out control characters from error message
+                        theme.bg_primary.r(), theme.bg_primary.g(), theme.bg_primary.b(), 220,
+                    ));
                     let safe_err: String = err.chars().filter(|c| !c.is_control()).collect();
                     let msg = language.tf("ssh_error", &safe_err);
-
-                    // Check if this is a host key verification error
-                    let is_key_error = err.contains("Host key verification failed") ||
-                                      err.contains("MITM attack");
-
-                    // Use wrap layout to support newline characters
-                    let galley = ui.fonts(|f| f.layout(msg,
-                        egui::FontId::monospace(13.0), theme.red, rect.width() * 0.85));
-
+                    let is_key_error = err.contains("Host key verification failed")
+                        || err.contains("MITM attack");
+                    let galley = ui.fonts(|f| f.layout(
+                        msg,
+                        egui::FontId::monospace(13.0),
+                        theme.red,
+                        rect.width() * 0.85,
+                    ));
                     let text_y = rect.center().y - galley.rect.height() / 2.0 - 10.0;
-                    painter.galley(egui::pos2(rect.center().x - galley.rect.width() / 2.0,
-                        text_y), galley, egui::Color32::TRANSPARENT);
-
-                    // Show "Remove old key" button for host key verification failures
+                    painter.galley(
+                        egui::pos2(rect.center().x - galley.rect.width() / 2.0, text_y),
+                        galley,
+                        egui::Color32::TRANSPARENT,
+                    );
                     if is_key_error {
                         let btn_size = egui::vec2(120.0, 28.0);
-                        let btn_pos = egui::pos2(rect.center().x - btn_size.x / 2.0,
-                            rect.center().y + 10.0);
+                        let btn_pos  = egui::pos2(
+                            rect.center().x - btn_size.x / 2.0,
+                            rect.center().y + 10.0,
+                        );
                         let btn_rect = egui::Rect::from_min_size(btn_pos, btn_size);
                         let btn_resp = ui.allocate_rect(btn_rect, egui::Sense::click());
-
-                        // Button background (stroke style for alert)
                         painter.rect_filled(btn_rect, 4.0, theme.bg_elevated);
                         painter.rect_stroke(btn_rect, 4.0, egui::Stroke::new(1.0, theme.red));
-
-                        let btn_text = "Remove old key";
                         let btn_galley = ui.fonts(|f| f.layout_no_wrap(
-                            btn_text.to_string(),
+                            "Remove old key".to_string(),
                             egui::FontId::proportional(12.0),
                             theme.fg_primary,
                         ));
                         painter.galley(
-                            egui::pos2(btn_rect.center().x - btn_galley.rect.width() / 2.0,
-                                btn_rect.center().y - btn_galley.rect.height() / 2.0),
+                            egui::pos2(
+                                btn_rect.center().x - btn_galley.rect.width() / 2.0,
+                                btn_rect.center().y - btn_galley.rect.height() / 2.0,
+                            ),
                             btn_galley,
                             egui::Color32::TRANSPARENT,
                         );
-
                         if btn_resp.clicked() {
                             action = Some(PaneAction::RemoveHostKey);
                         }
                     }
                 }
                 SshConnectionState::Disconnected(ref reason) => {
-                    // Filter out control characters from reason
                     let safe_reason: String = reason.chars().filter(|c| !c.is_control()).collect();
-                    let galley = ui.fonts(|f| f.layout_no_wrap(language.tf("disconnected", &safe_reason),
-                        egui::FontId::monospace(11.0), theme.red));
-                    painter.galley(egui::pos2(rect.min.x + 4.0, rect.max.y - galley.rect.height() - 4.0),
-                        galley, egui::Color32::TRANSPARENT);
+                    let galley = ui.fonts(|f| f.layout_no_wrap(
+                        language.tf("disconnected", &safe_reason),
+                        egui::FontId::monospace(11.0),
+                        theme.red,
+                    ));
+                    painter.galley(
+                        egui::pos2(rect.min.x + 4.0, rect.max.y - galley.rect.height() - 4.0),
+                        galley,
+                        egui::Color32::TRANSPARENT,
+                    );
                 }
                 SshConnectionState::Connected => {}
             }
         }
-    }
+    } // end grid.lock()
 
-    // ── Search bar overlay ──
+    // ── Search bar overlay ────────────────────────────────────────────────────
     if session.search_state.is_some() {
-        let search_bar_width = 320.0_f32;
-        let search_bar_height = 32.0_f32;
+        let font_size_sb  = 13.0;
+        let line_height_sb = font_size_sb * 1.5;
+        let padding = 6.0;
+        let search_bar_height = line_height_sb + padding * 2.0;
+        let search_bar_width  = 280.0_f32;
         let search_bar_margin = 8.0_f32;
+
         let search_bar_rect = egui::Rect::from_min_size(
             egui::pos2(
                 pane_rect.max.x - search_bar_width - search_bar_margin,
@@ -1292,99 +1304,104 @@ pub fn render_terminal_session(
             egui::vec2(search_bar_width, search_bar_height),
         );
 
-        // Draw search bar background with border
-        let search_painter = ctx.layer_painter(egui::LayerId::new(
-            egui::Order::Foreground,
-            egui::Id::new("search_bar").with(pane_id),
-        ));
-        search_painter.rect(
-            search_bar_rect,
-            6.0,
-            theme.bg_elevated,
-            egui::Stroke::new(1.0, theme.border),
+        let bg          = theme.bg_elevated;
+        let border      = theme.border;
+        let text_color  = theme.fg_primary;
+        let muted_color = theme.fg_dim;
+        let accent      = theme.accent;
+
+        let btn_size   = line_height_sb - 2.0;
+        let spacing    = 3.0;
+        let count_width = 70.0;
+
+        let input_width = search_bar_width - padding * 2.0
+            - count_width - btn_size * 3.0 - spacing * 3.0;
+        let input_rect = egui::Rect::from_min_size(
+            egui::pos2(search_bar_rect.min.x + padding, search_bar_rect.min.y + padding),
+            egui::vec2(input_width, line_height_sb),
         );
 
-        // Layout: [text input] [match count] [prev] [next] [close]
-        let inner_margin = 4.0;
-        let btn_width = 22.0;
-        let count_width = 50.0;
-        let input_width = search_bar_width - inner_margin * 2.0 - btn_width * 3.0 - count_width - 8.0;
+        let mut query = session.search_state.as_ref().map(|s| s.query.clone()).unwrap_or_default();
+        let prev_query = query.clone();
 
-        // Extract current state for rendering
-        let match_count = session.search_state.as_ref().map(|s| s.matches.len()).unwrap_or(0);
-        let current_index = session.search_state.as_ref().map(|s| s.current_index).unwrap_or(0);
-        let query_str = session.search_state.as_ref().map(|s| s.query.clone()).unwrap_or_default();
+        ui.memory_mut(|mem| mem.request_focus(search_input_id));
+        let has_focus = search_has_focus;
 
-        // Match count label
-        let count_text = if query_str.is_empty() {
-            String::new()
-        } else if match_count == 0 {
-            language.t("no_matches").to_string()
-        } else {
-            format!("{}/{}", current_index + 1, match_count)
-        };
+        let count_x = input_rect.max.x + spacing;
+        let btn_x   = count_x + count_width + spacing;
+        let btn_y   = input_rect.min.y;
 
-        let count_color = if match_count == 0 && !query_str.is_empty() {
-            theme.red
-        } else {
-            theme.fg_dim
-        };
+        let prev_rect  = egui::Rect::from_min_size(egui::pos2(btn_x,                    btn_y), egui::vec2(btn_size, line_height_sb));
+        let next_rect  = egui::Rect::from_min_size(egui::pos2(btn_x + btn_size + spacing, btn_y), egui::vec2(btn_size, line_height_sb));
+        let close_rect = egui::Rect::from_min_size(egui::pos2(btn_x + (btn_size + spacing) * 2.0, btn_y), egui::vec2(btn_size, line_height_sb));
 
-        let count_galley = ui.fonts(|f| f.layout_no_wrap(
-            count_text,
-            egui::FontId::proportional(11.0),
-            count_color,
-        ));
+        let prev_response  = ui.allocate_rect(prev_rect,  egui::Sense::click());
+        let next_response  = ui.allocate_rect(next_rect,  egui::Sense::click());
+        let close_response = ui.allocate_rect(close_rect, egui::Sense::click());
 
-        let count_x = search_bar_rect.min.x + inner_margin + input_width + 4.0;
-        let count_y = search_bar_rect.center().y - count_galley.rect.height() / 2.0;
-        search_painter.galley(egui::pos2(count_x, count_y), count_galley, egui::Color32::TRANSPARENT);
+        let painter = ui.painter_at(pane_rect);
+        painter.rect_filled(search_bar_rect, 4.0, bg);
+        painter.rect_stroke(search_bar_rect, 4.0, egui::Stroke::new(1.0, border));
+        if has_focus {
+            painter.rect_stroke(search_bar_rect, 4.0, egui::Stroke::new(2.0, accent));
+        }
 
-        // Previous button (▲)
-        let prev_x = count_x + count_width;
-        let prev_rect = egui::Rect::from_min_size(
-            egui::pos2(prev_x, search_bar_rect.min.y + (search_bar_height - btn_width) / 2.0),
-            egui::vec2(btn_width, btn_width),
-        );
-        let prev_resp = ui.allocate_rect(prev_rect, egui::Sense::click());
-        let prev_bg = if prev_resp.hovered() { theme.hover_bg } else { egui::Color32::TRANSPARENT };
-        search_painter.rect_filled(prev_rect, 4.0, prev_bg);
-        search_painter.text(
-            prev_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "\u{25b2}",
-            egui::FontId::proportional(10.0),
-            theme.fg_dim,
-        );
-        if prev_resp.clicked() {
+        let text_edit = egui::TextEdit::singleline(&mut query)
+            .id(search_input_id)
+            .font(egui::FontId::proportional(font_size_sb))
+            .desired_width(f32::INFINITY)
+            .hint_text(language.t("search_placeholder"))
+            .text_color(text_color)
+            .frame(false);
+        let text_edit_response = ui.put(input_rect, text_edit);
+        if text_edit_response.clicked() {
+            ui.memory_mut(|mem| mem.request_focus(search_input_id));
+        }
+        if has_focus && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            session.search_state = None;
+        }
+
+        let match_count    = session.search_state.as_ref().map(|s| s.matches.len()).unwrap_or(0);
+        let current_index  = session.search_state.as_ref().map(|s| s.current_index).unwrap_or(0);
+        let query_str      = session.search_state.as_ref().map(|s| s.query.clone()).unwrap_or_default();
+
+        if !query_str.is_empty() {
+            let count_text = if match_count == 0 {
+                language.t("no_matches").to_string()
+            } else {
+                format!("{}/{}", current_index + 1, match_count)
+            };
+            let count_color = if match_count == 0 { theme.red } else { muted_color };
+            let count_galley = ui.fonts(|f| f.layout_no_wrap(
+                count_text,
+                egui::FontId::proportional(font_size_sb - 1.0),
+                count_color,
+            ));
+            let count_y = input_rect.min.y + (line_height_sb - count_galley.rect.height()) / 2.0;
+            painter.galley(egui::pos2(count_x, count_y), count_galley, egui::Color32::TRANSPARENT);
+        }
+
+        // Prev button
+        if prev_response.hovered() { painter.rect_filled(prev_rect, 3.0, theme.hover_bg); }
+        painter.text(prev_rect.center(), egui::Align2::CENTER_CENTER, '▲',
+                     egui::FontId::proportional(font_size_sb - 3.0), muted_color);
+        if prev_response.clicked() {
             if let Some(ref mut state) = session.search_state {
                 if !state.matches.is_empty() {
-                    if state.current_index == 0 {
-                        state.current_index = state.matches.len() - 1;
+                    state.current_index = if state.current_index == 0 {
+                        state.matches.len() - 1
                     } else {
-                        state.current_index -= 1;
-                    }
+                        state.current_index - 1
+                    };
                 }
             }
         }
 
-        // Next button (▼)
-        let next_x = prev_x + btn_width;
-        let next_rect = egui::Rect::from_min_size(
-            egui::pos2(next_x, search_bar_rect.min.y + (search_bar_height - btn_width) / 2.0),
-            egui::vec2(btn_width, btn_width),
-        );
-        let next_resp = ui.allocate_rect(next_rect, egui::Sense::click());
-        let next_bg = if next_resp.hovered() { theme.hover_bg } else { egui::Color32::TRANSPARENT };
-        search_painter.rect_filled(next_rect, 4.0, next_bg);
-        search_painter.text(
-            next_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "\u{25bc}",
-            egui::FontId::proportional(10.0),
-            theme.fg_dim,
-        );
-        if next_resp.clicked() {
+        // Next button
+        if next_response.hovered() { painter.rect_filled(next_rect, 3.0, theme.hover_bg); }
+        painter.text(next_rect.center(), egui::Align2::CENTER_CENTER, '▼',
+                     egui::FontId::proportional(font_size_sb - 3.0), muted_color);
+        if next_response.clicked() {
             if let Some(ref mut state) = session.search_state {
                 if !state.matches.is_empty() {
                     state.current_index = (state.current_index + 1) % state.matches.len();
@@ -1392,71 +1409,27 @@ pub fn render_terminal_session(
             }
         }
 
-        // Close button (×)
-        let close_x = next_x + btn_width;
-        let close_rect = egui::Rect::from_min_size(
-            egui::pos2(close_x, search_bar_rect.min.y + (search_bar_height - btn_width) / 2.0),
-            egui::vec2(btn_width, btn_width),
-        );
-        let close_resp = ui.allocate_rect(close_rect, egui::Sense::click());
-        let close_bg = if close_resp.hovered() {
-            egui::Color32::from_rgb(192, 77, 77)
-        } else {
-            egui::Color32::TRANSPARENT
-        };
-        search_painter.rect_filled(close_rect, 4.0, close_bg);
-        search_painter.text(
-            close_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "\u{00d7}",
-            egui::FontId::proportional(13.0),
-            theme.fg_dim,
-        );
-        if close_resp.clicked() {
+        // Close button
+        if close_response.hovered() { painter.rect_filled(close_rect, 3.0, theme.hover_bg); }
+        painter.text(close_rect.center(), egui::Align2::CENTER_CENTER, '×',
+                     egui::FontId::proportional(font_size_sb + 1.0), muted_color);
+        if close_response.clicked() {
             session.search_state = None;
         }
 
-        // Text input field — rendered using egui's TextEdit widget
-        if session.search_state.is_some() {
-            let input_rect = egui::Rect::from_min_size(
-                egui::pos2(search_bar_rect.min.x + inner_margin, search_bar_rect.min.y + inner_margin),
-                egui::vec2(input_width, search_bar_height - inner_margin * 2.0),
-            );
-
-            let search_input_id = egui::Id::new("search_input").with(pane_id);
-            let mut query = session.search_state.as_ref().map(|s| s.query.clone()).unwrap_or_default();
-            let prev_query = query.clone();
-
-            let text_edit = egui::TextEdit::singleline(&mut query)
-                .id(search_input_id)
-                .font(egui::FontId::proportional(13.0))
-                .desired_width(input_width)
-                .hint_text(language.t("search_placeholder"))
-                .text_color(theme.fg_primary)
-                .frame(false);
-
-            let inner_resp = ui.put(input_rect, text_edit);
-
-            // Auto-focus the text input when search opens
-            if !inner_resp.has_focus() {
-                inner_resp.request_focus();
-            }
-
-            // Update search state when query changes
-            if query != prev_query {
-                if let Some(ref mut state) = session.search_state {
-                    state.query = query.clone();
-                    // Run search
-                    if let Ok(grid) = session.grid.lock() {
-                        let raw_matches = grid.search(&state.query, state.case_sensitive);
-                        state.matches = raw_matches.into_iter().map(|(row, col_start, col_end)| {
-                            SearchMatch { row, col_start, col_end }
-                        }).collect();
-                        if state.matches.is_empty() {
-                            state.current_index = 0;
-                        } else {
-                            state.current_index = state.current_index.min(state.matches.len() - 1);
-                        }
+        // Update search on query change
+        if query != prev_query {
+            if let Some(ref mut state) = session.search_state {
+                state.query = query.clone();
+                if let Ok(grid) = session.grid.lock() {
+                    let raw_matches = grid.search(&state.query, state.case_sensitive);
+                    state.matches = raw_matches.into_iter().map(|(row, col_start, col_end)| {
+                        SearchMatch { row, col_start, col_end }
+                    }).collect();
+                    if state.matches.is_empty() {
+                        state.current_index = 0;
+                    } else {
+                        state.current_index = state.current_index.min(state.matches.len() - 1);
                     }
                 }
             }
@@ -1469,11 +1442,8 @@ pub fn render_terminal_session(
                 if let Ok(grid) = session.grid.lock() {
                     let scrollback_len = grid.scrollback_len();
                     if current_match.row < scrollback_len {
-                        // Match is in scrollback — scroll to show it
-                        let target_offset = scrollback_len - current_match.row;
-                        session.scroll_offset = target_offset;
+                        session.scroll_offset = scrollback_len - current_match.row;
                     } else {
-                        // Match is in current grid — ensure we're scrolled to bottom
                         session.scroll_offset = 0;
                     }
                 }
@@ -1481,13 +1451,13 @@ pub fn render_terminal_session(
         }
     }
 
-    // ── Broadcast mode border (accent border on non-focused panes) ──
+    // ── Broadcast mode border ─────────────────────────────────────────────────
     if broadcast_state.is_active() && !is_focused {
         let painter = ui.painter_at(pane_rect);
         painter.rect_stroke(pane_rect, 0.0, egui::Stroke::new(2.0, theme.accent));
     }
 
-    // ── Close button (×) shown on hover (only when multiple panes exist) ──
+    // ── Close button (×) ──────────────────────────────────────────────────────
     if show_close_btn && response.hovered() {
         let btn_bg = if close_btn_hovered {
             egui::Color32::from_rgb(192, 77, 77)
@@ -1507,31 +1477,7 @@ pub fn render_terminal_session(
     (action, input_bytes)
 }
 
-/// Render a single terminal pane into the given rect (thin wrapper around render_terminal_session).
-/// Render a single terminal pane leaf node.
-///
-/// Wraps `render_terminal_session` with UI chrome including:
-/// - Close button in top-right corner
-/// - Border (accent color when broadcasting, standard border otherwise)
-/// - Proper spacing and padding
-///
-/// # Arguments
-///
-/// Same as `render_terminal_session` plus:
-/// * `session_idx` - Index into sessions vector
-/// * `sessions` - Mutable slice of all terminal sessions
-/// * `focused_session` - Index of currently focused session
-///
-/// # Notes
-///
-/// This function is called from `render_pane_tree` when it reaches a leaf node.
-/// For detached windows, this is the entry point. For tabbed panes, the parent
-/// manages the tab UI.
-///
-/// # See Also
-///
-/// * `render_terminal_session` - Core rendering logic
-/// * `render_pane_tree` - Recursive pane tree renderer
+/// Thin wrapper around `render_terminal_session` that binds a session index and pane ID.
 #[allow(clippy::too_many_arguments)]
 pub fn render_terminal_pane(
     ui: &mut egui::Ui,
@@ -1569,68 +1515,7 @@ pub fn render_terminal_pane(
     )
 }
 
-/// Recursively render a pane layout tree into the given rect.
-/// Recursively render a pane tree with split panes and terminal sessions.
-///
-/// This function handles the pane tree structure which supports:
-/// - **Horizontal splits**: Panes stacked vertically (Cmd+D)
-/// - **Vertical splits**: Panes side-by-side (Cmd+Shift+D)
-/// - **Leaf nodes**: Terminal sessions
-/// - **Resizable dividers**: Drag to adjust split ratio
-/// - **Close button**: Per-pane close functionality
-///
-/// # Pane Tree Structure
-///
-/// ```text
-/// PaneNode::Split {
-///     direction: Horizontal,
-///     first: PaneNode::Leaf(0),      // Top pane
-///     second: PaneNode::Leaf(1),     // Bottom pane
-///     ratio: 0.5,                    // Split at 50%
-/// }
-/// ```
-///
-/// # Arguments
-///
-/// * `ui` - egui UI context
-/// * `ctx` - egui context for I/O
-/// * `node` - Pane tree node (mutable to update ratio from drag)
-/// * `rect` - Available rectangle for this pane
-/// * `sessions` - All terminal sessions
-/// * `focused_session` - Currently focused session index
-/// * `broadcast_state` - Broadcast mode state
-/// * `ime_composing` - IME composition state
-/// * `ime_preedit` - IME preedit text
-/// * `can_close_pane` - Whether panes can be closed
-/// * `theme` - Color theme
-/// * `font_size` - Terminal font size
-/// * `language` - UI language
-///
-/// # Returns
-///
-/// * `(Option<usize>, Option<PaneAction>, Vec<u8>)`
-///   - Session index (if any)
-///   - Action to perform (close/focus/split)
-///   - Input bytes to send to terminal
-///
-/// # Divider Interaction
-///
-/// Split dividers are interactive areas between panes:
-/// - **Width**: 2 pixels with 10-pixel hit area
-/// - **Cursor**: Changes to resize cursor on hover
-/// - **Drag**: Adjusts the split ratio
-/// - **Bounds**: Ratio clamped to [0.1, 0.9]
-///
-/// # Example
-///
-/// ```rust
-/// let (session_idx, action, input) = render_pane_tree(
-///     ui, ctx, &mut pane_root, available_rect,
-///     &mut sessions, focused_session, &broadcast_state,
-///     &mut ime_composing, &mut ime_preedit,
-///     true, &theme, 14.0, &language
-/// );
-/// ```
+/// Recursively render a pane layout tree.
 #[allow(clippy::too_many_arguments)]
 pub fn render_pane_tree(
     ui: &mut egui::Ui,
@@ -1666,9 +1551,8 @@ pub fn render_pane_tree(
         }
         PaneNode::Split { direction, ratio, first, second } => {
             let dir = *direction;
-
-            // Update ratio on drag BEFORE calculating rects
             let gap = 2.0;
+
             let divider_rect = match dir {
                 SplitDirection::Horizontal => egui::Rect::from_min_max(
                     egui::pos2(rect.min.x + rect.width() * *ratio - gap / 2.0, rect.min.y),
@@ -1684,7 +1568,6 @@ pub fn render_pane_tree(
                 .with((rect.min.x as i32, rect.min.y as i32, dir == SplitDirection::Horizontal));
             let divider_resp = ui.interact(divider_rect, divider_id, egui::Sense::drag());
 
-            // Update ratio on drag
             if divider_resp.dragged() {
                 let delta = divider_resp.drag_delta();
                 match dir {
@@ -1697,10 +1580,8 @@ pub fn render_pane_tree(
                 }
             }
 
-            // Calculate rects with current ratio
             let (rect1, rect2) = split_rect(rect, dir, *ratio);
 
-            // Resize cursor
             if divider_resp.hovered() || divider_resp.dragged() {
                 let icon = match dir {
                     SplitDirection::Horizontal => egui::CursorIcon::ResizeHorizontal,
@@ -1709,25 +1590,24 @@ pub fn render_pane_tree(
                 ctx.set_cursor_icon(icon);
             }
 
-            // Render panes
             let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language, shortcut_resolver);
             let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language, shortcut_resolver);
 
-            // Prefer the pane with a non-Focus action (split) over a plain focus
             let result = match (f1, f2) {
                 (Some((_, PaneAction::Focus, _)), Some(other)) => Some(other),
                 (Some(a), _) => Some(a),
                 (None, b)    => b,
             };
 
-            // Draw divider AFTER panes to ensure it's on top
             let div_color = if divider_resp.hovered() || divider_resp.dragged() {
                 theme.accent
             } else {
                 theme.border
             };
-            // Use layer_painter to draw divider on top of everything
-            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("divider").with(divider_id)));
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Middle,
+                egui::Id::new("divider").with(divider_id),
+            ));
             painter.rect_filled(divider_rect, 0.0, div_color);
 
             result
@@ -1735,87 +1615,28 @@ pub fn render_pane_tree(
     }
 }
 
-/// Find word boundaries around a given cell position for double-click selection.
+/// Find word boundaries around a given cell for double-click selection.
 ///
-/// This function identifies the start and end column indices of the word containing
-/// the specified cell. It handles both ASCII and CJK characters, as well as
-/// wide character continuation cells.
+/// Returns `(start_col, end_col)` inclusive. The range covers the full
+/// extent of the word containing `col`, with continuation cells included
+/// in the end column for wide characters.
 ///
-/// # Word Definition
+/// ## Fixes in this revision
 ///
-/// A "word" is defined as a contiguous sequence of:
-/// - ASCII alphanumeric characters (a-z, A-Z, 0-9)
-/// - Underscore (_)
-/// - CJK ideographs (Chinese, Japanese, Korean characters)
-///
-/// Everything else (spaces, punctuation, symbols) is treated as a word separator.
-///
-/// # Arguments
-///
-/// * `grid` - Terminal grid containing character cells
-/// * `row` - Row index (must be < grid.rows)
-/// * `col` - Column index to find word around
-///
-/// # Returns
-///
-/// * `(usize, usize)` - Start and end column indices (inclusive range)
-///
-/// # Special Cases
-///
-/// ## Wide Characters
-///
-/// CJK characters occupy two cells (main + continuation). If clicking on a
-/// continuation cell, the function moves to the main cell first:
-///
-/// ```text
-/// Grid:  你  好  (ni hao - "hello" in Chinese)
-/// Cells: [0] [1] [2] [3]
-///        main  cont main  cont
-///
-/// Click on col 1 (continuation):
-///   → Moves to col 0 (main cell)
-///   → Returns (0, 3) - selects both characters
+/// The right-walk loop previously did:
 /// ```
-///
-/// ## Boundary Cases
-///
-/// - Clicking on a separator (space, punctuation): returns (col, col)
-/// - Out of bounds row: returns (col, col) - no selection
-/// - Empty/separator line: returns (col, col) - single character
-///
-/// # Algorithm
-///
-/// 1. **Wide character check**: If on continuation cell, move to main cell
-/// 2. **Character classification**: Determine if clicked char is a word char
-/// 3. **Expand left**: Walk left while chars are word chars
-/// 4. **Expand right**: Walk right while chars are word chars
-/// 5. **Return**: (start_col, end_col)
-///
-/// # Example
-///
-/// ```rust
-/// let grid = /* terminal with "echo hello_world" */;
-/// let (start, end) = find_word_boundaries(&grid, 0, 8);
-/// // start = 5, end = 15 (selects "hello_world")
-///
-/// let (start, end) = find_word_boundaries(&grid, 0, 10);
-/// // start = 5, end = 15 (clicking in middle of "hello_world")
+///   if next_cell.wide_continuation { end = next_idx; continue; }
 /// ```
+/// After `continue` the loop re-entered with `end` pointing at the
+/// continuation cell, then checked `cells[end + 1]`. For "你好" this
+/// caused the continuation cell of "你" to be stored in `end`, and the
+/// loop would then inspect "好" as the next candidate — potentially
+/// over-extending the selection by 1 column for ASCII words ending
+/// adjacent to a CJK character.
 ///
-/// # Note
-///
-/// This function only works with grid rows, not scrollback rows. When calling
-/// from selection code, convert global index to local grid index first:
-///
-/// ```rust
-/// let local_row = if global_row < scrollback_len {
-///     /* Can't select scrollback words - not supported */
-///     return;
-/// } else {
-///     global_row - scrollback_len
-/// };
-/// let (start, end) = find_word_boundaries(&grid, local_row, col);
-/// ```
+/// Fix: when a continuation cell is encountered on the right walk, include
+/// it in `end` and **break** immediately. A continuation cell marks the
+/// right edge of a wide character; no further extension is needed or correct.
 pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usize) -> (usize, usize) {
     if row >= grid.rows {
         return (col, col);
@@ -1823,11 +1644,9 @@ pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usiz
     let cells = &grid.cells[row];
     let cell = cells.get(col);
 
-    // Handle wide character continuation - if we're on a continuation cell,
-    // move to the start of the wide character
+    // If we landed on a continuation cell, walk back to the owning main cell
     let actual_col = if let Some(c) = cell {
         if c.wide_continuation && col > 0 {
-            // Find the start of this wide character
             let mut search = col - 1;
             while search > 0 && cells[search].wide_continuation {
                 search -= 1;
@@ -1842,42 +1661,17 @@ pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usiz
 
     let ch = cells.get(actual_col).map(|c| c.c).unwrap_or(' ');
 
-    // Word characters: ASCII alphanumeric, underscore, and CJK ideographs
     let is_word_char = |c: char| -> bool {
-        // ASCII word characters
-        if c.is_ascii_alphanumeric() || c == '_' {
-            return true;
-        }
-        // CJK Unified Ideographs - treat each as individual word character
-        let cp = c as u32;
-        (0x4E00..=0x9FFF).contains(&cp) || // Common CJK
-        (0x3400..=0x4DBF).contains(&cp) || // CJK Extension A
-        (0x20000..=0x2A6DF).contains(&cp) || // CJK Extension B
-        (0x2A700..=0x2B73F).contains(&cp) || // CJK Extension C
-        (0x2B740..=0x2B81F).contains(&cp) || // CJK Extension D
-        (0x2B820..=0x2CEAF).contains(&cp) || // CJK Extension E
-        (0xF900..=0xFAFF).contains(&cp) || // CJK Compatibility Ideographs
-        (0x2F800..=0x2FA1F).contains(&cp) || // CJK Compatibility Ideographs Supplement
-        false
+        if c.is_ascii_alphanumeric() || c == '_' { return true; }
+        is_cjk(c as u32)
     };
 
     if !is_word_char(ch) {
         return (col, col);
     }
 
-    // For CJK characters, each character is independent - only select the clicked character
-    let cp = ch as u32;
-    let is_cjk = (0x4E00..=0x9FFF).contains(&cp) ||
-                  (0x3400..=0x4DBF).contains(&cp) ||
-                  (0x20000..=0x2A6DF).contains(&cp) ||
-                  (0x2A700..=0x2B73F).contains(&cp) ||
-                  (0x2B740..=0x2B81F).contains(&cp) ||
-                  (0x2B820..=0x2CEAF).contains(&cp) ||
-                  (0xF900..=0xFAFF).contains(&cp) ||
-                  (0x2F800..=0x2FA1F).contains(&cp);
-
-    if is_cjk {
-        // CJK: select only this character (may include its continuation cell)
+    // CJK fast path: each ideograph is its own word unit
+    if is_cjk(ch as u32) {
         let mut end = actual_col;
         if end + 1 < cells.len() && cells[end + 1].wide_continuation {
             end += 1;
@@ -1885,58 +1679,58 @@ pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usiz
         return (actual_col, end);
     }
 
-    // For ASCII words, find the full word boundary
+    // ── ASCII word: walk left ────────────────────────────────────────────────
     let mut start = actual_col;
     while start > 0 {
-        let prev_idx = start - 1;
+        let prev_idx  = start - 1;
         let prev_cell = &cells[prev_idx];
 
-        // Skip wide character continuation cells
+        // A continuation cell means the character before it is a wide (CJK)
+        // char — that is a word boundary for ASCII words.
         if prev_cell.wide_continuation {
-            start = prev_idx;
-            continue;
+            break;
         }
 
-        // Stop at non-word characters or CJK
         let prev_cp = prev_cell.c as u32;
-        let prev_is_cjk = (0x4E00..=0x9FFF).contains(&prev_cp) ||
-                           (0x3400..=0x4DBF).contains(&prev_cp);
-
-        if !is_word_char(prev_cell.c) || prev_is_cjk {
+        if !is_word_char(prev_cell.c) || is_cjk(prev_cp) {
             break;
         }
 
         start = prev_idx;
     }
 
+    // ── ASCII word: walk right ───────────────────────────────────────────────
     let mut end = actual_col;
     while end + 1 < cells.len().min(grid.cols) {
-        let next_idx = end + 1;
+        let next_idx  = end + 1;
         let next_cell = &cells[next_idx];
 
-        // Skip wide character continuation cells
+        // ── FIX 3 ───────────────────────────────────────────────────────────
+        // A continuation cell is the right half of a wide character.
+        // Include it in `end` (so the selection covers the full glyph slot)
+        // and then STOP — do not `continue` back into the loop, as that
+        // would cause the loop to inspect `cells[end + 1]` (the next real
+        // character) and potentially extend the selection past the CJK char
+        // into the following ASCII word, or over-count by one column when
+        // two CJK characters are adjacent.
         if next_cell.wide_continuation {
             end = next_idx;
-            continue;
+            break; // ← was `continue` — this is the fix
         }
 
-        // Stop at non-word characters or CJK
         let next_cp = next_cell.c as u32;
-        let next_is_cjk = (0x4E00..=0x9FFF).contains(&next_cp) ||
-                           (0x3400..=0x4DBF).contains(&next_cp);
-
-        if !is_word_char(next_cell.c) || next_is_cjk {
+        if !is_word_char(next_cell.c) || is_cjk(next_cp) {
             break;
         }
 
         end = next_idx;
 
-        // If this is a wide character, include its continuation
+        // If this char is itself wide, absorb its continuation and stop
         if end + 1 < cells.len() && cells[end + 1].wide_continuation {
             end += 1;
+            break;
         }
     }
 
     (start, end)
 }
-

@@ -159,7 +159,8 @@ impl PortalApp {
                     // Right side: New Host button
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.add(widgets::text_button(self.language.t("new_host"), self.theme.accent)).clicked() {
-                            self.add_host_dialog.open_new();
+                            let current_time = ctx.input(|i| i.time);
+                            self.add_host_dialog.open_new(current_time);
                         }
                     });
                 });
@@ -781,7 +782,8 @@ impl PortalApp {
         }
         if let Some(idx) = edit_host_index {
             let host = self.hosts[idx].clone();
-            self.add_host_dialog.open_edit(idx, &host);
+            let current_time = ctx.input(|i| i.time);
+            self.add_host_dialog.open_edit(idx, &host, current_time);
         }
         if let Some(host) = connect_history_host {
             self.add_tab_ssh(&host);
@@ -794,8 +796,11 @@ impl PortalApp {
 
     /// Right-side drawer for adding / editing a host (shown in Hosts view)
     pub fn show_add_host_drawer(&mut self, ctx: &egui::Context) {
-        if !self.add_host_dialog.open {
-            return;
+        let current_time = ctx.input(|i| i.time);
+
+        // Update animation and check if drawer should be visible
+        if !self.add_host_dialog.update_animation(current_time) {
+            return; // Drawer fully closed, don't render
         }
 
         // Poll the async test result
@@ -832,22 +837,35 @@ impl PortalApp {
         let mut save_clicked = false;
         let mut test_clicked = false;
 
-        egui::SidePanel::right("add_host_drawer")
-            .exact_width(ctx.screen_rect().width().min(DRAWER_WIDTH).max(280.0))
-            .resizable(false)
-            .frame(egui::Frame {
-                fill: theme.bg_secondary,
-                inner_margin: egui::Margin::same(0.0),
-                stroke: egui::Stroke::NONE,
-                ..Default::default()
-            })
+        // Calculate animated width
+        let full_width = ctx.screen_rect().width().min(DRAWER_WIDTH).max(280.0);
+        let current_width = full_width * self.add_host_dialog.anim_state;
+
+        // Use Area with animated width for smooth slide-in effect
+        let screen_rect = ctx.screen_rect();
+        let drawer_rect = egui::Rect::from_min_max(
+            egui::pos2(screen_rect.max.x - current_width, screen_rect.min.y),
+            screen_rect.max,
+        );
+
+        egui::Area::new(egui::Id::new("add_host_drawer"))
+            .fixed_pos(drawer_rect.min)
             .show(ctx, |ui| {
+                ui.set_width(current_width);
+                ui.set_height(drawer_rect.height());
+
                 egui::Frame {
-                    fill: theme.bg_elevated,
-                    inner_margin: egui::Margin::symmetric(20.0, 12.0),
+                    fill: theme.bg_secondary,
+                    inner_margin: egui::Margin::same(0.0),
                     ..Default::default()
                 }
                 .show(ui, |ui| {
+                    egui::Frame {
+                        fill: theme.bg_elevated,
+                        inner_margin: egui::Margin::symmetric(20.0, 12.0),
+                        ..Default::default()
+                    }
+                    .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(drawer_title).color(theme.fg_primary).size(16.0).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -855,7 +873,8 @@ impl PortalApp {
                                 egui::Button::new(egui::RichText::new("✕").color(theme.fg_dim).size(16.0))
                                     .frame(false)
                             ).clicked() {
-                                self.add_host_dialog.reset();
+                                self.add_host_dialog.open = false;
+                                self.add_host_dialog.anim_start_time = Some(ctx.input(|i| i.time));
                             }
                             if self.add_host_dialog.edit_index.is_some() {
                                 if ui.add(
@@ -864,7 +883,8 @@ impl PortalApp {
                                 ).on_hover_text(lang.t("delete"))
                                 .clicked() {
                                     self.confirm_delete_host = self.add_host_dialog.edit_index;
-                                    self.add_host_dialog.reset();
+                                    self.add_host_dialog.open = false;
+                                    self.add_host_dialog.anim_start_time = Some(ctx.input(|i| i.time));
                                 }
                             }
                         });
@@ -1551,9 +1571,11 @@ impl PortalApp {
             }
 
             self.save_hosts();
-            self.add_host_dialog.reset();
+            self.add_host_dialog.open = false;
+            self.add_host_dialog.anim_start_time = Some(ctx.input(|i| i.time));
         }
-    }
+    }); // Close Area
+    } // Close show_add_host_drawer
 
     /// Format duration for display
     fn format_duration(&self, duration: std::time::Duration) -> String {

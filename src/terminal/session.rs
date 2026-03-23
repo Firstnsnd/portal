@@ -919,6 +919,7 @@ impl<'a> Perform for VteHandler<'a> {
             }
             _ => {}
         }
+        eprintln!("VTE execute: byte=0x{:02X} cursor_col after={}", byte, self.grid.cursor_col);
     }
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {

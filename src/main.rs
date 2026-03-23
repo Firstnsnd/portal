@@ -32,6 +32,8 @@ impl eframe::App for PortalApp {
             AppView::Keychain => self.language.t("keychain").to_string(),
             AppView::Settings => self.language.t("settings").to_string(),
             AppView::Batch => "Batch".to_string(),
+            AppView::Snippets => "Snippets".to_string(),
+            AppView::Tunnels => "Tunnels".to_string(),
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
@@ -82,6 +84,8 @@ impl eframe::App for PortalApp {
                     AppView::Keychain => self.language.t("keychain").to_string(),
                     AppView::Settings => self.language.t("settings").to_string(),
                     AppView::Batch => "Batch".to_string(),
+                    AppView::Snippets => "Snippets".to_string(),
+                    AppView::Tunnels => "Tunnels".to_string(),
                 };
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
@@ -104,7 +108,7 @@ impl eframe::App for PortalApp {
                         let resolved_auth = tab.sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                         let new_session = if let Some(host) = &ssh_host {
                             let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                            TerminalSession::new_ssh(host, auth, &self.runtime)
+                            TerminalSession::new_ssh(host, auth, &self.runtime, None)
                         } else {
                             let id = dw.next_id;
                             dw.next_id += 1;
@@ -130,7 +134,7 @@ impl eframe::App for PortalApp {
                         let resolved_auth = tab.sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                         let new_session = if let Some(host) = &ssh_host {
                             let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                            TerminalSession::new_ssh(host, auth, &self.runtime)
+                            TerminalSession::new_ssh(host, auth, &self.runtime, None)
                         } else {
                             let id = dw.next_id;
                             dw.next_id += 1;
@@ -255,74 +259,56 @@ impl eframe::App for PortalApp {
                                             let mut tab_to_detach: Option<usize> = None;
                                             let mut tab_rects: Vec<egui::Rect> = Vec::with_capacity(dw.tabs.len());
 
-                                            // Calculate tab displacement offset with smooth easing
-                                            let displacement_offset = if let (Some(target), Some(start_time)) = (dw.tab_drag.target_index, dw.tab_drag.animation_start_time) {
-                                                if !dw.tab_drag.is_merge && dw.tab_drag.source_index.is_some() {
-                                                    let current_time = ctx.input(|i| i.time);
-                                                    let elapsed = (current_time - start_time) as f32;
-                                                    let animation_duration = 0.6; // 600ms for smooth animation
-                                                    let progress = (elapsed / animation_duration).min(1.0);
+                                            // Ensure animation state is sized correctly
+                                            dw.tab_drag.ensure_size(dw.tabs.len());
+                                            let current_time = ctx.input(|i| i.time);
+                                            let tab_width = dw.tab_drag.ghost_size.x.max(100.0);
 
-                                                    // Enhanced ease-in-out (slow-fast-slow) for smooth tab displacement
-                                                    // Using cubic easing for more pronounced slow-start and slow-end
-                                                    let t = progress;
-                                                    let eased = if t < 0.5 {
-                                                        4.0 * t * t * t  // Ease in: slow → fast
-                                                    } else {
-                                                        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0  // Ease out: fast → slow
-                                                    };
-
-                                                    // Use actual tab width
-                                                    let tab_width = if dw.tab_drag.ghost_size.x > 0.0 {
-                                                        dw.tab_drag.ghost_size.x
-                                                    } else {
-                                                        150.0
-                                                    };
-
-                                                    // Mark animation as completed for this target
-                                                    if progress >= 1.0 {
-                                                        dw.tab_drag.animation_completed_target = Some(target);
+                                            // Calculate target offsets for all tabs based on drag state
+                                            if let (Some(source), Some(target)) = (dw.tab_drag.source_index, dw.tab_drag.target_index) {
+                                                if !dw.tab_drag.is_merge && source != target {
+                                                    // For reordering: shift tabs to make room for the dragged tab
+                                                    for ti in 0..dw.tabs.len() {
+                                                        if ti == source {
+                                                            dw.tab_drag.set_target_offset(ti, 0.0, current_time);
+                                                        } else if dw.tab_drag.insert_before {
+                                                            // Insert before target: shift target and all after it
+                                                            if ti >= target && ti < source {
+                                                                dw.tab_drag.set_target_offset(ti, tab_width + 8.0, current_time);
+                                                            } else if ti > source && ti < target {
+                                                                dw.tab_drag.set_target_offset(ti, -(tab_width + 8.0), current_time);
+                                                            } else {
+                                                                dw.tab_drag.set_target_offset(ti, 0.0, current_time);
+                                                            }
+                                                        } else {
+                                                            // Insert after target: shift tabs after target
+                                                            if ti > target && ti < source {
+                                                                dw.tab_drag.set_target_offset(ti, tab_width + 8.0, current_time);
+                                                            } else if ti > source && ti <= target {
+                                                                dw.tab_drag.set_target_offset(ti, -(tab_width + 8.0), current_time);
+                                                            } else {
+                                                                dw.tab_drag.set_target_offset(ti, 0.0, current_time);
+                                                            }
+                                                        }
                                                     }
-
-                                                    Some(eased * tab_width)
-                                                } else {
-                                                    None
-                                                }
-                                            } else if let (Some(target), Some(completed_target)) = (dw.tab_drag.target_index, dw.tab_drag.animation_completed_target) {
-                                                // Animation completed, keep the final displacement
-                                                if !dw.tab_drag.is_merge && dw.tab_drag.source_index.is_some() && target == completed_target {
-                                                    let tab_width = if dw.tab_drag.ghost_size.x > 0.0 {
-                                                        dw.tab_drag.ghost_size.x
-                                                    } else {
-                                                        150.0
-                                                    };
-                                                    Some(tab_width)
-                                                } else {
-                                                    None
                                                 }
                                             } else {
-                                                None
-                                            };
+                                                // No drag in progress, reset all offsets
+                                                for ti in 0..dw.tabs.len() {
+                                                    dw.tab_drag.set_target_offset(ti, 0.0, current_time);
+                                                }
+                                            }
 
+                                            // Render tabs with smooth animation
+                                            // We'll use add_space with animated offset for each tab
                                             for (ti, tab) in dw.tabs.iter().enumerate() {
                                                 let is_active = ti == dw.active_tab;
                                                 let is_drag_target = dw.tab_drag.source_index.is_some() && dw.tab_drag.target_index == Some(ti);
                                                 let tab_fill = if is_active { self.theme.bg_elevated } else { egui::Color32::TRANSPARENT };
 
-                                                // Apply smooth displacement animation to tabs that should move
-                                                if let (Some(target), Some(offset)) = (dw.tab_drag.target_index, displacement_offset) {
-                                                    // If this tab should be displaced, add space before it
-                                                    let should_displace = if dw.tab_drag.insert_before {
-                                                        // Displace target and all tabs after it
-                                                        ti >= target
-                                                    } else {
-                                                        // Displace only tabs after the target
-                                                        ti > target
-                                                    };
-                                                    if should_displace && dw.tab_drag.source_index != Some(ti) {
-                                                        ui.add_space(offset);
-                                                    }
-                                                }
+                                                // Get current animated offset for this tab and apply it
+                                                let offset = dw.tab_drag.get_offset(ti, current_time);
+                                                ui.add_space(offset);
 
                                                 let mut close_btn_rect: Option<egui::Rect> = None;
                                                 let tab_resp = egui::Frame {
@@ -462,14 +448,12 @@ impl eframe::App for PortalApp {
 
                                                     // Reset animation ONLY when target changes from Some(a) to Some(b) where a != b
                                                     // Don't reset when going None -> Some or staying on same target (prevents looping)
+                                                    // New animation system handles this automatically via set_target_offset
                                                     let should_reset = match (prev_target, new_target) {
                                                         (Some(a), Some(b)) if a != b => true,
                                                         _ => false,
                                                     };
-                                                    if should_reset {
-                                                        dw.tab_drag.animation_start_time = Some(ctx.input(|i| i.time));
-                                                        dw.tab_drag.animation_completed_target = None;
-                                                    }
+                                                    // Animation reset is now handled by set_target_offset in the render loop
 
                                                     // Draw ghost tab at cursor position
                                                     let ghost_rect = egui::Rect::from_center_size(
@@ -601,10 +585,7 @@ impl eframe::App for PortalApp {
                                                             }
                                                         }
                                                     }
-                                                    dw.tab_drag.source_index = None;
-                                                    dw.tab_drag.target_index = None;
-                                                    dw.tab_drag.animation_start_time = None;
-                                                    dw.tab_drag.animation_completed_target = None;
+                                                    dw.tab_drag.reset();
                                                 }
                                             }
 
@@ -855,6 +836,7 @@ impl eframe::App for PortalApp {
                                         &self.theme,
                                         self.font_size,
                                         &self.language,
+                                        &self.shortcut_resolver,
                                     )
                                 };
                                 if let Some((idx, action, input_bytes)) = pane_result {
@@ -881,7 +863,7 @@ impl eframe::App for PortalApp {
                                             let resolved_auth = dw.tabs[active].sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                                             let new_session = if let Some(host) = &ssh_host {
                                                 let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                                                TerminalSession::new_ssh(host, auth, &self.runtime)
+                                                TerminalSession::new_ssh(host, auth, &self.runtime, None)
                                             } else {
                                                 let id = dw.next_id;
                                                 dw.next_id += 1;
@@ -903,7 +885,7 @@ impl eframe::App for PortalApp {
                                             let resolved_auth = dw.tabs[active].sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
                                             let new_session = if let Some(host) = &ssh_host {
                                                 let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                                                TerminalSession::new_ssh(host, auth, &self.runtime)
+                                                TerminalSession::new_ssh(host, auth, &self.runtime, None)
                                             } else {
                                                 let id = dw.next_id;
                                                 dw.next_id += 1;
@@ -950,7 +932,7 @@ impl eframe::App for PortalApp {
                                             if let Some(host) = dw.tabs[active].sessions.get(idx).and_then(|s| s.ssh_host.clone()) {
                                                 let _ = crate::ssh::remove_known_hosts_key(&host.host, host.port);
                                                 // Reconnect the SSH session
-                                                dw.tabs[active].sessions[idx].reconnect_ssh(&self.runtime);
+                                                dw.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
                                             }
                                         }
                                     }
@@ -971,6 +953,12 @@ impl eframe::App for PortalApp {
                             AppView::Batch => {
                                 self.check_batch_execution_updates();
                                 self.show_batch_page(ctx);
+                            }
+                            AppView::Snippets => {
+                                ui.label("Snippets view");
+                            }
+                            AppView::Tunnels => {
+                                ui.label("Tunnels view");
                             }
                         }
                     });
@@ -1074,74 +1062,54 @@ impl eframe::App for PortalApp {
                                 let mut tab_to_detach: Option<usize> = None;
                                 let mut tab_rects: Vec<egui::Rect> = Vec::with_capacity(self.tabs.len());
 
-                                // Calculate tab displacement offset with smooth easing
-                                let displacement_offset = if let (Some(target), Some(start_time)) = (self.tab_drag.target_index, self.tab_drag.animation_start_time) {
-                                    if !self.tab_drag.is_merge && self.tab_drag.source_index.is_some() {
-                                        let current_time = ctx.input(|i| i.time);
-                                        let elapsed = (current_time - start_time) as f32;
-                                        let animation_duration = 0.6; // 600ms for smooth animation
-                                        let progress = (elapsed / animation_duration).min(1.0);
+                                // Ensure animation state is sized correctly
+                                self.tab_drag.ensure_size(self.tabs.len());
+                                let current_time = ctx.input(|i| i.time);
+                                let tab_width = self.tab_drag.ghost_size.x.max(100.0);
 
-                                        // Enhanced ease-in-out (slow-fast-slow) for smooth tab displacement
-                                        // Using cubic easing for more pronounced slow-start and slow-end
-                                        let t = progress;
-                                        let eased = if t < 0.5 {
-                                            4.0 * t * t * t  // Ease in: slow → fast
-                                        } else {
-                                            1.0 - (-2.0 * t + 2.0).powi(3) / 2.0  // Ease out: fast → slow
-                                        };
-
-                                        // Use actual tab width
-                                        let tab_width = if self.tab_drag.ghost_size.x > 0.0 {
-                                            self.tab_drag.ghost_size.x
-                                        } else {
-                                            150.0
-                                        };
-
-                                        // Mark animation as completed for this target
-                                        if progress >= 1.0 {
-                                            self.tab_drag.animation_completed_target = Some(target);
+                                // Calculate target offsets for all tabs based on drag state
+                                if let (Some(source), Some(target)) = (self.tab_drag.source_index, self.tab_drag.target_index) {
+                                    if !self.tab_drag.is_merge && source != target {
+                                        // For reordering: shift tabs to make room for the dragged tab
+                                        for ti in 0..self.tabs.len() {
+                                            if ti == source {
+                                                self.tab_drag.set_target_offset(ti, 0.0, current_time);
+                                            } else if self.tab_drag.insert_before {
+                                                // Insert before target: shift target and all after it
+                                                if ti >= target && ti < source {
+                                                    self.tab_drag.set_target_offset(ti, tab_width + 8.0, current_time);
+                                                } else if ti > source && ti < target {
+                                                    self.tab_drag.set_target_offset(ti, -(tab_width + 8.0), current_time);
+                                                } else {
+                                                    self.tab_drag.set_target_offset(ti, 0.0, current_time);
+                                                }
+                                            } else {
+                                                // Insert after target: shift tabs after target
+                                                if ti > target && ti < source {
+                                                    self.tab_drag.set_target_offset(ti, tab_width + 8.0, current_time);
+                                                } else if ti > source && ti <= target {
+                                                    self.tab_drag.set_target_offset(ti, -(tab_width + 8.0), current_time);
+                                                } else {
+                                                    self.tab_drag.set_target_offset(ti, 0.0, current_time);
+                                                }
+                                            }
                                         }
-
-                                        Some(eased * tab_width)
-                                    } else {
-                                        None
-                                    }
-                                } else if let (Some(target), Some(completed_target)) = (self.tab_drag.target_index, self.tab_drag.animation_completed_target) {
-                                    // Animation completed, keep the final displacement
-                                    if !self.tab_drag.is_merge && self.tab_drag.source_index.is_some() && target == completed_target {
-                                        let tab_width = if self.tab_drag.ghost_size.x > 0.0 {
-                                            self.tab_drag.ghost_size.x
-                                        } else {
-                                            150.0
-                                        };
-                                        Some(tab_width)
-                                    } else {
-                                        None
                                     }
                                 } else {
-                                    None
-                                };
+                                    // No drag in progress, reset all offsets
+                                    for ti in 0..self.tabs.len() {
+                                        self.tab_drag.set_target_offset(ti, 0.0, current_time);
+                                    }
+                                }
 
                                 for (i, tab) in self.tabs.iter().enumerate() {
                                     let is_active = i == self.active_tab;
                                     let is_drag_target = self.tab_drag.source_index.is_some() && self.tab_drag.target_index == Some(i);
                                     let is_broadcasting = tab.broadcast_enabled;
 
-                                    // Apply smooth displacement animation to tabs that should move
-                                    if let (Some(target), Some(offset)) = (self.tab_drag.target_index, displacement_offset) {
-                                        // If this tab should be displaced, add space before it
-                                        let should_displace = if self.tab_drag.insert_before {
-                                            // Displace target and all tabs after it
-                                            i >= target
-                                        } else {
-                                            // Displace only tabs after the target
-                                            i > target
-                                        };
-                                        if should_displace && self.tab_drag.source_index != Some(i) {
-                                            ui.add_space(offset);
-                                        }
-                                    }
+                                    // Get current animated offset for this tab and apply it
+                                    let offset = self.tab_drag.get_offset(i, current_time);
+                                    ui.add_space(offset);
 
                                     let tab_fill = if is_active {
                                         self.theme.bg_elevated
@@ -1318,14 +1286,12 @@ impl eframe::App for PortalApp {
 
                                         // Reset animation ONLY when target changes from Some(a) to Some(b) where a != b
                                         // Don't reset when going None -> Some or staying on same target (prevents looping)
+                                        // New animation system handles this automatically via set_target_offset
                                         let should_reset = match (prev_target, new_target) {
                                             (Some(a), Some(b)) if a != b => true,
                                             _ => false,
                                         };
-                                        if should_reset {
-                                            self.tab_drag.animation_start_time = Some(ctx.input(|i| i.time));
-                                            self.tab_drag.animation_completed_target = None;
-                                        }
+                                        // Animation reset is now handled by set_target_offset in the render loop
 
                                         // Draw ghost tab at cursor position
                                         let ghost_rect = egui::Rect::from_center_size(
@@ -1464,10 +1430,7 @@ impl eframe::App for PortalApp {
                                                 }
                                             }
                                         }
-                                        self.tab_drag.source_index = None;
-                                        self.tab_drag.target_index = None;
-                                        self.tab_drag.animation_start_time = None;
-                                        self.tab_drag.animation_completed_target = None;
+                                        self.tab_drag.reset();
                                     }
                                 }
 
@@ -1480,7 +1443,7 @@ impl eframe::App for PortalApp {
                                 }
                                 if let Some(i) = tab_to_reconnect {
                                     let si = self.tabs[i].focused_session;
-                                    self.tabs[i].sessions[si].reconnect_ssh(&self.runtime);
+                                    self.tabs[i].sessions[si].reconnect_ssh(&self.runtime, None);
                                 }
                                 if let Some(i) = tab_to_detach {
                                     self.detach_tab(i);
@@ -1896,6 +1859,7 @@ impl eframe::App for PortalApp {
                                 &self.theme,
                                 self.font_size,
                                 &self.language,
+                                &self.shortcut_resolver,
                             )
                         };
                         if let Some((idx, action, input_bytes)) = pane_result {
@@ -1927,7 +1891,7 @@ impl eframe::App for PortalApp {
                                     if let Some(host) = self.tabs[active].sessions.get(idx).and_then(|s| s.ssh_host.clone()) {
                                         let _ = crate::ssh::remove_known_hosts_key(&host.host, host.port);
                                         // Reconnect the SSH session
-                                        self.tabs[active].sessions[idx].reconnect_ssh(&self.runtime);
+                                        self.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
                                     }
                                 }
                             }
@@ -1949,6 +1913,14 @@ impl eframe::App for PortalApp {
                     AppView::Batch => {
                         self.check_batch_execution_updates();
                         self.show_batch_page(ctx);
+                    }
+
+                    AppView::Snippets => {
+                        ui.label("Snippets view");
+                    }
+
+                    AppView::Tunnels => {
+                        ui.label("Tunnels view");
                     }
                 }
             });

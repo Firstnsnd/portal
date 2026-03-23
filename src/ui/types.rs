@@ -224,6 +224,10 @@ pub enum CredentialMode {
 /// Add Host dialog state
 pub struct AddHostDialog {
     pub open: bool,
+    /// Animation state: 0.0 = fully closed, 1.0 = fully open
+    pub anim_state: f32,
+    /// Animation start time
+    pub anim_start_time: Option<f64>,
     pub edit_index: Option<usize>,
     pub name: String,
     pub host: String,
@@ -274,6 +278,8 @@ impl Default for AddHostDialog {
     fn default() -> Self {
         Self {
             open: false,
+            anim_state: 0.0,
+            anim_start_time: None,
             edit_index: None,
             name: String::new(),
             host: String::new(),
@@ -310,15 +316,48 @@ impl Default for AddHostDialog {
 
 impl AddHostDialog {
     pub fn reset(&mut self) {
-        *self = Self::default();
+        self.open = false;
+        self.edit_index = None;
+        self.name.clear();
+        self.host.clear();
+        self.port = "22".to_owned();
+        self.username.clear();
+        self.group.clear();
+        self.tags.clear();
+        self.error.clear();
+        self.credential_mode = CredentialMode::None;
+        self.selected_credential_id = None;
+        self.auth_method = AuthMethodChoice::Password;
+        self.password.clear();
+        self.key_path.clear();
+        self.key_content.clear();
+        self.key_source = KeySourceChoice::LocalFile;
+        self.key_passphrase.clear();
+        self.key_in_keychain = false;
+        self.startup_commands.clear();
+        self.agent_forwarding = false;
+        self.test_conn_state = TestConnState::Idle;
+        self.test_conn_result = None;
+        self.show_remove_key_button = false;
+        self.remove_key_message.clear();
+        self.jump_host = None;
+        self.port_forwards.clear();
+        self.new_forward_kind = crate::config::ForwardKind::Local;
+        self.new_forward_local_host = "127.0.0.1".to_owned();
+        self.new_forward_local_port.clear();
+        self.new_forward_remote_host = "127.0.0.1".to_owned();
+        self.new_forward_remote_port.clear();
+        // Note: don't reset anim_state - let it animate out
     }
 
-    pub fn open_new(&mut self) {
+    pub fn open_new(&mut self, current_time: f64) {
         self.reset();
         self.open = true;
+        self.anim_start_time = Some(current_time);
+        self.anim_state = 0.0;
     }
 
-    pub fn open_edit(&mut self, index: usize, host: &HostEntry) {
+    pub fn open_edit(&mut self, index: usize, host: &HostEntry, current_time: f64) {
         self.open = true;
         self.edit_index = Some(index);
         self.name = host.name.clone();
@@ -364,6 +403,53 @@ impl AddHostDialog {
             self.credential_mode = CredentialMode::None;
             self.selected_credential_id = None;
         }
+        self.anim_start_time = Some(current_time);
+        self.anim_state = 0.0;
+    }
+
+    /// Update animation state, return true if drawer should be visible
+    pub fn update_animation(&mut self, current_time: f64) -> bool {
+        const ANIM_DURATION: f64 = 0.3; // 300ms for smooth slide
+
+        if self.open {
+            // Opening animation
+            if let Some(start) = self.anim_start_time {
+                let elapsed = current_time - start;
+                let progress = (elapsed / ANIM_DURATION).min(1.0);
+
+                // Ease-out cubic: fast start, smooth end
+                let t = progress as f32;
+                let eased = 1.0 - (1.0 - t).powi(3);
+
+                self.anim_state = eased;
+
+                if progress >= 1.0 {
+                    self.anim_start_time = None; // Animation complete
+                }
+            } else {
+                self.anim_state = 1.0;
+            }
+            true
+        } else {
+            // Closing animation
+            if let Some(start) = self.anim_start_time {
+                let elapsed = current_time - start;
+                let progress = (elapsed / ANIM_DURATION).min(1.0);
+
+                // Ease-in cubic: smooth start, fast end
+                let eased = (progress as f32).powi(3);
+
+                self.anim_state = 1.0 - eased;
+
+                if progress >= 1.0 {
+                    self.anim_start_time = None;
+                    return false; // Fully closed, stop rendering
+                }
+            } else {
+                return false; // Not animating, fully closed
+            }
+            true
+        }
     }
 }
 
@@ -379,6 +465,7 @@ pub struct SearchMatch {
 }
 
 /// Search state for terminal content
+#[derive(Clone)]
 pub struct SearchState {
     /// Current search query
     pub query: String,
