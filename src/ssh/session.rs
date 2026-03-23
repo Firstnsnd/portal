@@ -145,7 +145,7 @@ pub async fn connect_and_authenticate(
     port: u16,
     username: &str,
     auth: &ResolvedAuth,
-    keepalive_interval: u32,
+    _keepalive_interval: u32,
     _agent_forwarding: bool,
 ) -> Result<russh::client::Handle<SshClient>, String> {
     let mut config = russh::client::Config::default();

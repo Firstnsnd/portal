@@ -4,6 +4,7 @@ use crate::app::PortalApp;
 use crate::ui::theme::ThemePreset;
 use crate::ui::i18n::Language;
 use crate::ui::widgets;
+use crate::ui::fonts;
 
 impl PortalApp {
     pub fn apply_visuals(&self, ctx: &egui::Context) {
@@ -58,57 +59,7 @@ impl PortalApp {
     }
 
     pub fn apply_fonts(&mut self, ctx: &egui::Context) {
-        let mut fonts = egui::FontDefinitions::default();
-
-        if !self.custom_font_path.is_empty() {
-            if let Ok(font_data) = std::fs::read(&self.custom_font_path) {
-                fonts.font_data.insert(
-                    "CustomFont".to_owned(),
-                    egui::FontData::from_owned(font_data),
-                );
-                fonts.families
-                    .entry(egui::FontFamily::Monospace)
-                    .or_insert_with(Vec::new)
-                    .insert(0, "CustomFont".to_owned());
-            }
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            if let Ok(font_data) = std::fs::read("/System/Library/Fonts/Monaco.dfont") {
-                fonts.font_data.insert(
-                    "Monaco".to_owned(),
-                    egui::FontData::from_owned(font_data),
-                );
-                fonts.families
-                    .entry(egui::FontFamily::Monospace)
-                    .or_insert_with(Vec::new)
-                    .push("Monaco".to_owned());
-            }
-            let cjk_paths = [
-                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-                "/System/Library/Fonts/STHeiti Medium.ttc",
-                "/System/Library/Fonts/Hiragino Sans GB.ttc",
-            ];
-            for path in &cjk_paths {
-                if let Ok(font_data) = std::fs::read(path) {
-                    fonts.font_data.insert(
-                        "CJK".to_owned(),
-                        egui::FontData::from_owned(font_data),
-                    );
-                    fonts.families
-                        .entry(egui::FontFamily::Monospace)
-                        .or_insert_with(Vec::new)
-                        .push("CJK".to_owned());
-                    fonts.families
-                        .entry(egui::FontFamily::Proportional)
-                        .or_insert_with(Vec::new)
-                        .push("CJK".to_owned());
-                    break;
-                }
-            }
-        }
-
+        let fonts = fonts::load_fonts(&self.custom_font_path);
         ctx.set_fonts(fonts);
         self.fonts_dirty = false;
     }

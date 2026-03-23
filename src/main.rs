@@ -751,6 +751,7 @@ impl eframe::App for PortalApp {
                         .frame(egui::Frame {
                             fill: self.theme.bg_secondary,
                             inner_margin: egui::Margin::symmetric(12.0, 0.0),
+                            outer_margin: egui::Margin::symmetric(0.0, 0.0),
                             stroke: egui::Stroke::NONE,
                             ..Default::default()
                         })
@@ -806,6 +807,7 @@ impl eframe::App for PortalApp {
                     .frame(egui::Frame {
                         fill: self.theme.bg_primary,
                         inner_margin: egui::Margin::same(0.0),
+                        outer_margin: egui::Margin::same(0.0),
                         ..Default::default()
                     })
                     .show(ctx, |ui| {
@@ -1674,6 +1676,7 @@ impl eframe::App for PortalApp {
                 .frame(egui::Frame {
                     fill: self.theme.bg_secondary,
                     inner_margin: egui::Margin::symmetric(12.0, 0.0),
+                    outer_margin: egui::Margin::symmetric(0.0, 0.0),
                     stroke: egui::Stroke::NONE,
                     ..Default::default()
                 })
@@ -1821,6 +1824,7 @@ impl eframe::App for PortalApp {
             .frame(egui::Frame {
                 fill: self.theme.bg_primary,
                 inner_margin: egui::Margin::same(0.0),
+                outer_margin: egui::Margin::same(0.0),
                 ..Default::default()
             })
             .show(ctx, |ui| {

@@ -42,6 +42,7 @@
 pub mod tokens;
 pub mod theme;
 pub mod i18n;
+pub mod fonts;
 pub mod input;
 pub mod types;
 pub mod pane;
