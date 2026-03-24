@@ -519,8 +519,9 @@ impl TerminalGrid {
             return;
         }
 
-        // Step 1: Collect all logical lines (rows wrapped with line_wrapped flag)
-        let mut logical_lines: Vec<Vec<TerminalCell>> = Vec::new();
+        // Step 1: Collect logical lines separately from scrollback and grid
+        let mut scrollback_logical_lines: Vec<Vec<TerminalCell>> = Vec::new();
+        let mut grid_logical_lines: Vec<Vec<TerminalCell>> = Vec::new();
         let mut current_line: Vec<TerminalCell> = Vec::new();
 
         // Process scrollback first
@@ -529,12 +530,12 @@ impl TerminalGrid {
             let was_wrapped = self.scrollback_wrapped.get(row_idx).copied().unwrap_or(false);
             current_line.extend(row.iter().cloned());
             if !was_wrapped {
-                logical_lines.push(std::mem::take(&mut current_line));
+                scrollback_logical_lines.push(std::mem::take(&mut current_line));
             }
         }
         // Add any remaining line from scrollback
         if !current_line.is_empty() {
-            logical_lines.push(std::mem::take(&mut current_line));
+            scrollback_logical_lines.push(std::mem::take(&mut current_line));
         }
 
         // Process visible grid
@@ -547,59 +548,135 @@ impl TerminalGrid {
             if !was_wrapped || row_idx == self.rows - 1 {
                 // Don't add if it's empty and we already have content
                 if !current_line.is_empty() {
-                    logical_lines.push(std::mem::take(&mut current_line));
+                    grid_logical_lines.push(std::mem::take(&mut current_line));
                 }
             }
         }
 
-        // Step 2: Re-wrap each logical line at the new column width
-        let mut new_scrollback: VecDeque<Vec<TerminalCell>> = VecDeque::new();
-        let mut new_scrollback_wrapped: VecDeque<bool> = VecDeque::new();
+        // Step 2: Re-wrap scrollback logical lines at new column width
+        let reflow_line = |logical_lines: &[Vec<TerminalCell>], new_cols: usize| -> VecDeque<Vec<TerminalCell>> {
+            let mut result = VecDeque::new();
+            for logical_line in logical_lines {
+                // Find actual content length (skip trailing spaces/nuls)
+                let line_len = logical_line.iter().rposition(|c| c.c != ' ' && c.c != '\0')
+                    .map(|p| p + 1).unwrap_or(0);
 
-        for logical_line in logical_lines {
-            // Find actual content length (skip trailing spaces/nuls)
-            let line_len = logical_line.iter().rposition(|c| c.c != ' ' && c.c != '\0')
-                .map(|p| p + 1).unwrap_or(0);
+                if line_len == 0 {
+                    continue;
+                }
 
-            if line_len == 0 {
-                // Empty logical line - skip it
-                continue;
-            }
-
-            // Split logical line into chunks of new_cols
-            let chunks = logical_line[..line_len].chunks(new_cols).collect::<Vec<_>>();
-            for (idx, chunk) in chunks.iter().enumerate() {
-                let is_last = idx == chunks.len() - 1;
-                let mut row = vec![TerminalCell::default(); new_cols];
-                for (i, cell) in chunk.iter().enumerate() {
-                    if i < new_cols {
-                        row[i] = cell.clone();
+                // Split logical line into chunks of new_cols
+                let chunks = logical_line[..line_len].chunks(new_cols).collect::<Vec<_>>();
+                for chunk in chunks {
+                    let mut row = vec![TerminalCell::default(); new_cols];
+                    for (i, cell) in chunk.iter().enumerate() {
+                        if i < new_cols {
+                            row[i] = cell.clone();
+                        }
                     }
+                    result.push_back(row);
                 }
-                new_scrollback.push_back(row);
-                new_scrollback_wrapped.push_back(!is_last);
             }
-        }
+            result
+        };
+
+        // Re-wrap scrollback content
+        let mut new_scrollback = reflow_line(&scrollback_logical_lines, new_cols);
+        // Calculate wrapped flags for scrollback
+        let scrollback_row_counts: Vec<usize> = scrollback_logical_lines.iter()
+            .map(|line| {
+                let line_len = line.iter().rposition(|c| c.c != ' ' && c.c != '\0').map(|p| p + 1).unwrap_or(0);
+                if line_len == 0 { 0 } else { (line_len + new_cols - 1) / new_cols }
+            })
+            .collect();
+
+        // Re-wrap grid content
+        let mut new_grid_content = reflow_line(&grid_logical_lines, new_cols);
+        // Calculate wrapped flags for grid
+        let grid_row_counts: Vec<usize> = grid_logical_lines.iter()
+            .map(|line| {
+                let line_len = line.iter().rposition(|c| c.c != ' ' && c.c != '\0').map(|p| p + 1).unwrap_or(0);
+                if line_len == 0 { 0 } else { (line_len + new_cols - 1) / new_cols }
+            })
+            .collect();
+
+        // Helper to calculate wrapped flags from row counts
+        let calc_wrapped_flags = |row_counts: &[usize]| -> VecDeque<bool> {
+            let mut flags = VecDeque::new();
+            for &count in row_counts {
+                for i in 0..count {
+                    flags.push_back(i < count.saturating_sub(1));
+                }
+            }
+            flags
+        };
 
         // Step 3: Distribute rows between scrollback and visible grid
-        let total_rows = new_scrollback.len();
+        let scrollback_rows = new_scrollback.len();
+        let grid_rows = new_grid_content.len();
+        let total_rows = scrollback_rows + grid_rows;
 
         if total_rows == 0 {
             // Empty terminal - create all empty rows
             self.cells = vec![vec![TerminalCell::default(); new_cols]; new_rows];
             self.line_wrapped = vec![false; new_rows];
+            self.scrollback.clear();
+            self.scrollback_wrapped.clear();
+        } else if total_rows <= new_rows {
+            // All content (scrollback + grid) fits in visible grid
+            // Only merge scrollback if it's very small (3 rows or less)
+            if scrollback_rows > 0 && scrollback_rows <= 3 {
+                // Small scrollback - merge into grid for better visibility
+                for mut row in new_scrollback {
+                    new_grid_content.push_front(row);
+                }
+
+                // Calculate wrapped flags for all content
+                let grid_flags = calc_wrapped_flags(&grid_row_counts);
+                let scrollback_flags = calc_wrapped_flags(&scrollback_row_counts);
+                let mut all_wrapped_flags = scrollback_flags;
+                for flag in grid_flags {
+                    all_wrapped_flags.push_back(flag);
+                }
+
+                // Set grid content
+                self.cells = new_grid_content.into_iter().collect();
+                self.line_wrapped = all_wrapped_flags.into_iter().collect();
+
+                // Fill remaining rows
+                while self.cells.len() < new_rows {
+                    self.cells.push(vec![TerminalCell::default(); new_cols]);
+                    self.line_wrapped.push(false);
+                }
+
+                // Clear scrollback
+                self.scrollback.clear();
+                self.scrollback_wrapped.clear();
+            } else {
+                // Significant scrollback or no scrollback - keep separate
+                self.scrollback = new_scrollback;
+                self.scrollback_wrapped = calc_wrapped_flags(&scrollback_row_counts).into_iter().collect();
+
+                self.cells = new_grid_content.into_iter().collect();
+                self.line_wrapped = calc_wrapped_flags(&grid_row_counts).into_iter().collect();
+
+                // Fill remaining rows
+                while self.cells.len() < new_rows {
+                    self.cells.push(vec![TerminalCell::default(); new_cols]);
+                    self.line_wrapped.push(false);
+                }
+            }
         } else {
-            // Calculate how many rows go to scrollback vs visible grid
-            // Keep as much as possible in scrollback, fill the grid with remaining rows
-            let rows_for_grid = new_rows.min(total_rows);
+            // total_rows > new_rows: need to keep scrollback
+            // Most recent new_rows content goes to grid, rest to scrollback
+            let rows_for_grid = new_rows;
 
             // Pop rows for the visible grid (from the back, so we get the most recent content)
             self.cells = Vec::new();
             self.line_wrapped = Vec::new();
             for _ in 0..rows_for_grid {
-                if let Some(row) = new_scrollback.pop_back() {
+                if let Some(row) = new_grid_content.pop_back() {
                     self.cells.push(row);
-                    self.line_wrapped.push(new_scrollback_wrapped.pop_back().unwrap_or(false));
                 }
             }
             // Reverse since we popped from the back
@@ -612,9 +689,25 @@ impl TerminalGrid {
                 self.line_wrapped.push(false);
             }
 
-            // Remaining rows stay in scrollback
+            // Remaining grid content + scrollback goes to scrollback
+            while let Some(row) = new_grid_content.pop_front() {
+                new_scrollback.push_back(row);
+            }
             self.scrollback = new_scrollback;
-            self.scrollback_wrapped = new_scrollback_wrapped;
+
+            // Set wrapped flags for scrollback (scrollback content + overflow from grid)
+            let mut scrollback_wrapped = calc_wrapped_flags(&scrollback_row_counts);
+            // Add wrapped flags for overflow grid content (first rows that didn't fit)
+            let mut grid_row_idx = 0;
+            for &count in &grid_row_counts {
+                for i in 0..count {
+                    if grid_row_idx < grid_rows - rows_for_grid {
+                        scrollback_wrapped.push_back(i < count.saturating_sub(1));
+                    }
+                    grid_row_idx += 1;
+                }
+            }
+            self.scrollback_wrapped = scrollback_wrapped;
         }
 
         // Update grid dimensions

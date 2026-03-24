@@ -345,6 +345,24 @@ mod tests {
         }
     }
 
+    /// Helper to get scrollback content as a string (for testing)
+    fn get_scrollback_content(grid: &TerminalGrid) -> String {
+        let mut result = String::new();
+        for i in 0..grid.scrollback_len() {
+            if let Some(row) = grid.get_scrollback_row(i) {
+                for c in row.iter() {
+                    if c.c != ' ' && c.c != '\0' {
+                        result.push(c.c);
+                    } else if !result.is_empty() && !result.ends_with(' ') && !result.ends_with('\n') {
+                        result.push(' ');
+                    }
+                }
+                result.push('\n');
+            }
+        }
+        result
+    }
+
     /// Helper to get the visible content as a string (for testing)
     fn get_visible_content(grid: &TerminalGrid) -> String {
         let mut result = String::new();
@@ -499,9 +517,11 @@ mod tests {
         // Resize to wider (30 cols)
         grid.resize(30, 5);
 
-        // Content should still be preserved
+        // Content should still be preserved (may be partially in scrollback)
         let content = get_visible_content(&grid);
-        assert!(content.contains("abcdefghijklmnopqrst"));
+        let scrollback_content = get_scrollback_content(&grid);
+        let combined = format!("{}{}", scrollback_content, content);
+        assert!(combined.contains("abcdefghijklmnopqrst"));
     }
 
     #[test]
@@ -571,5 +591,51 @@ mod tests {
         grid.exit_alt_screen();
         // Note: simple resize in alt screen may truncate content at old width
         // This is expected behavior for alt screen (no reflow)
+    }
+
+    #[test]
+    fn test_reflow_with_existing_scrollback_content() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Write multiple lines of content (simulating executed commands)
+        for line_num in 0..10 {
+            write_string(&mut grid, &format!("Command output line {}", line_num));
+            // Move to next line manually (simulating newline)
+            grid.cursor_row += 1;
+            grid.cursor_col = 0;
+        }
+
+        // Scroll some content to scrollback by simulating more output
+        for _ in 0..5 {
+            grid.scroll_up(0, 23);
+        }
+
+        let initial_scrollback_len = grid.scrollback_len();
+        assert!(initial_scrollback_len > 0, "Should have scrollback content");
+
+        // Now resize to narrower width - this should preserve scrollback
+        grid.resize(40, 24);
+
+        // Scrollback should still have content
+        let new_scrollback_len = grid.scrollback_len();
+        assert!(new_scrollback_len > 0, "Scrollback should not be empty after resize");
+
+        // The scrollback should contain the original content (possibly reflowed)
+        let mut scrollback_content = String::new();
+        for i in 0..new_scrollback_len {
+            if let Some(row) = grid.get_scrollback_row(i) {
+                for c in row.iter() {
+                    if c.c != ' ' && c.c != '\0' {
+                        scrollback_content.push(c.c);
+                    } else if !scrollback_content.is_empty() && scrollback_content.ends_with(|ch: char| ch != ' ' && ch != '\n') {
+                        scrollback_content.push(' ');
+                    }
+                }
+                scrollback_content.push('\n');
+            }
+        }
+
+        // Should still contain our original content
+        assert!(scrollback_content.contains("Command"), "Scrollback should contain original content");
     }
 }
