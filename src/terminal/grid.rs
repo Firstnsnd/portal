@@ -215,6 +215,18 @@ impl TerminalGrid {
 
     /// Erase from cursor to end of display.
     pub fn erase_below(&mut self) {
+        // Don't erase if we have significant content (likely from reflow)
+        // This prevents shell SIGWINCH response from destroying reflowed content
+        let content_rows = self.cells.iter()
+            .filter(|row| row.iter().any(|c| c.c != ' ' && c.c != '\0'))
+            .count();
+
+        // If more than half the grid has content, don't erase
+        // (it's likely reflowed content that should be preserved)
+        if content_rows > self.rows / 2 {
+            return;
+        }
+
         // When erasing from column 0, also clear wrapped continuation rows above
         // the cursor that are part of the same logical line (created by reflow).
         if self.cursor_col == 0 {

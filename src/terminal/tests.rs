@@ -733,4 +733,44 @@ mod tests {
         assert!(combined.contains("cargo build"), "Second command should be preserved");
         assert!(combined.contains("Compiling"), "Output should be preserved");
     }
+
+    #[test]
+    fn test_reflow_large_output_narrowing() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Simulate ls command with many files (20 lines of output)
+        write_string(&mut grid, "$ ls");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+
+        for i in 0..20 {
+            write_string(&mut grid, &format!("file_{:03}.txt  some content here", i));
+            grid.cursor_row += 1;
+            grid.cursor_col = 0;
+        }
+
+        // Add a prompt at the end
+        write_string(&mut grid, "$ ");
+
+        // Get content before resize
+        let content_before = get_visible_content(&grid);
+        let lines_before = content_before.lines().count();
+
+        // Resize to half width (this doubles the row count)
+        grid.resize(40, 24);
+
+        // Check that content is preserved
+        let content_after = get_visible_content(&grid);
+
+        // The original files should still be present
+        assert!(content_after.contains("file_000"), "First file should be in visible area");
+        assert!(content_after.contains("file_019"), "Last file should be in visible area");
+
+        // Resize back to original width
+        grid.resize(80, 24);
+
+        // Content should still be preserved
+        let content_final = get_visible_content(&grid);
+        assert!(content_final.contains("file_000"), "Content should be preserved after resize back");
+    }
 }

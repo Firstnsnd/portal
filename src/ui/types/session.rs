@@ -353,12 +353,12 @@ impl TerminalSession {
         if cols_changed {
             // Debounce PTY resize to prevent shell SIGWINCH response (erase_below)
             // from destroying reflowed content during drag.
-            // Use longer debounce during active resize bursts (rapid drag / direction changes)
-            // to ensure SIGWINCH only fires after the user has fully stopped dragging.
+            // Use longer debounce to ensure user has fully stopped dragging.
+            // Only send PTY resize after user has settled on a new width.
             let debounce = if self.pending_pty_size.is_some() {
-                Duration::from_millis(800)
+                Duration::from_millis(1500)  // Longer debounce during active resize
             } else {
-                Duration::from_millis(150)
+                Duration::from_millis(500)   // Initial debounce
             };
             self.pending_pty_size = Some((cols as u16, rows as u16));
             self.pty_resize_deadline = Instant::now() + debounce;
