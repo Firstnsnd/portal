@@ -1,5 +1,5 @@
 //! # Terminal Grid
-//!
+
 //! This module contains the terminal grid implementation that manages
 //! the visible screen content, cursor position, scrollback history,
 //! and related terminal state.
@@ -154,6 +154,10 @@ impl TerminalGrid {
 
         // Handle pending wrap from hitting last column
         if self.wrap_pending {
+            // Mark the previous row as wrapped
+            if self.cursor_row < self.rows {
+                self.line_wrapped[self.cursor_row] = true;
+            }
             self.cursor_col = 0;
             self.cursor_row += 1;
             if self.cursor_row > self.scroll_bottom {
@@ -449,7 +453,7 @@ impl TerminalGrid {
         for global_row in 0..total_rows {
             let cells = if global_row < sb_len {
                 match self.scrollback.get(global_row) {
-                    Some(row) => row.as_slice(),
+                    Some(row) => row,
                     None => continue,
                 }
             } else {
@@ -507,15 +511,131 @@ impl TerminalGrid {
     }
 
     /// Resize with reflow logic (for column changes when not in alt screen).
-    /// This is a simplified version - the full implementation is quite complex.
+    /// Re-wraps all content at the new column boundary to preserve text.
     fn resize_reflow(&mut self, new_cols: usize, new_rows: usize) {
         let old_cols = self.cols;
         if old_cols == new_cols {
             self.resize_screen(new_cols, new_rows);
             return;
         }
-        // For simplicity, use non-reflow resize for now
-        // A full implementation would re-wrap lines at the new column boundary
-        self.resize_screen(new_cols, new_rows);
+
+        // Step 1: Collect all logical lines (rows wrapped with line_wrapped flag)
+        let mut logical_lines: Vec<Vec<TerminalCell>> = Vec::new();
+        let mut current_line: Vec<TerminalCell> = Vec::new();
+
+        // Process scrollback first
+        for row_idx in 0..self.scrollback.len() {
+            let row = &self.scrollback[row_idx];
+            let was_wrapped = self.scrollback_wrapped.get(row_idx).copied().unwrap_or(false);
+            current_line.extend(row.iter().cloned());
+            if !was_wrapped {
+                logical_lines.push(std::mem::take(&mut current_line));
+            }
+        }
+        // Add any remaining line from scrollback
+        if !current_line.is_empty() {
+            logical_lines.push(std::mem::take(&mut current_line));
+        }
+
+        // Process visible grid
+        for row_idx in 0..self.rows {
+            let row = &self.cells[row_idx];
+            let was_wrapped = self.line_wrapped.get(row_idx).copied().unwrap_or(false);
+            current_line.extend(row.iter().cloned());
+
+            // If this row was not wrapped OR it's the last row, end the logical line
+            if !was_wrapped || row_idx == self.rows - 1 {
+                // Don't add if it's empty and we already have content
+                if !current_line.is_empty() {
+                    logical_lines.push(std::mem::take(&mut current_line));
+                }
+            }
+        }
+
+        // Step 2: Re-wrap each logical line at the new column width
+        let mut new_scrollback: VecDeque<Vec<TerminalCell>> = VecDeque::new();
+        let mut new_scrollback_wrapped: VecDeque<bool> = VecDeque::new();
+
+        for logical_line in logical_lines {
+            // Find actual content length (skip trailing spaces/nuls)
+            let line_len = logical_line.iter().rposition(|c| c.c != ' ' && c.c != '\0')
+                .map(|p| p + 1).unwrap_or(0);
+
+            if line_len == 0 {
+                // Empty logical line - skip it
+                continue;
+            }
+
+            // Split logical line into chunks of new_cols
+            let chunks = logical_line[..line_len].chunks(new_cols).collect::<Vec<_>>();
+            for (idx, chunk) in chunks.iter().enumerate() {
+                let is_last = idx == chunks.len() - 1;
+                let mut row = vec![TerminalCell::default(); new_cols];
+                for (i, cell) in chunk.iter().enumerate() {
+                    if i < new_cols {
+                        row[i] = cell.clone();
+                    }
+                }
+                new_scrollback.push_back(row);
+                new_scrollback_wrapped.push_back(!is_last);
+            }
+        }
+
+        // Step 3: Distribute rows between scrollback and visible grid
+        let total_rows = new_scrollback.len();
+
+        if total_rows == 0 {
+            // Empty terminal - create all empty rows
+            self.cells = vec![vec![TerminalCell::default(); new_cols]; new_rows];
+            self.line_wrapped = vec![false; new_rows];
+        } else {
+            // Calculate how many rows go to scrollback vs visible grid
+            // Keep as much as possible in scrollback, fill the grid with remaining rows
+            let rows_for_grid = new_rows.min(total_rows);
+
+            // Pop rows for the visible grid (from the back, so we get the most recent content)
+            self.cells = Vec::new();
+            self.line_wrapped = Vec::new();
+            for _ in 0..rows_for_grid {
+                if let Some(row) = new_scrollback.pop_back() {
+                    self.cells.push(row);
+                    self.line_wrapped.push(new_scrollback_wrapped.pop_back().unwrap_or(false));
+                }
+            }
+            // Reverse since we popped from the back
+            self.cells.reverse();
+            self.line_wrapped.reverse();
+
+            // Fill remaining rows with empty cells if needed
+            while self.cells.len() < new_rows {
+                self.cells.push(vec![TerminalCell::default(); new_cols]);
+                self.line_wrapped.push(false);
+            }
+
+            // Remaining rows stay in scrollback
+            self.scrollback = new_scrollback;
+            self.scrollback_wrapped = new_scrollback_wrapped;
+        }
+
+        // Update grid dimensions
+        self.cols = new_cols;
+        self.rows = new_rows;
+        self.scroll_bottom = new_rows.saturating_sub(1);
+        self.cursor_col = self.cursor_col.min(new_cols.saturating_sub(1));
+        self.cursor_row = self.cursor_row.min(new_rows.saturating_sub(1));
+
+        // Recalculate scrollback memory usage
+        self.current_scrollback_bytes = self.scrollback.iter()
+            .map(|row| Self::row_memory_usage(row))
+            .sum();
+
+        // Trim scrollback if needed (after reflow we might exceed limit)
+        while self.current_scrollback_bytes > self.max_scrollback_bytes {
+            if let Some(oldest) = self.scrollback.pop_front() {
+                let oldest_bytes = Self::row_memory_usage(&oldest);
+                self.current_scrollback_bytes -= oldest_bytes;
+            }
+            self.scrollback_wrapped.pop_front();
+        }
     }
 }

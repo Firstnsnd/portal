@@ -3,7 +3,7 @@
 #[cfg(test)]
 mod tests {
     use crate::terminal::TerminalGrid;
-    use crate::terminal::types::{TerminalCell, CellAttrs};
+    use crate::terminal::types::CellAttrs;
 
     fn create_test_grid(cols: usize, rows: usize) -> TerminalGrid {
         TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024)
@@ -37,7 +37,7 @@ mod tests {
         let mut grid = create_test_grid(80, 24);
 
         // Write some characters to move cursor
-        for i in 0..10 {
+        for _i in 0..10 {
             grid.write_char_with_attrs('A', &CellAttrs::default());
         }
         assert_eq!(grid.cursor_col, 10);
@@ -334,5 +334,242 @@ mod tests {
 
         let matches_wrong_case = grid.search("hello", true);
         assert!(matches_wrong_case.is_empty());
+    }
+
+    // === Reflow Tests ===
+
+    /// Helper to write a string at the current cursor position
+    fn write_string(grid: &mut TerminalGrid, s: &str) {
+        for c in s.chars() {
+            grid.write_char_with_attrs(c, &CellAttrs::default());
+        }
+    }
+
+    /// Helper to get the visible content as a string (for testing)
+    fn get_visible_content(grid: &TerminalGrid) -> String {
+        let mut result = String::new();
+        for row_idx in 0..grid.rows {
+            let row = &grid.cells[row_idx];
+            // Find the range of non-space characters (trim leading and trailing spaces)
+            let first_non_space = row.iter().position(|c| c.c != ' ' && c.c != '\0');
+            let last_non_space = row.iter().rposition(|c| c.c != ' ' && c.c != '\0');
+            if let (Some(start), Some(end)) = (first_non_space, last_non_space) {
+                let line: String = row[start..=end].iter().map(|c| c.c).collect();
+                result.push_str(&line);
+                result.push('\n');
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn test_reflow_narrow_then_wide() {
+        let mut grid = create_test_grid(20, 5);
+        // Not in alt screen by default, so reflow should work
+
+        // Write a long line "ere ere sd gg" (13 chars)
+        write_string(&mut grid, "ere ere sd gg");
+
+        // Content should be on first row
+        assert_eq!(grid.cells[0][0].c, 'e');
+        assert_eq!(grid.cells[0][12].c, 'g');
+
+        // Resize to narrower (10 cols)
+        grid.resize(10, 5);
+
+        // Content should be reflowed into multiple rows
+        // "ere ere sd" + " gg" = 10 + 3 chars
+        assert_eq!(grid.cells[0][0].c, 'e');
+        assert_eq!(grid.cells[0][9].c, 'd'); // Last char of first wrapped row
+        assert_eq!(grid.cells[1][0].c, ' ');
+        assert_eq!(grid.cells[1][1].c, 'g'); // " gg"
+
+        // Resize back to wider (20 cols)
+        grid.resize(20, 5);
+
+        // Content should be preserved and re-expanded
+        // Note: due to reflow, the exact layout depends on wrapped flags
+        // But we should have all characters preserved
+        let content = get_visible_content(&grid);
+        assert!(content.contains("ere"));
+        assert!(content.contains("sd"));
+        assert!(content.contains("gg"));
+    }
+
+    #[test]
+    fn test_reflow_with_scrollback() {
+        let mut grid = create_test_grid(10, 3);
+
+        // Write some content and scroll it to scrollback
+        write_string(&mut grid, "line1");
+        grid.cursor_row = 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "line2");
+        grid.cursor_row = 2;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "line3");
+
+        // Scroll up to move content to scrollback
+        grid.scroll_up(0, 2);
+        assert_eq!(grid.scrollback_len(), 1);
+
+        // Now resize - with only 3 rows total and 3 content rows,
+        // all content fits in the grid and scrollback is emptied
+        grid.resize(15, 3);
+
+        // After resize, all content should be visible in the grid
+        // (scrollback is empty because all 3 rows fit in the grid)
+        let content = get_visible_content(&grid);
+        assert!(content.contains("line1"));
+        assert!(content.contains("line2"));
+        assert!(content.contains("line3"));
+    }
+
+    #[test]
+    fn test_reflow_soft_wrapped_lines() {
+        let mut grid = create_test_grid(10, 5);
+
+        // Write content that exactly fills one line (10 chars)
+        write_string(&mut grid, "0123456789");
+        assert_eq!(grid.cursor_col, 9); // At last column
+        assert!(grid.wrap_pending); // Wrap pending
+
+        // Write more to trigger actual wrap
+        write_string(&mut grid, "ab");
+        assert_eq!(grid.cursor_row, 1);
+        grid.line_wrapped[0] = true; // Mark first row as wrapped
+
+        // Now we have two rows: "0123456789" (wrapped) and "ab"
+        // Resize to narrower (8 cols)
+        grid.resize(8, 5);
+
+        // Content should be reflowed at new width
+        // "01234567" + "89ab" = 8 + 4 chars
+        // The original wrapped flag should be preserved in reflow
+        let content = get_visible_content(&grid);
+        assert!(content.contains("01234567"));
+        assert!(content.contains("89ab"));
+    }
+
+    #[test]
+    fn test_reflow_empty_terminal() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Empty terminal - no content written
+        assert_eq!(grid.cells.len(), 24);
+        assert_eq!(grid.cells[0].len(), 80);
+
+        // Resize should not panic and should maintain correct dimensions
+        grid.resize(100, 30);
+
+        assert_eq!(grid.cols, 100);
+        assert_eq!(grid.rows, 30);
+        assert_eq!(grid.cells.len(), 30);
+        assert_eq!(grid.cells[0].len(), 100);
+
+        // All cells should be empty (spaces)
+        for row in &grid.cells {
+            for cell in row {
+                assert_eq!(cell.c, ' ');
+            }
+        }
+    }
+
+    #[test]
+    fn test_reflow_single_long_line() {
+        let mut grid = create_test_grid(20, 5);
+
+        // Write a very long line (61 chars)
+        let long_text = "abcdefghijklmnopqrstuvwxyz123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        assert_eq!(long_text.len(), 61);
+        for c in long_text.chars() {
+            grid.write_char_with_attrs(c, &CellAttrs::default());
+        }
+
+        // Resize to much narrower (10 cols)
+        grid.resize(10, 5);
+
+        // Should be reflowed into multiple rows
+        // 61 chars / 10 cols = 7 rows (with partial last row)
+        // Since grid is only 5 rows, only the last 5 rows are visible
+        let content = get_visible_content(&grid);
+        assert!(content.contains("56789")); // Last visible characters
+        assert!(content.contains("ABCD"));  // Upper case, not lower
+
+        // Resize to wider (30 cols)
+        grid.resize(30, 5);
+
+        // Content should still be preserved
+        let content = get_visible_content(&grid);
+        assert!(content.contains("abcdefghijklmnopqrst"));
+    }
+
+    #[test]
+    fn test_reflow_preserves_line_wrapped_flags() {
+        let mut grid = create_test_grid(10, 5);
+
+        // Write a long line that will naturally wrap
+        // "hello_world" is 11 chars, which will wrap at 10 cols
+        write_string(&mut grid, "hello_world");
+
+        // After writing 11 chars, we should have:
+        // - Row 0: "hello_worl" (10 chars) with line_wrapped[0] = true
+        // - Row 1: "d" (1 char)
+        assert!(grid.line_wrapped[0]); // First row should be marked as wrapped
+
+        // Resize to different width
+        grid.resize(15, 5);
+
+        // The reflow should respect the wrapped flags and reconstruct logical lines
+        // "hello_world" should be preserved
+        let content = get_visible_content(&grid);
+        assert!(content.contains("hello_world"));
+    }
+
+    #[test]
+    fn test_reflow_no_change_same_dimensions() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Write some content
+        write_string(&mut grid, "test content");
+        let original_cursor_col = grid.cursor_col;
+        let original_cursor_row = grid.cursor_row;
+
+        // Resize to same dimensions should be no-op
+        grid.resize(80, 24);
+
+        assert_eq!(grid.cols, 80);
+        assert_eq!(grid.rows, 24);
+        assert_eq!(grid.cursor_col, original_cursor_col);
+        assert_eq!(grid.cursor_row, original_cursor_row);
+        // Content should be preserved
+        assert_eq!(grid.cells[0][0].c, 't');
+        assert_eq!(grid.cells[0][1].c, 'e');
+    }
+
+    #[test]
+    fn test_reflow_in_alt_screen_no_reflow() {
+        let mut grid = create_test_grid(20, 5);
+
+        // Write main screen content
+        write_string(&mut grid, "main");
+
+        // Enter alt screen
+        grid.enter_alt_screen();
+
+        // Write alt screen content
+        write_string(&mut grid, "alt screen content that is quite long");
+
+        // Resize in alt screen should use simple resize (no reflow)
+        grid.resize(15, 5);
+
+        // Alt screen content should be preserved (without complex reflow)
+        assert_eq!(grid.cols, 15);
+        assert_eq!(grid.rows, 5);
+
+        // Exit alt screen and verify main screen is preserved
+        grid.exit_alt_screen();
+        // Note: simple resize in alt screen may truncate content at old width
+        // This is expected behavior for alt screen (no reflow)
     }
 }
