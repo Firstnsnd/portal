@@ -187,23 +187,24 @@ pub fn render_terminal_session(
 
     if primary_down && session.selection.active {
         if let Some(pos) = hover_pos {
-            if pos.x >= rect.min.x - 10.0 && pos.x <= rect.max.x + 10.0 &&
-                pos.y >= rect.min.y - 50.0 && pos.y <= rect.max.y + 50.0 {
-                let clamped_x = pos.x.clamp(rect.min.x, rect.max.x);
-                let clamped_y = pos.y.clamp(rect.min.y, rect.max.y);
-                drag_end_pos = Some(egui::pos2(clamped_x, clamped_y));
+            // Track drag anywhere for proper multi-frame selection
+            let clamped_x = pos.x.clamp(rect.min.x, rect.max.x);
+            // Don't clamp Y - let pixel_to_cell handle positions outside the rect
+            drag_end_pos = Some(egui::pos2(clamped_x, pos.y));
 
-                let edge_margin = line_height * 3.0;
-                if pos.y < rect.min.y + edge_margin && pos.y >= rect.min.y - 50.0 {
-                    let distance = (rect.min.y + edge_margin - pos.y) / edge_margin;
-                    let scroll_speed = (distance * 3.0).ceil() as usize;
-                    let max_offset = session.grid.lock().map(|g| g.scrollback_len()).unwrap_or(0);
-                    session.scroll_offset = (session.scroll_offset + scroll_speed).min(max_offset);
-                } else if pos.y > rect.max.y - edge_margin && pos.y <= rect.max.y + 50.0 {
-                    let distance = (pos.y - (rect.max.y - edge_margin)) / edge_margin;
-                    let scroll_speed = (distance * 3.0).ceil() as usize;
-                    session.scroll_offset = session.scroll_offset.saturating_sub(scroll_speed);
-                }
+            // Auto-scroll when dragging near or beyond viewport edges
+            let edge_margin = line_height * 3.0;
+            if pos.y < rect.min.y + edge_margin {
+                // Dragging above viewport - scroll into scrollback
+                let distance = ((rect.min.y + edge_margin - pos.y) / edge_margin).max(0.0);
+                let scroll_speed = (distance * 2.0).ceil() as usize;
+                let max_offset = session.grid.lock().map(|g| g.scrollback_len()).unwrap_or(0);
+                session.scroll_offset = (session.scroll_offset + scroll_speed).min(max_offset);
+            } else if pos.y > rect.max.y - edge_margin {
+                // Dragging below viewport - scroll down (if applicable)
+                let distance = ((pos.y - (rect.max.y - edge_margin)) / edge_margin).max(0.0);
+                let scroll_speed = (distance * 2.0).ceil() as usize;
+                session.scroll_offset = session.scroll_offset.saturating_sub(scroll_speed);
             }
         }
     }
@@ -661,24 +662,36 @@ pub fn render_terminal_session(
         let offset = session.scroll_offset;
 
         // Convert pixel position to global grid index.
+        // Returns absolute index: 0..scrollback_len-1 for scrollback, scrollback_len.. for active grid
         let pixel_to_cell = |pos: egui::Pos2| -> (usize, usize) {
             let screen_row_float = (pos.y - rect.min.y) / line_height;
-            let screen_row = if screen_row_float < 0.0 {
+
+            // Position above viewport - select from scrollback
+            if screen_row_float < 0.0 {
                 let rows_above = (-screen_row_float).ceil() as usize;
+                // When above viewport with offset, we're selecting deeper into scrollback
                 let sb_idx = scrollback_len.saturating_sub(offset + rows_above);
                 return (sb_idx, 0);
-            } else {
-                screen_row_float as usize
-            };
-            let screen_row = screen_row.min(new_rows.saturating_sub(1));
+            }
 
-            let grid_row_idx = if offset > 0 && screen_row < offset {
-                let sb_idx = scrollback_len.saturating_sub(offset) + screen_row;
-                sb_idx
+            let screen_row = screen_row_float as usize;
+
+            // Calculate absolute grid row index
+            let grid_row_idx = if screen_row < new_rows {
+                // Within viewport - apply offset to get absolute position
+                if offset > 0 && screen_row < offset {
+                    // Viewport is showing scrollback content
+                    let sb_idx = scrollback_len.saturating_sub(offset) + screen_row;
+                    sb_idx
+                } else {
+                    // Viewport is showing active grid content
+                    let grid_row = screen_row.saturating_sub(offset);
+                    let grid_row = grid_row.min(grid.rows.saturating_sub(1));
+                    scrollback_len + grid_row
+                }
             } else {
-                let grid_row = screen_row.saturating_sub(offset);
-                let grid_row = grid_row.min(grid.rows.saturating_sub(1));
-                scrollback_len + grid_row
+                // Below viewport - extend to bottom of content
+                scrollback_len + grid.rows.saturating_sub(1)
             };
 
             let x_in_row = (pos.x - rect.min.x).max(0.0);
@@ -925,9 +938,13 @@ pub fn render_terminal_session(
 
                 let screen_row = if is_scrollback {
                     if sel_row >= scrollback_len { continue; }
-                    let sb_display_idx = scrollback_len.saturating_sub(offset) + sel_row;
-                    if sb_display_idx >= offset + scrollback_len { continue; }
-                    sb_display_idx
+                    // Calculate scrollback display position
+                    // When offset > 0, viewport shows scrollback[scrollback_len-offset..scrollback_len-1]
+                    // sel_row is an absolute scrollback index (0 = oldest)
+                    // Need to map sel_row to its display position
+                    let scrollback_visible_start = scrollback_len.saturating_sub(offset);
+                    if sel_row < scrollback_visible_start { continue; } // Not in visible portion
+                    sel_row - scrollback_visible_start
                 } else {
                     if grid_row_idx >= grid.rows { break; }
                     grid_row_idx + offset
