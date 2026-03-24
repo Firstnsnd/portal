@@ -49,6 +49,8 @@ pub struct TerminalGrid {
     pub scrollback_wrapped: VecDeque<bool>,
     /// Current working directory (updated via OSC 7 sequence)
     pub cwd: Option<String>,
+    /// Cached content from recent resize (to restore after shell erase_below)
+    resize_cache: Option<(VecDeque<Vec<TerminalCell>>, VecDeque<bool>, Vec<Vec<TerminalCell>>, Vec<bool>)>,
 }
 
 impl TerminalGrid {
@@ -84,6 +86,7 @@ impl TerminalGrid {
             line_wrapped: vec![false; rows],
             scrollback_wrapped: VecDeque::new(),
             cwd,
+            resize_cache: None,
         }
     }
 
@@ -144,6 +147,9 @@ impl TerminalGrid {
 
     /// Write a character to the grid at the current cursor position with given attributes.
     pub fn write_char_with_attrs(&mut self, c: char, attrs: &CellAttrs) {
+        // Clear resize cache when new input arrives (resize is complete)
+        self.resize_cache = None;
+
         // Handle control characters
         if c < ' ' && c != '\t' && c != '\n' && c != '\r' {
             return; // Skip other control characters
@@ -215,15 +221,29 @@ impl TerminalGrid {
 
     /// Erase from cursor to end of display.
     pub fn erase_below(&mut self) {
-        // Don't erase if we have significant content (likely from reflow)
-        // This prevents shell SIGWINCH response from destroying reflowed content
-        let content_rows = self.cells.iter()
-            .filter(|row| row.iter().any(|c| c.c != ' ' && c.c != '\0'))
-            .count();
+        // Check if we have cached content from a recent resize
+        // If so, restore it instead of erasing (this prevents shell SIGWINCH
+        // response from destroying our reflowed content)
+        if let Some((cached_scrollback, cached_scrollback_wrapped, cached_cells, cached_line_wrapped)) = self.resize_cache.take() {
+            // Restore the cached content
+            self.scrollback = cached_scrollback;
+            self.scrollback_wrapped = cached_scrollback_wrapped;
 
-        // If more than half the grid has content, don't erase
-        // (it's likely reflowed content that should be preserved)
-        if content_rows > self.rows / 2 {
+            // Only restore visible cells if dimensions match
+            if cached_cells.len() == self.cells.len() && cached_cells.get(0).map_or(0, |r| r.len()) == self.cols {
+                self.cells = cached_cells;
+                self.line_wrapped = cached_line_wrapped;
+            } else {
+                // Dimensions don't match, need to adjust
+                // Just keep the scrollback and create new visible grid
+                self.cells = vec![vec![TerminalCell::default(); self.cols]; self.rows];
+                self.line_wrapped = vec![false; self.rows];
+            }
+
+            // Recalculate memory usage after restore
+            self.current_scrollback_bytes = self.scrollback.iter()
+                .map(|row| Self::row_memory_usage(row))
+                .sum();
             return;
         }
 
@@ -739,5 +759,14 @@ impl TerminalGrid {
             }
             self.scrollback_wrapped.pop_front();
         }
+
+        // Cache the reflowed content to restore after shell's erase_below
+        // This prevents shell SIGWINCH response from destroying our reflowed content
+        self.resize_cache = Some((
+            self.scrollback.clone(),
+            self.scrollback_wrapped.clone(),
+            self.cells.clone(),
+            self.line_wrapped.clone(),
+        ));
     }
 }
