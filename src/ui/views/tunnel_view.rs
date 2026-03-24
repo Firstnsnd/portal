@@ -654,17 +654,16 @@ impl PortalApp {
                         if let Some(SessionBackend::Ssh(ssh_session)) = &session.session {
                             if let Some(host_entry) = &session.ssh_host {
                                 if host_entry.name == host.name {
-                                    let states = ssh_session.get_port_forward_states();
-                                    for (idx, (config, _)) in states.iter().enumerate() {
-                                        if config.kind == tunnel.kind &&
-                                           config.local_host == tunnel.local_host &&
-                                           config.local_port == tunnel.local_port &&
-                                           config.remote_host == tunnel.remote_host &&
-                                           config.remote_port == tunnel.remote_port {
-                                            ssh_session.stop_port_forward(idx);
-                                            return;
-                                        }
-                                    }
+                                    // Build the config to match
+                                    let config = crate::config::PortForwardConfig {
+                                        kind: tunnel.kind.clone(),
+                                        local_host: tunnel.local_host.clone(),
+                                        local_port: tunnel.local_port,
+                                        remote_host: tunnel.remote_host.clone(),
+                                        remote_port: tunnel.remote_port,
+                                    };
+                                    ssh_session.stop_port_forward(config);
+                                    return;
                                 }
                             }
                         }

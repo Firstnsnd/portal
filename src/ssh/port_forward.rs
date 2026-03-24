@@ -22,6 +22,8 @@ pub enum ForwardState {
 pub struct PortForward {
     pub config: PortForwardConfig,
     pub state: Arc<std::sync::Mutex<ForwardState>>,
+    /// Allocated port for remote forwards (returned by tcpip_forward)
+    pub allocated_port: Arc<std::sync::Mutex<Option<u32>>>,
     cancel_tx: watch::Sender<bool>,
 }
 
@@ -31,6 +33,7 @@ impl PortForward {
         let pf = Self {
             config,
             state: Arc::new(std::sync::Mutex::new(ForwardState::Starting)),
+            allocated_port: Arc::new(std::sync::Mutex::new(None)),
             cancel_tx,
         };
         (pf, cancel_rx)

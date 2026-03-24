@@ -27,7 +27,6 @@ impl PortalApp {
                 ..Default::default()
             })
             .show(ctx, |ui| {
-                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     // Left side: Keychain title
                     ui.label(egui::RichText::new(self.language.t("keychain"))
@@ -53,7 +52,6 @@ impl PortalApp {
                         }
                     });
                 });
-                ui.add_space(4.0);
             });
 
         egui::CentralPanel::default()

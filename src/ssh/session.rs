@@ -28,7 +28,7 @@ enum SshCommand {
     Resize { cols: u32, rows: u32 },
     Disconnect,
     StartPortForward(PortForwardConfig),
-    StopPortForward(usize),
+    StopPortForward(PortForwardConfig),
 }
 
 /// SSH connection state
@@ -524,17 +524,21 @@ impl SshSession {
         for cfg in port_forward_configs.iter().filter(|c| c.kind == ForwardKind::Remote) {
             let (pf, cancel_rx) = PortForward::new(cfg.clone());
             let fwd_state = Arc::clone(&pf.state);
-            if let Ok(mut fwds) = port_forwards.lock() {
-                fwds.push(pf);
-            }
+            let fwd_allocated = Arc::clone(&pf.allocated_port);
+
             // Register in handler's remote forward table
             if let Ok(mut rfwds) = remote_fwd_arc.lock() {
                 if !rfwds.iter().any(|c| c.remote_port == cfg.remote_port) {
                     rfwds.push(cfg.clone());
                 }
             }
+
             match handle.tcpip_forward(&cfg.remote_host, cfg.remote_port as u32).await {
                 Ok(port) => {
+                    // Store the allocated port for later cancellation
+                    if let Ok(mut allocated) = fwd_allocated.lock() {
+                        *allocated = Some(port);
+                    }
                     log::info!(
                         "Remote forward active: {}:{} (allocated port {}) -> {}:{}",
                         cfg.remote_host, cfg.remote_port, port,
@@ -548,6 +552,11 @@ impl SshSession {
                         *s = ForwardState::Error(format!("tcpip_forward failed: {}", e));
                     }
                 }
+            }
+
+            // Only add to port_forwards after tcpip_forward result is known
+            if let Ok(mut fwds) = port_forwards.lock() {
+                fwds.push(pf);
             }
             let _keep = cancel_rx; // keep alive for tracking
         }
@@ -631,19 +640,43 @@ impl SshSession {
                                 }
                             }
                         }
-                        Some(SshCommand::StopPortForward(index)) => {
-                            if let Ok(fwds) = port_forwards.lock() {
-                                if let Some(pf) = fwds.get(index) {
-                                    pf.stop();
+                        Some(SshCommand::StopPortForward(cfg)) => {
+                            // Find matching port forward by full config (not just index)
+                            let mut stopped_index = None;
+                            if let Ok(mut fwds) = port_forwards.lock() {
+                                for (idx, pf) in fwds.iter().enumerate() {
+                                    if pf.config.kind == cfg.kind &&
+                                       pf.config.local_host == cfg.local_host &&
+                                       pf.config.local_port == cfg.local_port &&
+                                       pf.config.remote_host == cfg.remote_host &&
+                                       pf.config.remote_port == cfg.remote_port {
+                                        pf.stop();
+                                        stopped_index = Some(idx);
+
+                                        // Note: For remote forwards, we can't call cancel_tcpip_forward
+                                        // here because it requires &mut Handle which we don't have
+                                        // after Arc wrapping. The server will clean up when the
+                                        // connection closes.
+                                        if cfg.kind == ForwardKind::Remote {
+                                            log::info!("Remote forward stopped (cancel-tcpip-forward will be sent on disconnect)");
+                                        }
+                                        break;
+                                    }
+                                }
+
+                                // Clean up: remove stopped forwards from the Vec
+                                if let Some(idx) = stopped_index {
+                                    fwds.remove(idx);
                                 }
                             }
                         }
                         Some(SshCommand::Disconnect) | None => {
-                            // Stop all port forwards
-                            if let Ok(fwds) = port_forwards.lock() {
+                            // Stop all port forwards and clean up the Vec
+                            if let Ok(mut fwds) = port_forwards.lock() {
                                 for pf in fwds.iter() {
                                     pf.stop();
                                 }
+                                fwds.clear();
                             }
                             let _ = channel.eof().await;
                             let _ = channel.close().await;
@@ -713,8 +746,8 @@ impl SshSession {
     }
 
     /// Stop a port forward by index
-    pub fn stop_port_forward(&self, index: usize) {
-        let _ = self.cmd_tx.send(SshCommand::StopPortForward(index));
+    pub fn stop_port_forward(&self, config: PortForwardConfig) {
+        let _ = self.cmd_tx.send(SshCommand::StopPortForward(config));
     }
 
     /// Get the current list of port forward states
