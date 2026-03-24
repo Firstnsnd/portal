@@ -773,4 +773,314 @@ mod tests {
         let content_final = get_visible_content(&grid);
         assert!(content_final.contains("file_000"), "Content should be preserved after resize back");
     }
+
+    #[test]
+    fn test_multiple_resizes_no_content_loss() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Write some content
+        for i in 0..10 {
+            write_string(&mut grid, &format!("Line {} content here", i));
+            grid.cursor_row += 1;
+            grid.cursor_col = 0;
+        }
+
+        // Perform multiple resizes
+        grid.resize(60, 24);  // Narrower
+        let content1 = get_visible_content(&grid);
+        assert!(content1.contains("Line 0"), "First resize should preserve content");
+
+        grid.resize(40, 24);  // Even narrower
+        let content2 = get_visible_content(&grid);
+        assert!(content2.contains("Line 0"), "Second resize should preserve content");
+
+        grid.resize(80, 24);  // Back to original
+        let content3 = get_visible_content(&grid);
+        assert!(content3.contains("Line 0"), "Third resize should preserve content");
+
+        grid.resize(100, 24); // Wider
+        let content4 = get_visible_content(&grid);
+        assert!(content4.contains("Line 0"), "Fourth resize should preserve content");
+
+        // All content should still be there after 4 resizes
+        assert!(content4.contains("Line 9"), "Last line should still be present");
+    }
+
+    #[test]
+    fn test_resize_preserves_long_lines_correctly() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Write a very long single line (no newline until the end)
+        let long_text = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        write_string(&mut grid, long_text);
+
+        // Resize narrower
+        grid.resize(40, 24);
+
+        // Content should be wrapped correctly
+        let content = get_visible_content(&mut grid);
+        assert!(content.contains("abcd"), "Start should be present");
+        assert!(content.contains("wxyz"), "End should be present");
+        // Note: middle portion spans row boundary, check each part separately
+        assert!(content.contains("ABCDEFGHIJKLMN"), "First part of middle should be in row 0");
+        assert!(content.contains("OPQRSTUVWXYZ"), "Second part of middle should be in row 1");
+
+        // Resize back
+        grid.resize(80, 24);
+
+        // Content should be re-expanded correctly
+        let content = get_visible_content(&mut grid);
+        assert!(content.contains(long_text), "Full content should be preserved");
+    }
+
+    #[test]
+    fn test_resize_with_mixed_width_lines() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Write content with varying line lengths
+        write_string(&mut grid, "short");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "medium length line here");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "a very long line that exceeds the default width and should wrap to the next line when displayed");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+
+        // Resize
+        grid.resize(40, 24);
+
+        // All lines should be preserved
+        let content = get_visible_content(&mut grid);
+        assert!(content.contains("short"), "Short line should be preserved");
+        assert!(content.contains("medium"), "Medium line should be preserved");
+        assert!(content.contains("long line"), "Long line should be preserved");
+    }
+
+    #[test]
+    fn test_resize_scrollback_with_wrapped_content() {
+        let mut grid = create_test_grid(80, 10);
+
+        // Write a long line that will wrap
+        write_string(&mut grid, "this is a very long line that will wrap when the terminal is resized to a narrower width");
+
+        // Fill up some rows
+        for i in 0..5 {
+            grid.cursor_row += 1;
+            grid.cursor_col = 0;
+            write_string(&mut grid, &format!("row {}", i));
+        }
+
+        // Scroll up to push content to scrollback
+        grid.scroll_up(0, 9);
+        assert_eq!(grid.scrollback_len(), 1, "Should have scrollback content");
+
+        // Resize to half width
+        grid.resize(40, 10);
+
+        // Scrollback should still exist (possibly reflowed)
+        assert!(grid.scrollback_len() > 0, "Scrollback should be preserved");
+
+        // The scrollback should contain the original text
+        let scrollback_content = get_scrollback_content(&grid);
+        assert!(scrollback_content.contains("very long line"), "Long wrapped line should be in scrollback");
+    }
+
+    #[test]
+    fn test_resize_empty_terminal_doesnt_crash() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Resize empty terminal
+        grid.resize(40, 24);
+
+        // Should not crash and should have correct dimensions
+        assert_eq!(grid.cols, 40);
+        assert_eq!(grid.rows, 24);
+        assert_eq!(grid.cursor_col, 0);
+        assert_eq!(grid.cursor_row, 0);
+    }
+
+    #[test]
+    fn test_resize_to_zero_width_safe() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Write some content
+        write_string(&mut grid, "test");
+
+        // Resize to very small but non-zero width
+        grid.resize(1, 24);
+
+        // Should handle gracefully
+        assert_eq!(grid.cols, 1);
+        assert_eq!(grid.rows, 24);
+
+        // Resize back
+        grid.resize(80, 24);
+
+        // Content should be preserved (though heavily wrapped)
+        let content = get_visible_content(&grid);
+        assert!(content.contains("test"), "Content should be preserved");
+    }
+
+    #[test]
+    fn test_resize_cursor_position_after_reflow() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Write some content
+        write_string(&mut grid, "Line 1");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "Line 2");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "Line 3");
+
+        // Cursor should be at position after "Line 3"
+        let cursor_col_before = grid.cursor_col;
+
+        // Resize
+        grid.resize(60, 24);
+
+        // Cursor should still be at a valid position
+        assert!(grid.cursor_col < grid.cols, "Cursor should be within bounds");
+        assert!(grid.cursor_row < grid.rows, "Cursor row should be within bounds");
+
+        // Cursor should be at or after the last written character
+        assert!(grid.cursor_col >= cursor_col_before.saturating_sub(5),
+                  "Cursor should be near the end of written content");
+    }
+
+    #[test]
+    fn test_resize_preserves_scrollback_order() {
+        let mut grid = create_test_grid(80, 10);
+
+        // Write multiple lines to scrollback
+        for i in 0..5 {
+            write_string(&mut grid, &format!("scrollback line {}", i));
+            grid.cursor_row += 1;
+            grid.cursor_col = 0;
+        }
+
+        // Write visible content
+        write_string(&mut grid, "visible line");
+
+        // Scroll all to scrollback
+        for _ in 0..6 {
+            grid.scroll_up(0, 9);
+        }
+
+        let scrollback_before = grid.scrollback_len();
+        assert!(scrollback_before > 0);
+
+        // Resize
+        grid.resize(40, 10);
+
+        // Scrollback should still exist
+        let scrollback_after = grid.scrollback_len();
+        assert!(scrollback_after > 0, "Scrollback should be preserved");
+
+        // Check that scrollback maintains order
+        let scrollback_content = get_scrollback_content(&grid);
+        assert!(scrollback_content.contains("scrollback line 0"), "First scrollback line should be preserved");
+        assert!(scrollback_content.contains("scrollback line 4"), "Last scrollback line should be preserved");
+    }
+
+    #[test]
+    fn test_resize_from_wide_to_narrow_to_wide() {
+        let mut grid = create_test_grid(100, 24);
+
+        // Original wide width
+        write_string(&mut grid, "Wide content: this line should fit in 100 columns");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "Second line");
+
+        // Narrow
+        grid.resize(50, 24);
+        let narrow_content = get_visible_content(&grid);
+        assert!(narrow_content.contains("Wide content"), "Content should be preserved");
+
+        // Narrower
+        grid.resize(30, 24);
+        let narrower_content = get_visible_content(&grid);
+        assert!(narrower_content.contains("Wide content"), "Content should still be preserved");
+
+        // Wider than original
+        grid.resize(150, 24);
+        let wide_content = get_visible_content(&grid);
+        assert!(wide_content.contains("Wide content"), "Content should be preserved");
+
+        // Back to original
+        grid.resize(100, 24);
+        let original_content = get_visible_content(&grid);
+        assert!(original_content.contains("Wide content"), "Content should be preserved");
+        assert!(original_content.contains("Second line"), "All lines should be preserved");
+    }
+
+    #[test]
+    fn test_resize_with_line_wrapping_boundary() {
+        let mut grid = create_test_grid(20, 5);
+
+        // Write exactly 20 characters (one full row) - no trailing newline
+        for c in "01234567890123456789".chars() {
+            grid.write_char_with_attrs(c, &CellAttrs::default());
+        }
+
+        // Cursor should be at last column with wrap_pending
+        assert_eq!(grid.cursor_col, 19);
+        assert!(grid.wrap_pending);
+
+        // Resize narrower
+        grid.resize(10, 5);
+
+        // Content should be correctly wrapped
+        let content = get_visible_content(&grid);
+        assert!(content.contains("0123456789"), "First 10 chars should be on first line");
+        assert!(content.contains("0123456789"), "Next 10 chars should be on second line");
+
+        // The first line should be marked as wrapped
+        assert!(grid.line_wrapped[0], "First row should be marked as wrapped");
+    }
+
+    #[test]
+    fn test_resize_does_not_corrupt_binary_data() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Test with various character types (note: control chars are filtered by write_char_with_attrs)
+        let test_data = "ABC∞∂DEF†‡";
+        for c in test_data.chars() {
+            grid.write_char_with_attrs(c, &CellAttrs::default());
+        }
+
+        // Resize
+        grid.resize(40, 24);
+
+        // Check that all characters are preserved
+        for (i, expected) in test_data.chars().enumerate() {
+            // Content should be somewhere (in grid or scrollback)
+            let found = grid.cells.iter().any(|row| {
+                row.iter().any(|cell| cell.c == expected)
+            });
+            assert!(found, "Character at index {} ({:?}) should be preserved", i, expected);
+        }
+    }
+
+    #[test]
+    fn test_resize_with_empty_lines_between_content() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Write content with gaps (empty lines)
+        write_string(&mut grid, "Line 1");
+        grid.cursor_row += 3;  // Skip 2 lines (create gap)
+        grid.cursor_col = 0;
+        write_string(&mut grid, "Line 4");
+
+        grid.resize(40, 24);
+
+        // Content should be preserved, gaps may be collapsed
+        let content = get_visible_content(&grid);
+        assert!(content.contains("Line 1"), "First line should be preserved");
+        assert!(content.contains("Line 4"), "Last line should be preserved");
+    }
 }

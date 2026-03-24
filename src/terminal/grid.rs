@@ -694,31 +694,39 @@ impl TerminalGrid {
 
         // Position cursor at the end of actual content (not at old clamped position)
         // Find the last non-empty row to place the cursor correctly
-        let mut last_content_row = 0;
+        let mut last_content_row = None;
         for row_idx in (0..self.cells.len()).rev() {
             let has_content = self.cells[row_idx].iter().any(|c| c.c != ' ' && c.c != '\0');
             if has_content {
-                last_content_row = row_idx;
+                last_content_row = Some(row_idx);
                 break;
             }
         }
 
-        // Find the last non-empty column in that row
-        let mut last_content_col = 0;
-        for col_idx in (0..self.cols).rev() {
-            if self.cells[last_content_row][col_idx].c != ' ' && self.cells[last_content_row][col_idx].c != '\0' {
-                last_content_col = col_idx;
-                break;
+        // Set cursor based on whether we found content
+        match last_content_row {
+            Some(row) => {
+                // Find the last non-empty column in that row
+                let mut last_content_col = 0;
+                for col_idx in (0..self.cols).rev() {
+                    if self.cells[row][col_idx].c != ' ' && self.cells[row][col_idx].c != '\0' {
+                        last_content_col = col_idx;
+                        break;
+                    }
+                }
+                self.cursor_row = row;
+                self.cursor_col = if last_content_col < self.cols.saturating_sub(1) {
+                    last_content_col + 1
+                } else {
+                    self.cols.saturating_sub(1)
+                };
+            }
+            None => {
+                // Empty terminal - cursor at origin
+                self.cursor_row = 0;
+                self.cursor_col = 0;
             }
         }
-
-        // Set cursor at the end of content
-        self.cursor_row = last_content_row;
-        self.cursor_col = if last_content_col < self.cols.saturating_sub(1) {
-            last_content_col + 1
-        } else {
-            self.cols.saturating_sub(1)
-        };
 
         // Recalculate scrollback memory usage
         self.current_scrollback_bytes = self.scrollback.iter()
