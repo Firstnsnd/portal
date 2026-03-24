@@ -351,17 +351,20 @@ impl TerminalSession {
         }
 
         if cols_changed {
-            // Debounce PTY resize to prevent shell SIGWINCH response (erase_below)
-            // from destroying reflowed content during drag.
-            // Use longer debounce to ensure user has fully stopped dragging.
-            // Only send PTY resize after user has settled on a new width.
-            let debounce = if self.pending_pty_size.is_some() {
-                Duration::from_millis(1500)  // Longer debounce during active resize
-            } else {
-                Duration::from_millis(500)   // Initial debounce
-            };
-            self.pending_pty_size = Some((cols as u16, rows as u16));
-            self.pty_resize_deadline = Instant::now() + debounce;
+            // Check if the pending PTY size is different from current
+            let current_pty_size = self.pending_pty_size.unwrap_or((cols as u16, rows as u16));
+            if current_pty_size.0 != cols as u16 || current_pty_size.1 != rows as u16 {
+                // Use longer debounce to ensure user has completely stopped dragging
+                // This prevents multiple shell redraw cycles that cause prompt duplication
+                let debounce = if self.pending_pty_size.is_some() {
+                    Duration::from_millis(2000)  // 2 seconds: wait for user to settle
+                } else {
+                    Duration::from_millis(1000)  // 1 second initial debounce
+                };
+                self.pending_pty_size = Some((cols as u16, rows as u16));
+                self.pty_resize_deadline = Instant::now() + debounce;
+            }
+            // If size hasn't changed, don't update deadline (keep existing debounce)
         } else {
             // Row-only change: send PTY resize immediately
             if let Some(ref mut session) = self.session {

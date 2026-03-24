@@ -49,9 +49,8 @@ pub struct TerminalGrid {
     pub scrollback_wrapped: VecDeque<bool>,
     /// Current working directory (updated via OSC 7 sequence)
     pub cwd: Option<String>,
-    /// Counter for protecting against shell erase_after immediately after resize
-    /// Only protects the FIRST erase_below call after each resize
-    resize_protection_count: u8,
+    /// Row index of the last known prompt (for protecting reflowed content)
+    last_prompt_row: Option<usize>,
 }
 
 impl TerminalGrid {
@@ -87,7 +86,7 @@ impl TerminalGrid {
             line_wrapped: vec![false; rows],
             scrollback_wrapped: VecDeque::new(),
             cwd,
-            resize_protection_count: 0,
+            last_prompt_row: None,
         }
     }
 
@@ -148,10 +147,6 @@ impl TerminalGrid {
 
     /// Write a character to the grid at the current cursor position with given attributes.
     pub fn write_char_with_attrs(&mut self, c: char, attrs: &CellAttrs) {
-        // Clear resize protection when new input arrives
-        // This means the resize operation is complete and shell has finished redrawing
-        self.resize_protection_count = 0;
-
         // Handle control characters
         if c < ' ' && c != '\t' && c != '\n' && c != '\r' {
             return; // Skip other control characters
@@ -223,14 +218,6 @@ impl TerminalGrid {
 
     /// Erase from cursor to end of display.
     pub fn erase_below(&mut self) {
-        // If we have resize protection active, decrement the counter and skip erasing
-        // This prevents the shell's SIGWINCH response (erase_below) from destroying
-        // our reflowed content, but only for the first call after each resize
-        if self.resize_protection_count > 0 {
-            self.resize_protection_count -= 1;
-            return;
-        }
-
         // When erasing from column 0, also clear wrapped continuation rows above
         // the cursor that are part of the same logical line (created by reflow).
         if self.cursor_col == 0 {
@@ -535,6 +522,9 @@ impl TerminalGrid {
             return;
         }
 
+        // Clear any cached prompt row to prevent duplication
+        self.last_prompt_row = None;
+
         // Step 1: Collect logical lines separately from scrollback and grid
         let mut scrollback_logical_lines: Vec<Vec<TerminalCell>> = Vec::new();
         let mut grid_logical_lines: Vec<Vec<TerminalCell>> = Vec::new();
@@ -743,9 +733,5 @@ impl TerminalGrid {
             }
             self.scrollback_wrapped.pop_front();
         }
-
-        // Set protection count - this will protect against the next erase_below call
-        // (shell's response to PTY resize), but not against subsequent erases
-        self.resize_protection_count = 1;
     }
 }
