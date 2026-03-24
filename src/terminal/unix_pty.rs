@@ -12,9 +12,12 @@ use std::sync::Arc;
 
 /// Unix PTY implementation
 pub struct UnixPty {
-    master: File,
-    child_pid: i32,
-    alive: Arc<AtomicBool>,
+    /// Master file descriptor for the PTY
+    pub master: File,
+    /// Child process ID
+    pub child_pid: i32,
+    /// Atomic flag indicating if the PTY is still alive
+    pub alive: Arc<AtomicBool>,
 }
 
 impl Pty for UnixPty {

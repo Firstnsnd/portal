@@ -7,10 +7,13 @@ mod tab_management;
 use crate::config::{HostEntry, Credential, ConnectionRecord, ShortcutAction, Snippet};
 use crate::sftp::{LocalBrowser, SftpBrowser};
 use crate::ui::types::{
-    BatchExecutionState, HostFilter, CredentialDialog, AddHostDialog, AddTunnelDialog,
-    AppView, SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog,
-    SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog,
-    KeychainDeleteRequest, TerminalSession, SnippetViewState,
+    dialogs::{
+        HostFilter, CredentialDialog, AddHostDialog, AddTunnelDialog,
+        AppView, KeychainDeleteRequest, SnippetViewState,
+    },
+    session::TerminalSession,
+    sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog,
+        SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog},
 };
 use crate::ui::pane::{Tab, DetachedWindow, TabDragState};
 use crate::ui::input::ShortcutResolver;
@@ -71,8 +74,6 @@ pub struct PortalApp {
     // Broadcast state
     #[allow(dead_code)]
     pub broadcast_state: crate::ui::types::BroadcastState,
-    // Batch execution state
-    pub batch_execution: BatchExecutionState,
     // Keychain
     pub keychain_confirm_delete: Option<KeychainDeleteRequest>,
     pub credential_dialog: CredentialDialog,
@@ -199,7 +200,6 @@ impl PortalApp {
             next_viewport_id: 0,
             main_window_hidden: false,
             broadcast_state: crate::ui::types::BroadcastState::default(),
-            batch_execution: BatchExecutionState::default(),
             keychain_confirm_delete: None,
             credential_dialog: CredentialDialog::default(),
             add_tunnel_dialog: AddTunnelDialog::default(),

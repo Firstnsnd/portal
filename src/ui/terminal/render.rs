@@ -1,83 +1,20 @@
-//! # Terminal Rendering System
+//! # Terminal Rendering
 //!
-//! This module provides comprehensive terminal emulation rendering with advanced text selection,
-//! mouse interaction, and multi-language support (CJK characters).
-//!
-//! ## Architecture Overview
-//!
-//! The rendering system is built on top of egui's immediate mode GUI framework and follows
-//! a layered architecture:
-//!
-//! ```text
-//! ┌─────────────────────────────────────────┐
-//! │   Pane Tree (split/multiple tabs)      │
-//! ├─────────────────────────────────────────┤
-//! │   Terminal Panes (detached windows)    │
-//! ├─────────────────────────────────────────┤
-//! │   Terminal Session (per pane/tab)      │
-//! │   - Text rendering                     │
-//! │   - Mouse selection                    │
-//! │   - Keyboard input                     │
-//! │   - IME support                        │
-//! └─────────────────────────────────────────┘
-//! ```
-//!
-//! ## Fix Notes (v2)
-//!
-//! Three bugs fixed in this revision:
-//!
-//! ### Bug 1 & 2: Selection highlight and cursor drift (left offset, accumulates)
-//!
-//! Root cause: `char_width` was measured with `glyph_width('M')` which returns the
-//! advance width including the glyph's right-side bearing but not necessarily matching
-//! what egui uses internally when composing a layout. More critically, `painter.text()`
-//! with `LEFT_CENTER` alignment positions the glyph origin at the given x coordinate,
-//! but CJK fallback fonts (STHeiti, Hiragino Sans GB, Noto CJK) have non-zero left
-//! bearings and advance widths that do not equal exactly `2 × char_width('M')`.
-//!
-//! When mixed ASCII+CJK runs were passed to a single `painter.text()` call, the font
-//! engine's internal advance accumulation diverged from the grid's `col × char_width`
-//! coordinate system. Even with clip_rect, the *visual origin* of glyphs after a CJK
-//! character was shifted right by `(cjk_advance - 2*char_width)` per CJK character.
-//! Selection highlight and cursor, both computed from `col × char_width`, appeared
-//! shifted left relative to the text — and the shift grew with each CJK character.
-//!
-//! Fixes applied:
-//! 1. `char_width` is now derived from a two-character galley (`"MM"`) divided by 2,
-//!    which measures the true per-cell advance the font engine uses for composition,
-//!    eliminating the bearing discrepancy.
-//! 2. CJK characters (wide runs) are rendered via `ui.fonts().layout_no_wrap()` +
-//!    `painter.galley()` with an explicit pixel origin, bypassing `painter.text()`'s
-//!    internal bearing offset. This guarantees each CJK glyph starts exactly at
-//!    `run_start_col × char_width` regardless of font metrics.
-//! 3. ASCII runs continue to use `painter.text()` (no change, no regression).
-//!
-//! ### Bug 3: `find_word_boundaries` wide_continuation walk-right over-advance
-//!
-//! The right-walk loop had:
-//! ```
-//!   if next_cell.wide_continuation { end = next_idx; continue; }
-//! ```
-//! After `continue`, the loop re-entered and checked `cells[end+1]` where `end` now
-//! pointed at the continuation cell itself. For two adjacent CJK characters "你好",
-//! the continuation cell of "你" (col 2) was stored in `end`, then the loop continued
-//! and found "好" (col 3) is also a word char (CJK fast-path already returns early,
-//! so this only affected ASCII→CJK boundary detection). The fix removes the
-//! `continue` branch: instead, when a continuation is encountered during the right
-//! walk, we include it in `end` and then immediately break, because a continuation
-//! cell signals the right edge of the current wide character — the word boundary
-//! stops there for ASCII words.
+//! This module contains terminal rendering functions for displaying
+//! terminal session content in the UI.
 
 use eframe::egui;
 
 use crate::config::ShortcutAction;
 use crate::ssh::SshConnectionState;
 use crate::terminal;
-use crate::ui::types::{SessionBackend, TerminalSession, BroadcastState, SearchMatch};
+use crate::ui::types::{session::{TerminalSession, SearchMatch, SessionBackend}, dialogs::BroadcastState};
 use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, split_rect};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
 use crate::ui::input::{key_to_ctrl_byte, key_to_char, ShortcutResolver};
+use super::selection::find_word_boundaries;
+
 
 // ---------------------------------------------------------------------------
 // Helper: measure true monospace cell width via galley composition
@@ -96,22 +33,6 @@ fn measure_char_width(fonts: &egui::text::Fonts, font_id: &egui::FontId) -> f32 
         egui::Color32::WHITE,
     );
     galley.size().x / 2.0
-}
-
-// ---------------------------------------------------------------------------
-// Helper: is a Unicode scalar value in a CJK block?
-// ---------------------------------------------------------------------------
-fn is_cjk(cp: u32) -> bool {
-    matches!(cp,
-        0x4E00..=0x9FFF   | // CJK Unified Ideographs
-        0x3400..=0x4DBF   | // CJK Extension A
-        0x20000..=0x2A6DF | // CJK Extension B
-        0x2A700..=0x2B73F | // CJK Extension C
-        0x2B740..=0x2B81F | // CJK Extension D
-        0x2B820..=0x2CEAF | // CJK Extension E
-        0xF900..=0xFAFF   | // CJK Compatibility Ideographs
-        0x2F800..=0x2FA1F   // CJK Compatibility Supplement
-    )
 }
 
 /// Core terminal session rendering function.
@@ -600,7 +521,7 @@ pub fn render_terminal_session(
                                 if session.search_state.is_some() {
                                     session.search_state = None;
                                 } else {
-                                    use crate::ui::types::SearchState;
+                                    use crate::ui::types::session::SearchState;
                                     session.search_state = Some(SearchState {
                                         query: String::new(),
                                         matches: Vec::new(),
@@ -1612,124 +1533,4 @@ pub fn render_pane_tree(
             result
         }
     }
-}
-
-/// Find word boundaries around a given cell for double-click selection.
-///
-/// Returns `(start_col, end_col)` inclusive. The range covers the full
-/// extent of the word containing `col`, with continuation cells included
-/// in the end column for wide characters.
-///
-/// ## Fixes in this revision
-///
-/// The right-walk loop previously did:
-/// ```
-///   if next_cell.wide_continuation { end = next_idx; continue; }
-/// ```
-/// After `continue` the loop re-entered with `end` pointing at the
-/// continuation cell, then checked `cells[end + 1]`. For "你好" this
-/// caused the continuation cell of "你" to be stored in `end`, and the
-/// loop would then inspect "好" as the next candidate — potentially
-/// over-extending the selection by 1 column for ASCII words ending
-/// adjacent to a CJK character.
-///
-/// Fix: when a continuation cell is encountered on the right walk, include
-/// it in `end` and **break** immediately. A continuation cell marks the
-/// right edge of a wide character; no further extension is needed or correct.
-pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usize) -> (usize, usize) {
-    if row >= grid.rows {
-        return (col, col);
-    }
-    let cells = &grid.cells[row];
-    let cell = cells.get(col);
-
-    // If we landed on a continuation cell, walk back to the owning main cell
-    let actual_col = if let Some(c) = cell {
-        if c.wide_continuation && col > 0 {
-            let mut search = col - 1;
-            while search > 0 && cells[search].wide_continuation {
-                search -= 1;
-            }
-            search
-        } else {
-            col
-        }
-    } else {
-        col
-    };
-
-    let ch = cells.get(actual_col).map(|c| c.c).unwrap_or(' ');
-
-    let is_word_char = |c: char| -> bool {
-        if c.is_ascii_alphanumeric() || c == '_' { return true; }
-        is_cjk(c as u32)
-    };
-
-    if !is_word_char(ch) {
-        return (col, col);
-    }
-
-    // CJK fast path: each ideograph is its own word unit
-    if is_cjk(ch as u32) {
-        let mut end = actual_col;
-        if end + 1 < cells.len() && cells[end + 1].wide_continuation {
-            end += 1;
-        }
-        return (actual_col, end);
-    }
-
-    // ── ASCII word: walk left ────────────────────────────────────────────────
-    let mut start = actual_col;
-    while start > 0 {
-        let prev_idx  = start - 1;
-        let prev_cell = &cells[prev_idx];
-
-        // A continuation cell means the character before it is a wide (CJK)
-        // char — that is a word boundary for ASCII words.
-        if prev_cell.wide_continuation {
-            break;
-        }
-
-        let prev_cp = prev_cell.c as u32;
-        if !is_word_char(prev_cell.c) || is_cjk(prev_cp) {
-            break;
-        }
-
-        start = prev_idx;
-    }
-
-    // ── ASCII word: walk right ───────────────────────────────────────────────
-    let mut end = actual_col;
-    while end + 1 < cells.len().min(grid.cols) {
-        let next_idx  = end + 1;
-        let next_cell = &cells[next_idx];
-
-        // ── FIX 3 ───────────────────────────────────────────────────────────
-        // A continuation cell is the right half of a wide character.
-        // Include it in `end` (so the selection covers the full glyph slot)
-        // and then STOP — do not `continue` back into the loop, as that
-        // would cause the loop to inspect `cells[end + 1]` (the next real
-        // character) and potentially extend the selection past the CJK char
-        // into the following ASCII word, or over-count by one column when
-        // two CJK characters are adjacent.
-        if next_cell.wide_continuation {
-            end = next_idx;
-            break; // ← was `continue` — this is the fix
-        }
-
-        let next_cp = next_cell.c as u32;
-        if !is_word_char(next_cell.c) || is_cjk(next_cp) {
-            break;
-        }
-
-        end = next_idx;
-
-        // If this char is itself wide, absorb its continuation and stop
-        if end + 1 < cells.len() && cells[end + 1].wide_continuation {
-            end += 1;
-            break;
-        }
-    }
-
-    (start, end)
 }

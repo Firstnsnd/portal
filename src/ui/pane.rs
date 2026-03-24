@@ -73,7 +73,7 @@
 
 use eframe::egui;
 
-use crate::ui::types::{TerminalSession, AppView, BroadcastState};
+use crate::ui::types::{session::TerminalSession, dialogs::{AppView, BroadcastState}};
 
 /// Split direction for pane layout
 #[derive(Clone, Copy, PartialEq)]
@@ -205,7 +205,7 @@ pub struct Tab {
 
 /// Per-tab animation state for smooth reordering
 #[derive(Clone, Default)]
-struct TabAnimation {
+pub struct TabAnimation {
     /// Current X offset (animation progress)
     current_offset: f32,
     /// Target X offset (where we want to be)

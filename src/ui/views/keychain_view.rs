@@ -2,275 +2,264 @@ use eframe::egui;
 
 use crate::app::PortalApp;
 use crate::config::{self, Credential, CredentialType};
-use crate::ui::types::{KeychainDeleteRequest, CredentialTypeChoice, KeySourceChoice};
+use crate::ui::types::dialogs::{KeychainDeleteRequest, CredentialTypeChoice, KeySourceChoice};
 use crate::ui::tokens::*;
 use crate::ui::widgets;
 
 impl PortalApp {
-    pub fn show_keychain_view(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        let theme = self.theme.clone();
-        let lang = self.language;
-
-        // Count how many hosts reference each credential
-        let binding_counts: std::collections::HashMap<String, Vec<String>> = {
-            let mut map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-            for host in &self.hosts {
-                if let Some(ref cid) = host.credential_id {
-                    map.entry(cid.clone()).or_default().push(host.name.clone());
-                }
+    /// Full keychain page content (used by both main and detached windows)
+    pub fn show_keychain_view(&mut self, ctx: &egui::Context, _ui: &mut egui::Ui) {
+        // Collect all unique groups and tags
+        let mut all_groups: Vec<String> = Vec::new();
+        for host in &self.hosts {
+            if !host.group.is_empty() && !all_groups.contains(&host.group) {
+                all_groups.push(host.group.clone());
             }
-            map
-        };
+        }
+        all_groups.sort();
 
-        let mut delete_request: Option<KeychainDeleteRequest> = None;
-        let mut edit_credential_id: Option<String> = None;
-
-        egui::ScrollArea::vertical()
-            .id_salt("keychain_page_scroll")
-            .show(ui, |ui| {
-            ui.add_space(SPACE_2XL / 2.0);
-
-            // ── Page header ──
-            ui.horizontal(|ui| {
-                ui.add_space(SPACE_XL);
-                ui.label(
-                    egui::RichText::new(lang.t("keychain"))
-                        .color(theme.fg_dim)
-                        .size(FONT_MD)
-                        .strong(),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(SPACE_XL);
-                    // New credential button
-                    if ui.add(
-                        widgets::text_button(lang.t("new_credential"), theme.accent)
-                    ).clicked() {
-                        self.credential_dialog.open_new();
-                    }
-                    if !self.credentials.is_empty() {
-                        ui.add_space(SPACE_MD);
-                        if ui.add(
-                            widgets::text_button(lang.t("delete_all"), theme.red)
-                        ).clicked() {
-                            delete_request = Some(KeychainDeleteRequest::All);
-                        }
-                    }
-                });
-            });
-            ui.add_space(SPACE_LG);
-
-            if self.credentials.is_empty() {
-                // ── Empty state ──
-                ui.add_space(60.0);
-                ui.vertical_centered(|ui| {
-                    ui.label(
-                        egui::RichText::new("\u{1f511}")
-                            .size(SPACE_2XL)
-                            .color(theme.fg_dim),
-                    );
-                    ui.add_space(SPACE_MD);
-                    ui.label(
-                        egui::RichText::new(lang.t("keychain_empty"))
-                            .color(theme.fg_dim)
-                            .size(FONT_BASE),
-                    );
-                });
-                ui.add_space(60.0);
-            } else {
-                // ── Section header ──
+        // Top navigation bar (matching terminal tab bar style)
+        egui::TopBottomPanel::top("keychain_nav_bar")
+            .frame(egui::Frame {
+                fill: self.theme.bg_secondary,
+                inner_margin: egui::Margin::symmetric(8.0, 4.0),
+                stroke: egui::Stroke::NONE,
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.add_space(SPACE_XL);
-                    ui.label(
-                        egui::RichText::new(lang.t("credentials_section"))
-                            .color(theme.fg_dim)
-                            .size(FONT_XS)
-                            .strong(),
-                    );
+                    // Left side: Keychain title
+                    ui.label(egui::RichText::new(self.language.t("keychain"))
+                        .color(self.theme.fg_dim)
+                        .size(FONT_BASE)
+                        .strong());
+
+                    // Right side: New Credential button
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Delete All button (only show if there are credentials)
+                        if !self.credentials.is_empty() {
+                            ui.add_space(SPACE_MD);
+                            if ui.add(
+                                widgets::text_button(self.language.t("delete_all"), self.theme.red)
+                            ).clicked() {
+                                self.keychain_confirm_delete = Some(KeychainDeleteRequest::All);
+                            }
+                        }
+                        if ui.add(
+                            widgets::text_button(self.language.t("new_credential"), self.theme.accent)
+                        ).clicked() {
+                            self.credential_dialog.open_new();
+                        }
+                    });
                 });
-                ui.add_space(SPACE_XS);
+                ui.add_space(4.0);
+            });
 
-                let border = theme.input_border;
+        egui::CentralPanel::default()
+            .frame(egui::Frame {
+                fill: self.theme.bg_primary,
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("keychain_page_scroll")
+                    .show(ui, |ui| {
+                        ui.add_space(SPACE_MD);
 
-                // ── Credential rows ──
-                for cred in &self.credentials {
-                    let bound_hosts = binding_counts.get(&cred.id);
-                    let binding_count = bound_hosts.map(|v| v.len()).unwrap_or(0);
-
-                    let type_key = match &cred.credential_type {
-                        CredentialType::Password { .. } => "credential_password",
-                        CredentialType::SshKey { .. } => "credential_private_key",
-                    };
-
-                    let subtitle = match &cred.credential_type {
-                        CredentialType::Password { username } => {
-                            if username.is_empty() {
-                                lang.t("credential_password").to_string()
-                            } else {
-                                format!("{}: {}", lang.t("username"), username)
-                            }
-                        }
-                        CredentialType::SshKey { key_path, .. } => {
-                            if key_path.is_empty() {
-                                lang.t("ssh_key").to_string()
-                            } else {
-                                format!("{}: {}", lang.t("key_source_path"), key_path)
-                            }
-                        }
-                    };
-
-                    let row_h = LIST_ROW_HEIGHT;
-                    let width = ui.available_width();
-                    let (rect, resp) = ui.allocate_exact_size(
-                        egui::vec2(width, row_h),
-                        egui::Sense::click(),
-                    );
-                    let hovered = resp.hovered();
-
-                    // Background hover effect (keep as painter)
-                    if hovered {
-                        ui.painter().rect_filled(
-                            egui::Rect::from_min_max(
-                                egui::pos2(rect.min.x, rect.max.y - 1.0),
-                                rect.max,
-                            ),
-                            0.0,
-                            theme.hover_shadow,
-                        );
-                        ui.painter().rect_filled(rect, 0.0, theme.hover_bg);
-                    }
-
-                    // Use a child UI for layout within the allocated rect
-                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
-                    child.add_space(SPACE_XL);
-
-                    // Icon
-                    child.label(egui::RichText::new("\u{1f511}").size(FONT_MD).color(theme.accent));
-                    child.add_space(SPACE_SM);
-
-                    // Name and subtitle column
-                    child.vertical(|ui| {
-                        ui.add_space(SPACE_SM);
-                        ui.label(egui::RichText::new(&cred.name).size(FONT_BASE).color(theme.fg_primary));
-                        ui.label(egui::RichText::new(&subtitle).size(FONT_XS).color(theme.fg_dim));
-                    });
-
-                    // Right-aligned: delete button + badges
-                    child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_space(SPACE_XL);
-
-                        // Delete button (hover only)
-                        if hovered {
-                            let del_rect = egui::Rect::from_center_size(
-                                egui::pos2(ui.max_rect().max.x - SPACE_XL - 4.0, rect.center().y),
-                                egui::vec2(24.0, 22.0),
-                            );
-                            let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
-                            let over_del = pointer_pos.map_or(false, |p| del_rect.contains(p));
-                            let del_bg = if over_del { theme.red } else { theme.bg_elevated };
-                            let del_fg = if over_del { theme.bg_primary } else { theme.fg_dim };
-                            ui.painter().rect(del_rect, RADIUS_SM, del_bg, egui::Stroke::NONE);
-                            ui.painter().text(
-                                del_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                "\u{2715}",
-                                egui::FontId::proportional(FONT_XS),
-                                del_fg,
-                            );
-                            // Allocate space for the delete button area
-                            ui.allocate_exact_size(egui::vec2(28.0, 22.0), egui::Sense::hover());
-                        }
-
-                        ui.add_space(SPACE_SM);
-
-                        // Binding count badge (keep as painter for custom styling)
-                        if binding_count > 0 {
-                            let badge_text = format!("{} {}", binding_count, lang.t("hosts_bound"));
-                            let badge_galley = ui.painter().layout_no_wrap(
-                                badge_text,
-                                egui::FontId::proportional(FONT_XS),
-                                theme.accent,
-                            );
-                            let badge_w = badge_galley.size().x + SPACE_MD;
-                            let badge_h = 18.0;
-                            let badge_pos = ui.cursor().min;
-                            let badge_rect = egui::Rect::from_min_size(
-                                egui::pos2(badge_pos.x - badge_w, rect.center().y - badge_h / 2.0),
-                                egui::vec2(badge_w, badge_h),
-                            );
-                            ui.painter().rect_filled(badge_rect, RADIUS_SM, theme.badge_bg);
-                            ui.painter().galley(
-                                egui::pos2(badge_rect.center().x - badge_galley.size().x / 2.0, badge_rect.center().y - badge_galley.size().y / 2.0),
-                                badge_galley,
-                                theme.accent,
-                            );
-                            ui.allocate_exact_size(egui::vec2(badge_w, badge_h), egui::Sense::hover());
-                            ui.add_space(SPACE_SM);
-                        }
-
-                        // Type badge (keep as painter for custom styling)
-                        let type_text = lang.t(type_key);
-                        let type_galley = ui.painter().layout_no_wrap(
-                            type_text.to_string(),
-                            egui::FontId::proportional(FONT_XS),
-                            theme.fg_dim,
-                        );
-                        let type_w = type_galley.size().x + SPACE_LG;
-                        let type_h = 18.0;
-                        let type_pos = ui.cursor().min;
-                        let type_rect = egui::Rect::from_min_size(
-                            egui::pos2(type_pos.x - type_w, rect.center().y - type_h / 2.0),
-                            egui::vec2(type_w, type_h),
-                        );
-                        ui.painter().rect(
-                            type_rect,
-                            RADIUS_SM,
-                            egui::Color32::TRANSPARENT,
-                            egui::Stroke::new(1.0, border),
-                        );
-                        ui.painter().galley(
-                            egui::pos2(type_rect.center().x - type_galley.size().x / 2.0, type_rect.center().y - type_galley.size().y / 2.0),
-                            type_galley,
-                            theme.fg_dim,
-                        );
-                        ui.allocate_exact_size(egui::vec2(type_w, type_h), egui::Sense::hover());
-                    });
-
-                    // Handle click interactions
-                    if hovered && resp.clicked() {
-                        let click_pos = ui.ctx().input(|i| i.pointer.interact_pos());
-                        let del_rect = egui::Rect::from_center_size(
-                            egui::pos2(rect.max.x - SPACE_XL - 4.0, rect.center().y),
-                            egui::vec2(24.0, 22.0),
-                        );
-                        if click_pos.map_or(false, |p| del_rect.contains(p)) {
-                            delete_request = Some(KeychainDeleteRequest::ById {
-                                credential_id: cred.id.clone(),
-                                affected_hosts: bound_hosts.cloned().unwrap_or_default(),
+                        // ── Empty state ──
+                        if self.credentials.is_empty() {
+                            ui.add_space(SPACE_2XL);
+                            ui.vertical_centered(|ui| {
+                                ui.label(
+                                    egui::RichText::new("\u{1f511}")
+                                        .size(SPACE_2XL)
+                                        .color(self.theme.fg_dim),
+                                );
+                                ui.add_space(SPACE_MD);
+                                ui.label(
+                                    egui::RichText::new(self.language.t("keychain_empty"))
+                                        .color(self.theme.fg_dim)
+                                        .size(FONT_BASE),
+                                );
                             });
-                        } else {
-                            edit_credential_id = Some(cred.id.clone());
+                            return;
                         }
-                    } else if resp.clicked() {
-                        edit_credential_id = Some(cred.id.clone());
-                    }
-                }
-            }
 
-            ui.add_space(20.0);
-        }); // end ScrollArea
+                        // ── Section header ──
+                        ui.horizontal(|ui| {
+                            ui.add_space(SPACE_XL);
+                            ui.label(
+                                egui::RichText::new(self.language.t("credentials_section"))
+                                    .color(self.theme.fg_dim)
+                                    .size(FONT_XS)
+                                    .strong(),
+                            );
+                        });
+                        ui.add_space(SPACE_XS);
 
-        // Open edit dialog for clicked credential
-        if let Some(cid) = edit_credential_id {
-            if let Some(cred) = self.credentials.iter().find(|c| c.id == cid) {
-                let cred = cred.clone();
-                self.credential_dialog.open_edit(&cred);
-            }
-        }
+                        let border = self.theme.input_border;
 
-        // Apply deferred delete request
-        if let Some(req) = delete_request {
-            self.keychain_confirm_delete = Some(req);
-        }
+                        // ── Credential rows ──
+                        for cred in &self.credentials {
+                            // Count how many hosts reference this credential
+                            let bound_hosts: Vec<String> = self.hosts.iter()
+                                .filter(|h| h.credential_id.as_ref() == Some(&cred.id))
+                                .map(|h| h.name.clone())
+                                .collect();
+                            let binding_count = bound_hosts.len();
+
+                            let type_key = match &cred.credential_type {
+                                CredentialType::Password { .. } => "credential_password",
+                                CredentialType::SshKey { .. } => "credential_private_key",
+                            };
+
+                            let subtitle = match &cred.credential_type {
+                                CredentialType::Password { username } => {
+                                    if username.is_empty() {
+                                        self.language.t("credential_password").to_string()
+                                    } else {
+                                        format!("{}: {}", self.language.t("username"), username)
+                                    }
+                                }
+                                CredentialType::SshKey { key_path, .. } => {
+                                    if key_path.is_empty() {
+                                        self.language.t("ssh_key").to_string()
+                                    } else {
+                                        format!("{}: {}", self.language.t("key_source_path"), key_path)
+                                    }
+                                }
+                            };
+
+                            let row_h = LIST_ROW_HEIGHT;
+                            let width = ui.available_width();
+                            let (rect, resp) = ui.allocate_exact_size(
+                                egui::vec2(width, row_h),
+                                egui::Sense::click(),
+                            );
+                            let hovered = resp.hovered();
+
+                            // Background hover effect
+                            if hovered {
+                                ui.painter().rect_filled(
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(rect.min.x, rect.max.y - 1.0),
+                                        rect.max,
+                                    ),
+                                    0.0,
+                                    self.theme.hover_shadow,
+                                );
+                                ui.painter().rect_filled(rect, 0.0, self.theme.hover_bg);
+                            }
+
+                            // Use a child UI for layout within the allocated rect
+                            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                            child.add_space(SPACE_XL);
+
+                            // Icon
+                            child.label(egui::RichText::new("\u{1f511}").size(FONT_MD).color(self.theme.accent));
+                            child.add_space(SPACE_SM);
+
+                            // Name and subtitle column
+                            child.vertical(|ui| {
+                                ui.add_space(SPACE_SM);
+                                ui.label(egui::RichText::new(&cred.name).size(FONT_BASE).color(self.theme.fg_primary));
+                                ui.label(egui::RichText::new(&subtitle).size(FONT_XS).color(self.theme.fg_dim));
+                            });
+
+                            // Right-aligned: edit button + badges
+                            child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.add_space(SPACE_XL);
+
+                                // Edit button (hover only)
+                                if hovered {
+                                    let edit_rect = egui::Rect::from_center_size(
+                                        egui::pos2(ui.max_rect().max.x - SPACE_XL - 4.0, rect.center().y),
+                                        egui::vec2(50.0, 22.0),
+                                    );
+                                    let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
+                                    let over_edit = pointer_pos.map_or(false, |p| edit_rect.contains(p));
+                                    let edit_bg = if over_edit { self.theme.hover_bg } else { self.theme.bg_elevated };
+                                    ui.painter().rect(edit_rect, RADIUS_SM, edit_bg, egui::Stroke::new(1.0, self.theme.border));
+                                    ui.painter().text(
+                                        edit_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        self.language.t("edit_file"),
+                                        egui::FontId::proportional(FONT_XS),
+                                        self.theme.fg_dim,
+                                    );
+                                    // Handle edit click
+                                    if over_edit && resp.clicked() {
+                                        self.credential_dialog.open_edit(cred);
+                                    }
+                                    ui.allocate_exact_size(egui::vec2(50.0, 22.0), egui::Sense::hover());
+                                }
+
+                                ui.add_space(SPACE_SM);
+
+                                // Binding count badge
+                                if binding_count > 0 {
+                                    let badge_text = format!("{} {}", binding_count, self.language.t("hosts_bound"));
+                                    let badge_galley = ui.painter().layout_no_wrap(
+                                        badge_text,
+                                        egui::FontId::proportional(FONT_XS),
+                                        self.theme.accent,
+                                    );
+                                    let badge_w = badge_galley.size().x + SPACE_MD;
+                                    let badge_h = 18.0;
+                                    let badge_pos = ui.cursor().min;
+                                    let badge_rect = egui::Rect::from_min_size(
+                                        egui::pos2(badge_pos.x - badge_w, rect.center().y - badge_h / 2.0),
+                                        egui::vec2(badge_w, badge_h),
+                                    );
+                                    ui.painter().rect_filled(badge_rect, RADIUS_SM, self.theme.badge_bg);
+                                    ui.painter().galley(
+                                        egui::pos2(badge_rect.center().x - badge_galley.size().x / 2.0, badge_rect.center().y - badge_galley.size().y / 2.0),
+                                        badge_galley,
+                                        self.theme.accent,
+                                    );
+                                    ui.allocate_exact_size(egui::vec2(badge_w, badge_h), egui::Sense::hover());
+                                    ui.add_space(SPACE_SM);
+                                }
+
+                                // Type badge
+                                let type_text = self.language.t(type_key);
+                                let type_galley = ui.painter().layout_no_wrap(
+                                    type_text.to_string(),
+                                    egui::FontId::proportional(FONT_XS),
+                                    self.theme.fg_dim,
+                                );
+                                let type_w = type_galley.size().x + SPACE_LG;
+                                let type_h = 18.0;
+                                let type_pos = ui.cursor().min;
+                                let type_rect = egui::Rect::from_min_size(
+                                    egui::pos2(type_pos.x - type_w, rect.center().y - type_h / 2.0),
+                                    egui::vec2(type_w, type_h),
+                                );
+                                ui.painter().rect(
+                                    type_rect,
+                                    RADIUS_SM,
+                                    egui::Color32::TRANSPARENT,
+                                    egui::Stroke::new(1.0, border),
+                                );
+                                ui.painter().galley(
+                                    egui::pos2(type_rect.center().x - type_galley.size().x / 2.0, type_rect.center().y - type_galley.size().y / 2.0),
+                                    type_galley,
+                                    self.theme.fg_dim,
+                                );
+                                ui.allocate_exact_size(egui::vec2(type_w, type_h), egui::Sense::hover());
+                            });
+
+                            // Handle click interactions
+                            if resp.clicked() && !hovered {
+                                // Only open edit on non-hovered row click (prevent double-trigger)
+                                self.credential_dialog.open_edit(cred);
+                            }
+                        }
+
+                        ui.add_space(40.0);
+                    });
+            });
 
         // ── Credential create/edit drawer (right SidePanel) ──
         if self.credential_dialog.open {
@@ -308,13 +297,35 @@ impl PortalApp {
                 };
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(title).color(theme.fg_primary).size(15.0).strong());
+                    ui.label(egui::RichText::new(title).color(theme.fg_primary).size(FONT_BASE).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.add(
-                            egui::Button::new(egui::RichText::new("\u{2715}").color(theme.fg_dim).size(14.0))
+                            egui::Button::new(egui::RichText::new("\u{2715}").color(theme.fg_dim).size(FONT_MD))
                                 .frame(false)
                         ).clicked() {
                             close_clicked = true;
+                        }
+                        if self.credential_dialog.edit_id.is_some() {
+                            if ui.add(
+                                egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
+                                    .frame(false)
+                            ).on_hover_text(lang.t("delete"))
+                            .clicked() {
+                                // Set confirm_delete to the editing credential id and close drawer
+                                if let Some(editing_id) = &self.credential_dialog.edit_id {
+                                    let affected_hosts: Vec<String> = self.hosts.iter()
+                                        .filter(|h| h.credential_id.as_ref() == Some(editing_id))
+                                        .map(|h| h.name.clone())
+                                        .collect();
+                                    self.keychain_confirm_delete = Some(
+                                        KeychainDeleteRequest::ById {
+                                            credential_id: editing_id.clone(),
+                                            affected_hosts,
+                                        }
+                                    );
+                                }
+                                close_clicked = true;
+                            }
                         }
                     });
                 });
