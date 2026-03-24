@@ -49,8 +49,9 @@ pub struct TerminalGrid {
     pub scrollback_wrapped: VecDeque<bool>,
     /// Current working directory (updated via OSC 7 sequence)
     pub cwd: Option<String>,
-    /// Cached content from recent resize (to restore after shell erase_below)
-    resize_cache: Option<(VecDeque<Vec<TerminalCell>>, VecDeque<bool>, Vec<Vec<TerminalCell>>, Vec<bool>)>,
+    /// Counter for protecting against shell erase_after immediately after resize
+    /// Only protects the FIRST erase_below call after each resize
+    resize_protection_count: u8,
 }
 
 impl TerminalGrid {
@@ -86,7 +87,7 @@ impl TerminalGrid {
             line_wrapped: vec![false; rows],
             scrollback_wrapped: VecDeque::new(),
             cwd,
-            resize_cache: None,
+            resize_protection_count: 0,
         }
     }
 
@@ -147,8 +148,9 @@ impl TerminalGrid {
 
     /// Write a character to the grid at the current cursor position with given attributes.
     pub fn write_char_with_attrs(&mut self, c: char, attrs: &CellAttrs) {
-        // Clear resize cache when new input arrives (resize is complete)
-        self.resize_cache = None;
+        // Clear resize protection when new input arrives
+        // This means the resize operation is complete and shell has finished redrawing
+        self.resize_protection_count = 0;
 
         // Handle control characters
         if c < ' ' && c != '\t' && c != '\n' && c != '\r' {
@@ -221,29 +223,11 @@ impl TerminalGrid {
 
     /// Erase from cursor to end of display.
     pub fn erase_below(&mut self) {
-        // Check if we have cached content from a recent resize
-        // If so, restore it instead of erasing (this prevents shell SIGWINCH
-        // response from destroying our reflowed content)
-        if let Some((cached_scrollback, cached_scrollback_wrapped, cached_cells, cached_line_wrapped)) = self.resize_cache.take() {
-            // Restore the cached content
-            self.scrollback = cached_scrollback;
-            self.scrollback_wrapped = cached_scrollback_wrapped;
-
-            // Only restore visible cells if dimensions match
-            if cached_cells.len() == self.cells.len() && cached_cells.get(0).map_or(0, |r| r.len()) == self.cols {
-                self.cells = cached_cells;
-                self.line_wrapped = cached_line_wrapped;
-            } else {
-                // Dimensions don't match, need to adjust
-                // Just keep the scrollback and create new visible grid
-                self.cells = vec![vec![TerminalCell::default(); self.cols]; self.rows];
-                self.line_wrapped = vec![false; self.rows];
-            }
-
-            // Recalculate memory usage after restore
-            self.current_scrollback_bytes = self.scrollback.iter()
-                .map(|row| Self::row_memory_usage(row))
-                .sum();
+        // If we have resize protection active, decrement the counter and skip erasing
+        // This prevents the shell's SIGWINCH response (erase_below) from destroying
+        // our reflowed content, but only for the first call after each resize
+        if self.resize_protection_count > 0 {
+            self.resize_protection_count -= 1;
             return;
         }
 
@@ -760,13 +744,8 @@ impl TerminalGrid {
             self.scrollback_wrapped.pop_front();
         }
 
-        // Cache the reflowed content to restore after shell's erase_below
-        // This prevents shell SIGWINCH response from destroying our reflowed content
-        self.resize_cache = Some((
-            self.scrollback.clone(),
-            self.scrollback_wrapped.clone(),
-            self.cells.clone(),
-            self.line_wrapped.clone(),
-        ));
+        // Set protection count - this will protect against the next erase_below call
+        // (shell's response to PTY resize), but not against subsequent erases
+        self.resize_protection_count = 1;
     }
 }
