@@ -624,47 +624,18 @@ impl TerminalGrid {
             self.scrollback_wrapped.clear();
         } else if total_rows <= new_rows {
             // All content (scrollback + grid) fits in visible grid
-            // Only merge scrollback if it's very small (3 rows or less)
-            if scrollback_rows > 0 && scrollback_rows <= 3 {
-                // Small scrollback - merge into grid for better visibility
-                for mut row in new_scrollback {
-                    new_grid_content.push_front(row);
-                }
+            // Keep scrollback separate to preserve history structure
+            // Even if scrollback is small, users expect to scroll up to see it
+            self.scrollback = new_scrollback;
+            self.scrollback_wrapped = calc_wrapped_flags(&scrollback_row_counts).into_iter().collect();
 
-                // Calculate wrapped flags for all content
-                let grid_flags = calc_wrapped_flags(&grid_row_counts);
-                let scrollback_flags = calc_wrapped_flags(&scrollback_row_counts);
-                let mut all_wrapped_flags = scrollback_flags;
-                for flag in grid_flags {
-                    all_wrapped_flags.push_back(flag);
-                }
+            self.cells = new_grid_content.into_iter().collect();
+            self.line_wrapped = calc_wrapped_flags(&grid_row_counts).into_iter().collect();
 
-                // Set grid content
-                self.cells = new_grid_content.into_iter().collect();
-                self.line_wrapped = all_wrapped_flags.into_iter().collect();
-
-                // Fill remaining rows
-                while self.cells.len() < new_rows {
-                    self.cells.push(vec![TerminalCell::default(); new_cols]);
-                    self.line_wrapped.push(false);
-                }
-
-                // Clear scrollback
-                self.scrollback.clear();
-                self.scrollback_wrapped.clear();
-            } else {
-                // Significant scrollback or no scrollback - keep separate
-                self.scrollback = new_scrollback;
-                self.scrollback_wrapped = calc_wrapped_flags(&scrollback_row_counts).into_iter().collect();
-
-                self.cells = new_grid_content.into_iter().collect();
-                self.line_wrapped = calc_wrapped_flags(&grid_row_counts).into_iter().collect();
-
-                // Fill remaining rows
-                while self.cells.len() < new_rows {
-                    self.cells.push(vec![TerminalCell::default(); new_cols]);
-                    self.line_wrapped.push(false);
-                }
+            // Fill remaining rows
+            while self.cells.len() < new_rows {
+                self.cells.push(vec![TerminalCell::default(); new_cols]);
+                self.line_wrapped.push(false);
             }
         } else {
             // total_rows > new_rows: need to keep scrollback
@@ -714,8 +685,34 @@ impl TerminalGrid {
         self.cols = new_cols;
         self.rows = new_rows;
         self.scroll_bottom = new_rows.saturating_sub(1);
-        self.cursor_col = self.cursor_col.min(new_cols.saturating_sub(1));
-        self.cursor_row = self.cursor_row.min(new_rows.saturating_sub(1));
+
+        // Position cursor at the end of actual content (not at old clamped position)
+        // Find the last non-empty row to place the cursor correctly
+        let mut last_content_row = 0;
+        for row_idx in (0..self.cells.len()).rev() {
+            let has_content = self.cells[row_idx].iter().any(|c| c.c != ' ' && c.c != '\0');
+            if has_content {
+                last_content_row = row_idx;
+                break;
+            }
+        }
+
+        // Find the last non-empty column in that row
+        let mut last_content_col = 0;
+        for col_idx in (0..self.cols).rev() {
+            if self.cells[last_content_row][col_idx].c != ' ' && self.cells[last_content_row][col_idx].c != '\0' {
+                last_content_col = col_idx;
+                break;
+            }
+        }
+
+        // Set cursor at the end of content
+        self.cursor_row = last_content_row;
+        self.cursor_col = if last_content_col < self.cols.saturating_sub(1) {
+            last_content_col + 1
+        } else {
+            self.cols.saturating_sub(1)
+        };
 
         // Recalculate scrollback memory usage
         self.current_scrollback_bytes = self.scrollback.iter()

@@ -435,12 +435,14 @@ mod tests {
         // all content fits in the grid and scrollback is emptied
         grid.resize(15, 3);
 
-        // After resize, all content should be visible in the grid
-        // (scrollback is empty because all 3 rows fit in the grid)
-        let content = get_visible_content(&grid);
-        assert!(content.contains("line1"));
-        assert!(content.contains("line2"));
-        assert!(content.contains("line3"));
+        // After resize, all content should be accessible (in scrollback or visible)
+        // Scrollback is preserved even though it could fit in the grid
+        let scrollback_content = get_scrollback_content(&grid);
+        let visible_content = get_visible_content(&grid);
+        let combined = format!("{}{}", scrollback_content, visible_content);
+        assert!(combined.contains("line1"), "line1 should be in scrollback or visible");
+        assert!(combined.contains("line2"), "line2 should be visible");
+        assert!(combined.contains("line3"), "line3 should be visible");
     }
 
     #[test]
@@ -637,5 +639,98 @@ mod tests {
 
         // Should still contain our original content
         assert!(scrollback_content.contains("Command"), "Scrollback should contain original content");
+    }
+
+    #[test]
+    fn test_reflow_preserves_command_output() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Simulate: user types "ls" and sees output, then prompt appears
+        // Write the prompt
+        write_string(&mut grid, "(base) vaniot@bogon portal % ");
+        write_string(&mut grid, "ls");
+
+        // Simulate ls output (multiple files)
+        grid.cursor_row += 1;  // Move to next line
+        grid.cursor_col = 0;
+        write_string(&mut grid, "Cargo.toml");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "Cargo.lock");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "src/");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "target/");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+
+        // Write another prompt
+        write_string(&mut grid, "(base) vaniot@bogon portal % ");
+
+        // Now resize to narrower width
+        let original_content = get_visible_content(&grid);
+        grid.resize(40, 24);
+
+        // The ls output should still be present
+        let new_content = get_visible_content(&grid);
+        assert!(new_content.contains("Cargo.toml"), "ls output should be preserved");
+        assert!(new_content.contains("src/"), "ls output should be preserved");
+
+        // Resize back to original width
+        grid.resize(80, 24);
+
+        // Content should still be there
+        let final_content = get_visible_content(&grid);
+        assert!(final_content.contains("Cargo.toml"), "ls output should still be preserved");
+    }
+
+    #[test]
+    fn test_reflow_with_multiple_commands_and_scrollback() {
+        let mut grid = create_test_grid(80, 10);
+
+        // First command with output
+        write_string(&mut grid, "(base) vaniot@bogon portal % ");
+        write_string(&mut grid, "ls -la");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "total 100");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "drwxr-xr-x  ... src");
+
+        // Second command
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "(base) vaniot@bogon portal % ");
+        write_string(&mut grid, "cargo build");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "Compiling...");
+        grid.cursor_row += 1;
+        grid.cursor_col = 0;
+        write_string(&mut grid, "Finished");
+
+        // Scroll up to push first command to scrollback
+        grid.scroll_up(0, 9);
+
+        let scrollback_len_before = grid.scrollback_len();
+        assert!(scrollback_len_before > 0, "Should have scrollback");
+
+        // Resize to narrower width
+        grid.resize(40, 10);
+
+        // Check that scrollback is preserved
+        let scrollback_len_after = grid.scrollback_len();
+        assert!(scrollback_len_after > 0, "Scrollback should still exist after resize");
+
+        // Check that content is preserved (in scrollback or visible)
+        let scrollback_content = get_scrollback_content(&grid);
+        let visible_content = get_visible_content(&grid);
+        let combined = format!("{}{}", scrollback_content, visible_content);
+        assert!(combined.contains("ls -la"), "First command should be preserved");
+        assert!(combined.contains("cargo build"), "Second command should be preserved");
+        assert!(combined.contains("Compiling"), "Output should be preserved");
     }
 }
