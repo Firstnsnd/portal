@@ -88,6 +88,7 @@ impl Default for CellAttrs {
 
 impl CellAttrs {
     /// Create a new TerminalCell with these attributes applied to the given character.
+    #[allow(dead_code)]
     pub fn apply_to_cell(&self, c: char) -> TerminalCell {
         let (fg, bg) = if self.inverse {
             (self.bg_color, self.fg_color)

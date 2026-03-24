@@ -56,6 +56,5 @@ pub use i18n::Language;
 pub use types::{SessionBackend, TerminalSession, AppView, BroadcastState};
 pub use pane::{SplitDirection, PaneNode, PaneAction, Tab, DetachedWindow, TabDragState};
 pub use terminal::render_pane_tree;
-pub use views::tab_view::{TabBarAction, tab_bar, detached_tab_bar};
 pub use widgets::nav_button;
 pub use tokens::STATUS_BAR_HEIGHT;

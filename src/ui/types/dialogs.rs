@@ -218,6 +218,7 @@ impl AddHostDialog {
     }
 
     /// Update animation state, return true if drawer should be visible
+    #[allow(dead_code)]
     pub fn update_animation(&mut self, current_time: f64) -> bool {
         const ANIM_DURATION: f64 = 0.3; // 300ms for smooth slide
 
@@ -403,11 +404,15 @@ pub enum KeychainDeleteRequest {
 
 /// Snippet view state for Command Snippets feature
 pub struct SnippetViewState {
+    #[allow(dead_code)]
     pub search_query: String,
     pub group_filter: String,  // Filter by group (empty = show all)
     pub editing: Option<String>,  // id of snippet being edited
+    #[allow(dead_code)]
     pub edit_name: String,
+    #[allow(dead_code)]
     pub edit_command: String,
+    #[allow(dead_code)]
     pub edit_group: String,
     // Drawer state for add/edit snippet
     pub open: bool,
@@ -419,9 +424,13 @@ pub struct SnippetViewState {
     pub quick_selector_open: bool,  // Whether quick snippet selector is open (from terminal)
     pub selected_snippet_index: Option<usize>,  // Currently selected snippet index in quick selector
     // Session selector state for running snippets (deprecated, kept for compatibility)
+    #[allow(dead_code)]
     pub pending_run_command: Option<String>,  // Command waiting to be executed
+    #[allow(dead_code)]
     pub selector_open: bool,  // Whether session selector dialog is open
+    #[allow(dead_code)]
     pub selected_tab: Option<usize>,  // Currently selected tab index in selector
+    #[allow(dead_code)]
     pub selected_session: Option<usize>,  // Currently selected session index in selector
 }
 
@@ -445,6 +454,7 @@ impl SnippetViewState {
     }
 
     /// Close the drawer
+    #[allow(dead_code)]
     pub fn close(&mut self) {
         self.open = false;
     }

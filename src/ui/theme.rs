@@ -16,7 +16,9 @@ pub struct ThemeColors {
     pub border: egui::Color32,
 
     // Semantic colors derived from base colors
+    #[allow(dead_code)]
     pub card_bg: egui::Color32,         // List item / card background
+    #[allow(dead_code)]
     pub card_hover: egui::Color32,      // List item hover
     pub input_bg: egui::Color32,        // Text input background
     pub input_border: egui::Color32,    // Text input border
@@ -24,9 +26,13 @@ pub struct ThemeColors {
     pub badge_bg: egui::Color32,        // Tag / badge background
     pub menu_bg: egui::Color32,         // Dropdown menu / popup background
     pub focus_ring: egui::Color32,      // Focus indicator
+    #[allow(dead_code)]
     pub divider: egui::Color32,         // Section divider line
+    #[allow(dead_code)]
     pub overlay_bg: egui::Color32,      // Modal overlay background
+    #[allow(dead_code)]
     pub success_dim: egui::Color32,     // Dimmed success (for backgrounds)
+    #[allow(dead_code)]
     pub error_dim: egui::Color32,       // Dimmed error (for backgrounds)
 }
 
@@ -44,22 +50,6 @@ impl ThemeColors {
             80,
         )
     }
-}
-
-pub fn darker(c: egui::Color32, amount: u8) -> egui::Color32 {
-    egui::Color32::from_rgb(
-        c.r().saturating_sub(amount),
-        c.g().saturating_sub(amount),
-        c.b().saturating_sub(amount),
-    )
-}
-
-pub fn brighter(c: egui::Color32, amount: u8) -> egui::Color32 {
-    egui::Color32::from_rgb(
-        c.r().saturating_add(amount),
-        c.g().saturating_add(amount),
-        c.b().saturating_add(amount),
-    )
 }
 
 #[derive(Clone, Copy, PartialEq)]

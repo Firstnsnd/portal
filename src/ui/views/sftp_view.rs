@@ -8,7 +8,6 @@ use crate::ui::widgets;
 
 // Import SFTP view components from subdirectory
 use crate::ui::views::sftp::{DragPayload, SelectionAction, MoveToDirRequest};
-use crate::ui::views::sftp::{format_transfer_speed, format_file_size};
 use crate::ui::views::sftp::{render_breadcrumbs, render_file_panel, apply_selection_action};
 use crate::ui::views::sftp::render_transfer_progress;
 

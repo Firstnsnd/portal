@@ -311,5 +311,4 @@ pub struct DetachedWindow {
     pub tab_drag: TabDragState,
     #[allow(dead_code)]
     pub broadcast_state: BroadcastState,
-    pub last_tab_rects: Vec<egui::Rect>,  // Store previous frame's tab rects for drag animation
 }

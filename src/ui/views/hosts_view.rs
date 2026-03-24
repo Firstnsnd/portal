@@ -1,16 +1,14 @@
 use eframe::egui;
-use egui::Widget;
 use std::sync::{Arc, Mutex};
 
 use crate::app::PortalApp;
 use crate::config::HostEntry;
 use crate::ssh::test_connection;
-use crate::ui::types::dialogs::{AuthMethodChoice, TestConnState, AppView, KeySourceChoice, CredentialMode};
+use crate::ui::types::dialogs::{AuthMethodChoice, TestConnState, KeySourceChoice, CredentialMode};
 use crate::ui::i18n::format_time_ago;
-use crate::ui::formatting::format_duration_compact;
 use crate::ui::tokens::*;
-use crate::ui::widgets;
 use crate::ui::views::nav_panel;
+use crate::ui::widgets;
 
 impl PortalApp {
     /// Navigation strip on the left (always visible)

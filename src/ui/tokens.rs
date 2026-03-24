@@ -10,10 +10,12 @@ pub const SPACE_2XL: f32 = 32.0;
 
 // Component sizes
 pub const LIST_ROW_HEIGHT: f32 = 52.0;
+#[allow(dead_code)]
 pub const TABLE_ROW_HEIGHT: f32 = 36.0;
 pub const DRAWER_WIDTH: f32 = 340.0;
 pub const DIALOG_WIDTH_SM: f32 = 300.0;
 pub const DIALOG_WIDTH_MD: f32 = 340.0;
+#[allow(dead_code)]
 pub const DIALOG_WIDTH_LG: f32 = 360.0;
 pub const STATUS_BAR_HEIGHT: f32 = 24.0;
 

@@ -75,5 +75,3 @@ pub struct SftpEditorDialog {
     pub error: String,
     pub save_as_name: String,
 }
-
-use eframe::egui;

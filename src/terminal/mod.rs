@@ -16,7 +16,7 @@ pub use color::DEFAULT_BG;
 pub use grid::TerminalGrid;
 pub use types::{TerminalCell, CellAttrs};
 pub use vte::VteHandler;
-pub use session::{RealPtySession, PtyWriter};
+pub use session::RealPtySession;
 
 // PTY abstraction types
 use std::process::ExitStatus;

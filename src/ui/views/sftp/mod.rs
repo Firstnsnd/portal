@@ -3,6 +3,9 @@
 //! This module contains components for the SFTP file browser view.
 //! It is organized into submodules for better maintainability.
 
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
 pub mod types;
 pub mod format;
 pub mod panel;

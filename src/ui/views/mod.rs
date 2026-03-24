@@ -23,7 +23,3 @@ pub mod settings_view;
 pub mod keychain_view;
 pub mod snippet_view;
 pub mod tunnel_view;
-
-// Re-export commonly used items
-pub use nav_panel::show_nav_panel;
-pub use tab_view::{TabBarAction, tab_bar, detached_tab_bar};

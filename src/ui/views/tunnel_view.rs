@@ -2,10 +2,9 @@
 
 use crate::app::PortalApp;
 use crate::config::{ForwardKind, PortForwardConfig};
-use crate::ui::types::dialogs::AddTunnelDialog;
-use crate::ui::types::session::{SessionBackend, TerminalSession};
+use crate::ui::types::session::SessionBackend;
 use crate::ui::tokens::*;
-use crate::ui::{widgets, ThemeColors, Language};
+use crate::ui::widgets;
 use eframe::egui;
 use std::collections::HashMap;
 

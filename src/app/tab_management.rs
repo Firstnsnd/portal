@@ -146,7 +146,6 @@ impl PortalApp {
             next_id,
             tab_drag: TabDragState::default(),
             broadcast_state: BroadcastState::default(),
-            last_tab_rects: Vec::new(),
         });
     }
 

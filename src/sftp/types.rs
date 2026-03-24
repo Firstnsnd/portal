@@ -67,6 +67,7 @@ impl TransferProgress {
     }
 
     /// Estimated time remaining in seconds, or None if unknown.
+    #[allow(dead_code)]
     pub fn eta_secs(&self) -> Option<f64> {
         let elapsed = self.started_at.elapsed().as_secs_f64();
         if elapsed > 0.0 && self.bytes_transferred > 0 {

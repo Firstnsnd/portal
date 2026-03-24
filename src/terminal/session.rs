@@ -185,6 +185,7 @@ impl RealPtySession {
     }
 
     /// Check if the PTY session is still alive
+    #[allow(dead_code)]
     pub fn is_alive(&self) -> bool {
         #[cfg(unix)]
         if let Some(ref pty) = self.pty {

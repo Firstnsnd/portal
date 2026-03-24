@@ -13,6 +13,7 @@ use std::time::Duration;
 /// - `3665s` → "1h 1m 5s"
 ///
 /// Used for: uptime display, transfer time estimates
+#[allow(dead_code)]
 pub fn format_duration_compact(duration: Duration) -> String {
     let secs = duration.as_secs();
     if secs < 60 {
