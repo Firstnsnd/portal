@@ -10,7 +10,7 @@ use crate::ui::types::session::SessionBackend;
 use crate::ssh::SshConnectionState;
 
 /// Tab bar action result
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum TabBarAction {
     ActivateTab(usize),
     CloseTab(usize),
@@ -20,6 +20,7 @@ pub enum TabBarAction {
     ReorderTab { src: usize, dst: usize, insert_before: bool },
     NewTab,
     ToggleBroadcast(usize),
+    OpenSnippets,
     None,
 }
 
@@ -424,15 +425,22 @@ fn render_more_menu(
             egui::Button::new(egui::RichText::new("⋯").color(btn_color).size(16.0))
                 .frame(false)
         );
+
         if more_resp.clicked() {
             *show_more_menu = !*show_more_menu;
         }
 
+        let mut action = TabBarAction::None;
         if *show_more_menu {
-            let popup_pos = egui::pos2(more_resp.rect.min.x, more_resp.rect.max.y + 2.0);
-            egui::Area::new(more_menu_id.with("popup"))
+            // Position menu below the button
+            let menu_pos = more_resp.rect.left_bottom();
+            let menu_id = more_menu_id.with("popup");
+
+            // Allocate space for the menu in the current UI
+            // Use egui's Area with proper positioning
+            egui::Area::new(menu_id)
                 .order(egui::Order::Foreground)
-                .fixed_pos(popup_pos)
+                .anchor(egui::Align2::LEFT_TOP, menu_pos.to_vec2())
                 .show(ctx, |ui| {
                     egui::Frame {
                         fill: theme.bg_elevated,
@@ -443,37 +451,60 @@ fn render_more_menu(
                     }
                     .show(ui, |ui| {
                         ui.set_min_width(200.0);
-                        ui.separator();
-                        ui.add_space(4.0);
-                        let current_tab_broadcast = active_tab < tabs.len() && tabs[active_tab].broadcast_enabled;
-                        let broadcast_label = if current_tab_broadcast {
-                            format!("◉ {}  ⌘⇧I", language.t("broadcast_off"))
-                        } else {
-                            format!("○ {}  ⌘⇧I", language.t("broadcast_on"))
-                        };
-                        if ui.add(
-                            egui::Button::new(
-                                egui::RichText::new(&broadcast_label)
-                                    .color(if current_tab_broadcast { theme.accent } else { theme.fg_primary })
-                                    .size(13.0)
-                            )
-                            .frame(false)
-                        ).clicked() {
-                            return TabBarAction::ToggleBroadcast(active_tab);
-                        }
-                        TabBarAction::None
+                        ui.vertical(|ui| {
+                            // Snippets drawer menu item
+                            let snippets_label = format!("{}  ⌘⇧S", language.t("snippets"));
+                            if ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new(&snippets_label)
+                                        .color(theme.fg_primary)
+                                        .size(13.0)
+                                )
+                                .frame(false)
+                            ).clicked() {
+                                action = TabBarAction::OpenSnippets;
+                            }
+
+                            ui.separator();
+                            ui.add_space(4.0);
+
+                            // Broadcast toggle menu item
+                            let current_tab_broadcast = active_tab < tabs.len() && tabs[active_tab].broadcast_enabled;
+                            let broadcast_label = if current_tab_broadcast {
+                                format!("◉ {}  ⌘⇧I", language.t("broadcast_off"))
+                            } else {
+                                format!("○ {}  ⌘⇧I", language.t("broadcast_on"))
+                            };
+                            if ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new(&broadcast_label)
+                                        .color(if current_tab_broadcast { theme.accent } else { theme.fg_primary })
+                                        .size(13.0)
+                                )
+                                .frame(false)
+                            ).clicked() {
+                                action = TabBarAction::ToggleBroadcast(active_tab);
+                            }
+                        });
                     });
                 });
 
             // Close menu when clicking outside
-            if ctx.input(|i| i.pointer.any_pressed()) {
-                if let Some(_pos) = ctx.input(|i| i.pointer.interact_pos()) {
-                    // This will be handled by the caller
+            if ctx.input(|i| i.pointer.any_click()) {
+                let menu_rect = egui::Rect::from_min_size(menu_pos, egui::vec2(200.0, 80.0));
+                if let Some(click_pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                    if !menu_rect.contains(click_pos) && !more_resp.rect.contains(click_pos) {
+                        *show_more_menu = false;
+                    }
                 }
             }
         }
 
-        TabBarAction::None
+        if action != TabBarAction::None {
+            *show_more_menu = false;
+        }
+
+        action
     }).inner
 }
 

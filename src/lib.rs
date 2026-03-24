@@ -34,3 +34,4 @@
 
 pub mod terminal;
 pub mod config;
+pub mod ssh;

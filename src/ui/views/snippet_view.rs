@@ -8,17 +8,15 @@ use uuid::Uuid;
 
 use crate::app::PortalApp;
 use crate::config::{self, Snippet};
-use crate::ui::types::dialogs::AppView;
-use crate::ui::{tokens::*, widgets, ThemeColors};
+use crate::ui::{tokens::*, widgets};
 
 impl PortalApp {
     /// Full snippets page content (used by both main and detached windows)
-    pub fn show_snippets_page(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+    pub fn show_snippets_page(&mut self, ctx: &egui::Context, _ui: &mut egui::Ui) {
         // Collect deferred actions
         let mut snippet_to_delete: Option<String> = None;
         let mut snippet_to_save: Option<Snippet> = None;
         let mut snippet_to_create: Option<Snippet> = None;
-        let mut command_to_run: Option<String> = None;
 
         // Top navigation bar (matching terminal tab bar style)
         egui::TopBottomPanel::top("snippets_nav_bar")
@@ -243,37 +241,9 @@ impl PortalApp {
 
                                 // Action buttons (only on hover)
                                 if hovered {
-                                    // Run button
-                                    let run_rect = egui::Rect::from_center_size(
-                                        egui::pos2(visible_right - 40.0, rect.center().y),
-                                        egui::vec2(56.0, 24.0),
-                                    );
-                                    let run_hovered = pointer_pos.map_or(false, |p| run_rect.contains(p));
-                                    ui.painter().rect(
-                                        run_rect,
-                                        RADIUS_SM,
-                                        if run_hovered {
-                                            self.theme.accent
-                                        } else {
-                                            self.theme.badge_bg
-                                        },
-                                        egui::Stroke::new(1.0, self.theme.accent),
-                                    );
-                                    ui.painter().text(
-                                        run_rect.center(),
-                                        egui::Align2::CENTER_CENTER,
-                                        self.language.t("run_snippet"),
-                                        egui::FontId::proportional(FONT_XS),
-                                        if run_hovered {
-                                            self.theme.bg_primary
-                                        } else {
-                                            self.theme.accent
-                                        },
-                                    );
-
-                                    // Edit button
+                                    // Edit button only (run via Cmd+Shift+S in terminal)
                                     let edit_rect = egui::Rect::from_center_size(
-                                        egui::pos2(visible_right - 108.0, rect.center().y),
+                                        egui::pos2(visible_right - 40.0, rect.center().y),
                                         egui::vec2(52.0, 24.0),
                                     );
                                     let edit_hovered = pointer_pos.map_or(false, |p| edit_rect.contains(p));
@@ -297,17 +267,13 @@ impl PortalApp {
 
                                     // Handle clicks
                                     if let Some(pos) = pointer_pos {
-                                        if resp.clicked() {
-                                            if run_rect.contains(pos) {
-                                                command_to_run = Some(snippet.command.clone());
-                                            } else if edit_rect.contains(pos) {
-                                                self.snippet_view_state.open_edit(
-                                                    snippet.id.clone(),
-                                                    &snippet.name,
-                                                    &snippet.command,
-                                                    &snippet.group
-                                                );
-                                            }
+                                        if resp.clicked() && edit_rect.contains(pos) {
+                                            self.snippet_view_state.open_edit(
+                                                snippet.id.clone(),
+                                                &snippet.name,
+                                                &snippet.command,
+                                                &snippet.group
+                                            );
                                         }
                                     }
                                 }
@@ -410,17 +376,6 @@ impl PortalApp {
             self.snippets.retain(|s| s.id != id);
             config::save_snippets(&self.snippets);
             self.snippet_view_state.confirm_delete = None;
-        }
-
-        if let Some(command) = command_to_run {
-            // Write command + newline to the focused terminal session
-            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                if let Some(session) = tab.sessions.get_mut(tab.focused_session) {
-                    session.write(&format!("{}\n", command));
-                }
-            }
-            // Switch to terminal view so the user can see the output
-            self.current_view = AppView::Terminal;
         }
     }
 
@@ -563,6 +518,157 @@ impl PortalApp {
             }
         }
         groups.into_iter().collect()
+    }
+
+    /// Show snippet run drawer (triggered from terminal view with Cmd+Shift+S)
+    /// Right-side drawer with clickable snippet list
+    pub fn show_snippet_run_drawer(&mut self, ctx: &egui::Context) {
+        let drawer_width = ctx.screen_rect().width().min(DRAWER_WIDTH).max(280.0);
+        let theme = self.theme.clone();
+        let lang = self.language;
+
+        egui::SidePanel::right("snippet_run_drawer")
+            .exact_width(drawer_width)
+            .resizable(false)
+            .frame(egui::Frame {
+                fill: theme.bg_secondary,
+                inner_margin: egui::Margin::same(20.0),
+                stroke: egui::Stroke::new(1.0, theme.border),
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    // Header with title and close button
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("\u{26A1}") // Lightning bolt
+                            .size(18.0)
+                            .color(theme.accent));
+                        ui.add_space(SPACE_XS);
+                        ui.label(egui::RichText::new(lang.t("run_snippet"))
+                            .color(theme.fg_primary)
+                            .size(FONT_BASE)
+                            .strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(
+                                egui::Button::new(egui::RichText::new("\u{2715}").color(theme.fg_dim).size(FONT_MD))
+                                    .frame(false)
+                            ).clicked() {
+                                self.snippet_view_state.quick_selector_open = false;
+                                self.snippet_view_state.selected_snippet_index = None;
+                            }
+                        });
+                    });
+                    ui.add_space(SPACE_MD);
+
+                    // Snippet list
+                    if self.snippets.is_empty() {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(SPACE_XL);
+                            ui.label(egui::RichText::new(lang.t("no_snippets"))
+                                .color(theme.fg_dim)
+                                .size(FONT_SM));
+                        });
+                    } else {
+                        egui::ScrollArea::vertical()
+                            .id_salt("snippet_run_drawer_scroll")
+                            .show(ui, |ui| {
+                                // Group snippets
+                                let mut groups: std::collections::BTreeMap<String, Vec<(usize, Snippet)>> =
+                                    std::collections::BTreeMap::new();
+                                for (idx, snippet) in self.snippets.iter().enumerate() {
+                                    groups.entry(snippet.group.clone()).or_default().push((idx, snippet.clone()));
+                                }
+
+                                for (group_name, snippets_in_group) in &groups {
+                                    // Group header
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new(group_name.to_uppercase())
+                                            .color(theme.fg_dim)
+                                            .size(10.0)
+                                            .strong());
+                                    });
+                                    ui.add_space(SPACE_XS);
+
+                                    for (_idx, snippet) in snippets_in_group {
+                                        let item_height = 52.0;
+                                        let (rect, resp) = ui.allocate_exact_size(
+                                            egui::vec2(ui.available_width(), item_height),
+                                            egui::Sense::click(),
+                                        );
+
+                                        // Hover background
+                                        if resp.hovered() {
+                                            ui.painter().rect_filled(rect, RADIUS_SM, theme.hover_bg);
+                                        }
+
+                                        // Icon
+                                        ui.painter().text(
+                                            egui::pos2(rect.min.x + 4.0, rect.min.y + 14.0),
+                                            egui::Align2::LEFT_TOP,
+                                            "\u{26A1}",
+                                            egui::FontId::proportional(12.0),
+                                            theme.accent,
+                                        );
+
+                                        // Name
+                                        ui.painter().text(
+                                            egui::pos2(rect.min.x + 24.0, rect.min.y + 12.0),
+                                            egui::Align2::LEFT_TOP,
+                                            &snippet.name,
+                                            egui::FontId::proportional(FONT_SM),
+                                            theme.fg_primary,
+                                        );
+
+                                        // Command preview
+                                        let preview = if snippet.command.len() > 30 {
+                                            format!("{}...", &snippet.command[..30])
+                                        } else {
+                                            snippet.command.clone()
+                                        };
+                                        let preview = preview.replace('\n', r" \ ");
+                                        ui.painter().text(
+                                            egui::pos2(rect.min.x + 24.0, rect.min.y + 30.0),
+                                            egui::Align2::LEFT_TOP,
+                                            &preview,
+                                            egui::FontId::monospace(10.0),
+                                            theme.fg_dim,
+                                        );
+
+                                        // Handle click - execute immediately
+                                        if resp.clicked() {
+                                            // Execute on current tab's sessions
+                                            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                                                if tab.broadcast_enabled {
+                                                    // Broadcast mode: send to all sessions
+                                                    for session in &mut tab.sessions {
+                                                        session.write(&format!("{}\n", snippet.command));
+                                                    }
+                                                } else {
+                                                    // Normal mode: send only to focused session
+                                                    if let Some(session) = tab.sessions.get_mut(tab.focused_session) {
+                                                        session.write(&format!("{}\n", snippet.command));
+                                                    }
+                                                }
+                                            }
+                                            // Keep drawer open for more selections
+                                        }
+
+                                        ui.add_space(SPACE_XS);
+                                    }
+                                    ui.add_space(SPACE_SM);
+                                }
+                            });
+
+                        // Footer hint
+                        ui.add_space(SPACE_SM);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Click to run")
+                                .size(11.0)
+                                .color(theme.fg_dim));
+                        });
+                    }
+                });
+            });
     }
 
     /// Filter snippets based on current group filter

@@ -415,6 +415,14 @@ pub struct SnippetViewState {
     pub new_command: String,
     pub new_group: String,
     pub confirm_delete: Option<String>,  // id of snippet pending delete confirmation
+    // Quick selector state for running snippets from terminal view
+    pub quick_selector_open: bool,  // Whether quick snippet selector is open (from terminal)
+    pub selected_snippet_index: Option<usize>,  // Currently selected snippet index in quick selector
+    // Session selector state for running snippets (deprecated, kept for compatibility)
+    pub pending_run_command: Option<String>,  // Command waiting to be executed
+    pub selector_open: bool,  // Whether session selector dialog is open
+    pub selected_tab: Option<usize>,  // Currently selected tab index in selector
+    pub selected_session: Option<usize>,  // Currently selected session index in selector
 }
 
 impl SnippetViewState {
@@ -456,6 +464,12 @@ impl Default for SnippetViewState {
             new_command: String::new(),
             new_group: String::new(),
             confirm_delete: None,
+            quick_selector_open: false,
+            selected_snippet_index: None,
+            pending_run_command: None,
+            selector_open: false,
+            selected_tab: None,
+            selected_session: None,
         }
     }
 }

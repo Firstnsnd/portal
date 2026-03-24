@@ -1059,3 +1059,8 @@ pub fn save_hosts(path: &Path, hosts: &[HostEntry]) {
         let _ = std::fs::write(path, json);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    include!("tests.rs");
+}

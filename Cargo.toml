@@ -102,3 +102,25 @@ assets = [
 [[bin]]
 name = "portal"
 path = "src/main.rs"
+
+[dev-dependencies]
+# Testing utilities
+tempfile = "3.10"
+
+# Async testing
+tokio-test = "0.4"
+
+# Mock SSH server for testing
+russh = { version = "0.57", features = ["default"] }
+
+# Environment control for tests
+temp-env = "0.3"
+
+# Pretty assertions for better error messages
+pretty_assertions = "1.4"
+
+# Serializtion testing for snapshots
+insta = "0.1"
+
+# HTTP mocking for E2E tests
+wiremock = "0.6"

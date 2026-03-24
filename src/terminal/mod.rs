@@ -107,3 +107,8 @@ pub use unix_pty::UnixPty;
 
 #[cfg(windows)]
 pub use windows_pty::WindowsPty;
+
+#[cfg(test)]
+mod tests {
+    include!("tests.rs");
+}

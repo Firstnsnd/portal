@@ -9,9 +9,18 @@ use crate::ui::fonts;
 
 impl PortalApp {
     pub fn apply_visuals(&self, ctx: &egui::Context) {
-        let mut visuals = egui::Visuals::dark();
+        // Use light or dark base visuals depending on theme
+        let is_light_theme = matches!(self.theme_preset,
+            ThemePreset::SolarizedLight | ThemePreset::GitHubLight | ThemePreset::OneLight
+        );
+        let mut visuals = if is_light_theme {
+            egui::Visuals::light()
+        } else {
+            egui::Visuals::dark()
+        };
+
         visuals.panel_fill = self.theme.bg_primary;
-        visuals.window_fill = self.theme.bg_secondary;
+        visuals.window_fill = self.theme.menu_bg;
         visuals.extreme_bg_color = self.theme.input_bg;
         visuals.faint_bg_color = self.theme.bg_elevated;
 
@@ -44,7 +53,8 @@ impl PortalApp {
         // Override text cursor color
         visuals.text_cursor.stroke = egui::Stroke::new(2.0, self.theme.fg_primary);
 
-        visuals.override_text_color = Some(self.theme.fg_primary);
+        // Don't override text color - let individual widgets control it
+        visuals.override_text_color = None;
 
         // Unified rounding (shadcn: 6px buttons/inputs, 8px windows)
         visuals.widgets.noninteractive.rounding = egui::Rounding::same(6.0);

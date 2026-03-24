@@ -293,6 +293,10 @@ impl eframe::App for PortalApp {
                                     }
                                     ctx.data_mut(|d| d.insert_temp(more_menu_id, false));
                                 }
+                                TabBarAction::OpenSnippets => {
+                                    // Snippets drawer is part of main window, no-op in detached windows
+                                    ctx.data_mut(|d| d.insert_temp(more_menu_id, false));
+                                }
                                 TabBarAction::None | TabBarAction::ReconnectTab(_) => {}
                             }
                         });
@@ -612,102 +616,63 @@ impl eframe::App for PortalApp {
             if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && i.modifiers.shift) {
                 self.split_focused_pane(SplitDirection::Vertical);
             }
+            // Cmd+Shift+S → open snippet quick selector
+            if ctx.input(|i| i.key_pressed(egui::Key::S) && i.modifiers.command && i.modifiers.shift) {
+                self.snippet_view_state.quick_selector_open = true;
+                self.snippet_view_state.selected_snippet_index = if !self.snippets.is_empty() { Some(0) } else { None };
+            }
         }
 
         // ── Nav panel (narrow, always shown first to get full height) ──
         self.show_nav_panel(ctx);
 
-        // ── Tab Bar (only in terminal view) ──────────────────────────────────────
-        if self.current_view == AppView::Terminal {
-        egui::TopBottomPanel::top("tab_bar")
-            .frame(egui::Frame {
-                fill: self.theme.bg_secondary,
-                inner_margin: egui::Margin::symmetric(8.0, 4.0),
-                stroke: egui::Stroke::NONE,
-                ..Default::default()
-            })
-            .show(ctx, |ui| {
-                use crate::ui::views::tab_view::{tab_bar, TabBarAction};
-
-                let more_menu_id = egui::Id::new("tab_bar_more_menu");
-                let mut show_more_menu = ctx.data_mut(|d| *d.get_temp_mut_or_default::<bool>(more_menu_id));
-
-                let action = tab_bar(
-                    ui, ctx, &self.tabs, self.active_tab, &mut self.tab_drag,
-                    &self.theme, &self.language, &mut show_more_menu
-                );
-
-                // Store menu state for next frame
-                ctx.data_mut(|d| d.insert_temp(more_menu_id, show_more_menu));
-
-                // Handle tab bar actions
-                match action {
-                    TabBarAction::ActivateTab(i) => {
-                        self.active_tab = i;
-                    }
-                    TabBarAction::CloseTab(i) => {
-                        if self.tabs.len() > 1 {
-                            self.tabs.remove(i);
-                            if self.active_tab >= self.tabs.len() {
-                                self.active_tab = self.tabs.len() - 1;
-                            } else if self.active_tab > i {
-                                self.active_tab -= 1;
-                            }
+        // ── Tab Bar and Status Bar (only in terminal view) ─────────────────────
+        // Collect terminal info for status bar (used across terminal view)
+        let (conn_type, shell_label, encoding_label, uptime_label) = if self.current_view == AppView::Terminal {
+            let conn_type = self.tabs.get(self.active_tab)
+                .and_then(|tab| tab.sessions.get(tab.focused_session))
+                .map(|s| match &s.session {
+                    Some(SessionBackend::Ssh(ssh)) => {
+                        let host = s.ssh_host.as_ref()
+                            .map(|h| format!("{}@{}:{}", h.username, h.host, h.port))
+                            .unwrap_or_else(|| "SSH".to_string());
+                        match ssh.connection_state() {
+                            SshConnectionState::Connected => format!("SSH  {}", host),
+                            SshConnectionState::Connecting => format!("SSH  {} (connecting…)", host),
+                            SshConnectionState::Authenticating => format!("SSH  {} (authenticating…)", host),
+                            SshConnectionState::Disconnected(_) => format!("SSH  {} (disconnected)", host),
+                            SshConnectionState::Error(_) => format!("SSH  {}", host),
                         }
                     }
-                    TabBarAction::ReconnectTab(i) => {
-                        let si = self.tabs[i].focused_session;
-                        self.tabs[i].sessions[si].reconnect_ssh(&self.runtime, None);
+                    _ => "Local".to_string(),
+                })
+                .unwrap_or_else(|| "Local".to_string());
+
+            let shell_label = self.tabs.get(self.active_tab)
+                .and_then(|tab| tab.sessions.get(tab.focused_session))
+                .map(|s| s.shell_name())
+                .unwrap_or_else(|| "—".to_string());
+            let encoding_label = self.selected_encoding.clone();
+
+            let uptime_label = self.tabs.get(self.active_tab)
+                .and_then(|tab| tab.sessions.get(tab.focused_session))
+                .map(|s| {
+                    let elapsed = s.created_at.elapsed().as_secs();
+                    let hours = elapsed / 3600;
+                    let minutes = (elapsed % 3600) / 60;
+                    let seconds = elapsed % 60;
+                    if hours > 0 {
+                        format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+                    } else {
+                        format!("{:02}:{:02}", minutes, seconds)
                     }
-                    TabBarAction::DetachTab(i) => {
-                        self.detach_tab(i);
-                    }
-                    TabBarAction::MergeTabs { src, dst } => {
-                        let mut src_tab = self.tabs.remove(src);
-                        let dst = if src < dst { dst - 1 } else { dst };
-                        let dst_tab = &mut self.tabs[dst];
-                        let offset = dst_tab.sessions.len();
-                        src_tab.layout.offset_indices(offset);
-                        dst_tab.sessions.extend(src_tab.sessions);
-                        let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
-                        dst_tab.layout = PaneNode::Split {
-                            direction: SplitDirection::Horizontal,
-                            ratio: 0.5,
-                            first: Box::new(old_layout),
-                            second: Box::new(src_tab.layout),
-                        };
-                        if self.active_tab == src {
-                            self.active_tab = dst;
-                        } else if self.active_tab > src && self.active_tab > 0 {
-                            self.active_tab -= 1;
-                        }
-                        if self.active_tab >= self.tabs.len() {
-                            self.active_tab = self.tabs.len().saturating_sub(1);
-                        }
-                    }
-                    TabBarAction::ReorderTab { src, dst, insert_before } => {
-                        let src_tab = self.tabs.remove(src);
-                        let insert_idx = if insert_before {
-                            if src < dst { dst.saturating_sub(1) } else { dst }
-                        } else {
-                            if src < dst { dst } else { (dst + 1).min(self.tabs.len()) }
-                        };
-                        self.tabs.insert(insert_idx, src_tab);
-                        self.active_tab = insert_idx;
-                    }
-                    TabBarAction::NewTab => {
-                        self.add_tab_local();
-                    }
-                    TabBarAction::ToggleBroadcast(i) => {
-                        if let Some(tab) = self.tabs.get_mut(i) {
-                            tab.broadcast_enabled = !tab.broadcast_enabled;
-                        }
-                        ctx.data_mut(|d| d.insert_temp(more_menu_id, false));
-                    }
-                    TabBarAction::None => {}
-                }
-            });
-        } // end if Terminal tab bar
+                })
+                .unwrap_or_default();
+
+            (Some(conn_type), shell_label, encoding_label, uptime_label)
+        } else {
+            (None, String::new(), String::new(), String::new())
+        };
 
         // ── Add/Edit Host Drawer (right panel, Hosts view only, before CentralPanel) ──
         if self.current_view == AppView::Hosts && self.add_host_dialog.open {
@@ -793,124 +758,6 @@ impl eframe::App for PortalApp {
             }
         }
 
-        // ── Status Bar (bottom, terminal view only) ────────────────────────
-        if self.current_view == AppView::Terminal {
-            let conn_type = self.tabs.get(self.active_tab)
-                .and_then(|tab| tab.sessions.get(tab.focused_session))
-                .map(|s| match &s.session {
-                    Some(SessionBackend::Ssh(ssh)) => {
-                        let host = s.ssh_host.as_ref()
-                            .map(|h| format!("{}@{}:{}", h.username, h.host, h.port))
-                            .unwrap_or_else(|| "SSH".to_string());
-                        match ssh.connection_state() {
-                            SshConnectionState::Connected => format!("SSH  {}", host),
-                            SshConnectionState::Connecting => format!("SSH  {} (connecting…)", host),
-                            SshConnectionState::Authenticating => format!("SSH  {} (authenticating…)", host),
-                            SshConnectionState::Disconnected(_) => format!("SSH  {} (disconnected)", host),
-                            SshConnectionState::Error(_) => format!("SSH  {}", host),
-                        }
-                    }
-                    _ => "Local".to_string(),
-                })
-                .unwrap_or_else(|| "Local".to_string());
-
-            let is_local_session = conn_type == "Local";
-            let shell_label = self.tabs.get(self.active_tab)
-                .and_then(|tab| tab.sessions.get(tab.focused_session))
-                .map(|s| s.shell_name())
-                .unwrap_or_else(|| "—".to_string());
-            let encoding_label = self.selected_encoding.clone();
-
-            let uptime_label = self.tabs.get(self.active_tab)
-                .and_then(|tab| tab.sessions.get(tab.focused_session))
-                .map(|s| {
-                    let elapsed = s.created_at.elapsed().as_secs();
-                    let hours = elapsed / 3600;
-                    let minutes = (elapsed % 3600) / 60;
-                    let seconds = elapsed % 60;
-                    if hours > 0 {
-                        format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
-                    } else {
-                        format!("{:02}:{:02}", minutes, seconds)
-                    }
-                })
-                .unwrap_or_default();
-
-            let sep_color = self.theme.border;
-            let conn_color = if conn_type == "Local" { self.theme.green } else { self.theme.accent };
-
-            egui::TopBottomPanel::bottom("status_bar")
-                .exact_height(STATUS_BAR_HEIGHT)
-                .frame(egui::Frame {
-                    fill: self.theme.bg_secondary,
-                    inner_margin: egui::Margin::symmetric(12.0, 0.0),
-                    outer_margin: egui::Margin::symmetric(0.0, 0.0),
-                    stroke: egui::Stroke::NONE,
-                    ..Default::default()
-                })
-                .show(ctx, |ui| {
-                    ui.horizontal_centered(|ui| {
-                        ui.spacing_mut().item_spacing.x = 0.0;
-
-                        let status_btn = |ui: &mut egui::Ui, text: &str, color: egui::Color32| {
-                            ui.add(egui::Button::new(
-                                egui::RichText::new(text).color(color).size(12.0)
-                            ).frame(false).rounding(0.0).min_size(egui::vec2(0.0, 24.0)))
-                        };
-
-                        // Connection type
-                        status_btn(ui, &conn_type, conn_color);
-
-                        // Broadcast indicator
-                        let is_broadcasting = self.tabs.get(self.active_tab)
-                            .map(|t| t.broadcast_enabled)
-                            .unwrap_or(false);
-                        if is_broadcasting {
-                            ui.add_space(12.0);
-                            ui.label(egui::RichText::new("|").color(sep_color).size(12.0));
-                            ui.add_space(12.0);
-                            ui.label(egui::RichText::new(self.language.t("broadcast")).color(self.theme.accent).size(12.0));
-                        }
-
-                        // Shell
-                        ui.add_space(12.0);
-                        ui.label(egui::RichText::new("|").color(sep_color).size(12.0));
-                        ui.add_space(12.0);
-                        // Shell display (non-interactive)
-                        ui.label(egui::RichText::new(&shell_label)
-                            .color(if is_local_session { self.theme.fg_primary } else { self.theme.fg_dim })
-                            .size(12.0));
-
-                        // Encoding
-                        ui.add_space(12.0);
-                        ui.label(egui::RichText::new("|").color(sep_color).size(12.0));
-                        ui.add_space(12.0);
-                        // Encoding display (non-interactive)
-                        ui.label(egui::RichText::new(&encoding_label)
-                            .color(self.theme.fg_dim)
-                            .size(12.0));
-
-                        // Uptime
-                        if !uptime_label.is_empty() {
-                            ui.add_space(12.0);
-                            ui.label(egui::RichText::new("|").color(sep_color).size(12.0));
-                            ui.add_space(12.0);
-                            ui.label(egui::RichText::new(&uptime_label).color(self.theme.fg_dim).size(12.0));
-                        }
-
-                        // Detached window count
-                        let n = self.detached_windows.len();
-                        if n > 0 {
-                            ui.add_space(12.0);
-                            ui.label(egui::RichText::new("|").color(sep_color).size(12.0));
-                            ui.add_space(12.0);
-                            ui.label(egui::RichText::new(format!("Detached: {}", n))
-                                .color(self.theme.green).size(12.0));
-                        }
-                });
-                });
-        }
-
         // ── Poll SFTP browser ──────────────────────────────────────────────
         if let Some(ref mut browser) = self.sftp_browser {
             let had_transfer = browser.transfer.is_some();
@@ -987,6 +834,163 @@ impl eframe::App for PortalApp {
             }
         }
 
+        // ── Terminal Tab Bar (top panel, only for terminal view) ─────────────
+        if self.current_view == AppView::Terminal {
+            egui::TopBottomPanel::top("terminal_tab_bar")
+                .frame(egui::Frame {
+                    fill: self.theme.bg_secondary,
+                    inner_margin: egui::Margin::symmetric(8.0, 8.0),
+                    stroke: egui::Stroke::NONE,
+                    ..Default::default()
+                })
+                .show(ctx, |ui| {
+                    use crate::ui::views::tab_view::{tab_bar, TabBarAction};
+
+                    let more_menu_id = egui::Id::new("tab_bar_more_menu");
+                    let mut show_more_menu = ctx.data_mut(|d| *d.get_temp_mut_or_default::<bool>(more_menu_id));
+
+                    let action = tab_bar(
+                        ui, ctx, &self.tabs, self.active_tab, &mut self.tab_drag,
+                        &self.theme, &self.language, &mut show_more_menu
+                    );
+
+                    ctx.data_mut(|d| d.insert_temp(more_menu_id, show_more_menu));
+
+                    match action {
+                        TabBarAction::ActivateTab(i) => { self.active_tab = i; }
+                        TabBarAction::CloseTab(i) => {
+                            if self.tabs.len() > 1 {
+                                self.tabs.remove(i);
+                                if self.active_tab >= self.tabs.len() {
+                                    self.active_tab = self.tabs.len() - 1;
+                                } else if self.active_tab > i {
+                                    self.active_tab -= 1;
+                                }
+                            }
+                        }
+                        TabBarAction::ReconnectTab(i) => {
+                            let si = self.tabs[i].focused_session;
+                            self.tabs[i].sessions[si].reconnect_ssh(&self.runtime, None);
+                        }
+                        TabBarAction::DetachTab(i) => { self.detach_tab(i); }
+                        TabBarAction::MergeTabs { src, dst } => {
+                            let mut src_tab = self.tabs.remove(src);
+                            let dst = if src < dst { dst - 1 } else { dst };
+                            let dst_tab = &mut self.tabs[dst];
+                            let offset = dst_tab.sessions.len();
+                            src_tab.layout.offset_indices(offset);
+                            dst_tab.sessions.extend(src_tab.sessions);
+                            let old_layout = std::mem::replace(&mut dst_tab.layout, PaneNode::Terminal(0));
+                            dst_tab.layout = PaneNode::Split {
+                                direction: SplitDirection::Horizontal,
+                                ratio: 0.5,
+                                first: Box::new(old_layout),
+                                second: Box::new(src_tab.layout),
+                            };
+                            if self.active_tab == src {
+                                self.active_tab = dst;
+                            } else if self.active_tab > src && self.active_tab > 0 {
+                                self.active_tab -= 1;
+                            }
+                            if self.active_tab >= self.tabs.len() {
+                                self.active_tab = self.tabs.len().saturating_sub(1);
+                            }
+                        }
+                        TabBarAction::ReorderTab { src, dst, insert_before } => {
+                            let src_tab = self.tabs.remove(src);
+                            let insert_idx = if insert_before {
+                                if src < dst { dst.saturating_sub(1) } else { dst }
+                            } else {
+                                if src < dst { dst } else { (dst + 1).min(self.tabs.len()) }
+                            };
+                            self.tabs.insert(insert_idx, src_tab);
+                            self.active_tab = insert_idx;
+                        }
+                        TabBarAction::NewTab => { self.add_tab_local(); }
+                        TabBarAction::ToggleBroadcast(i) => {
+                            if let Some(tab) = self.tabs.get_mut(i) {
+                                tab.broadcast_enabled = !tab.broadcast_enabled;
+                            }
+                            ctx.data_mut(|d| d.insert_temp(more_menu_id, false));
+                        }
+                        TabBarAction::OpenSnippets => {
+                            self.snippet_view_state.quick_selector_open = true;
+                            self.snippet_view_state.selected_snippet_index = if !self.snippets.is_empty() { Some(0) } else { None };
+                            ctx.data_mut(|d| d.insert_temp(more_menu_id, false));
+                        }
+                        TabBarAction::None => {}
+                    }
+                });
+        }
+
+        // ── Terminal Status Bar (bottom panel, only for terminal view) ──────
+        if self.current_view == AppView::Terminal {
+            if let (Some(conn_type), _, _, _) = (&conn_type, &shell_label, &encoding_label, &uptime_label) {
+                egui::TopBottomPanel::bottom("terminal_status_bar")
+                    .frame(egui::Frame {
+                        fill: self.theme.bg_secondary,
+                        inner_margin: egui::Margin::symmetric(12.0, 8.0),
+                        stroke: egui::Stroke::NONE,
+                        ..Default::default()
+                    })
+                    .show(ctx, |ui| {
+                        ui.horizontal_centered(|ui| {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+
+                            let sep_color = self.theme.border;
+                            let is_local_session = conn_type == "Local";
+                            let conn_color = if *conn_type == "Local" { self.theme.green } else { self.theme.accent };
+
+                            let status_btn = |ui: &mut egui::Ui, text: &str, color: egui::Color32| {
+                                ui.add(egui::Button::new(
+                                    egui::RichText::new(text).color(color).size(11.0)
+                                ).frame(false).rounding(0.0).min_size(egui::vec2(0.0, 20.0)))
+                            };
+
+                            status_btn(ui, conn_type, conn_color);
+
+                            let is_broadcasting = self.tabs.get(self.active_tab)
+                                .map(|t| t.broadcast_enabled)
+                                .unwrap_or(false);
+                            if is_broadcasting {
+                                ui.add_space(8.0);
+                                ui.label(egui::RichText::new("|").color(sep_color).size(11.0));
+                                ui.add_space(8.0);
+                                ui.label(egui::RichText::new(self.language.t("broadcast")).color(self.theme.accent).size(11.0));
+                            }
+
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("|").color(sep_color).size(11.0));
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new(&shell_label)
+                                .color(if is_local_session { self.theme.fg_primary } else { self.theme.fg_dim })
+                                .size(11.0));
+
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("|").color(sep_color).size(11.0));
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new(&encoding_label).color(self.theme.fg_dim).size(11.0));
+
+                            if !uptime_label.is_empty() {
+                                ui.add_space(8.0);
+                                ui.label(egui::RichText::new("|").color(sep_color).size(11.0));
+                                ui.add_space(8.0);
+                                ui.label(egui::RichText::new(&uptime_label).color(self.theme.fg_dim).size(11.0));
+                            }
+
+                            let n = self.detached_windows.len();
+                            if n > 0 {
+                                ui.add_space(8.0);
+                                ui.label(egui::RichText::new("|").color(sep_color).size(11.0));
+                                ui.add_space(8.0);
+                                ui.label(egui::RichText::new(format!("Detached: {}", n))
+                                    .color(self.theme.green).size(11.0));
+                            }
+                        });
+                    });
+            }
+        }
+
         // ── Central Panel: Main content area ──────────────────────────
         egui::CentralPanel::default()
             .frame(egui::Frame {
@@ -998,18 +1002,15 @@ impl eframe::App for PortalApp {
             .show(ctx, |ui| {
                 match self.current_view {
                     AppView::Terminal => {
-                        // ── Terminal pane tree ──────────────────────────
+                        // ── Terminal Content (only, panels are outside) ───────
                         ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 0.0);
-                        let mut available = ui.available_rect_before_wrap();
-                        available.max.y -= 24.0;
+                        let available = ui.available_rect_before_wrap();
                         let active = self.active_tab;
                         let focused = self.tabs[active].focused_session;
                         let can_close = self.tabs.len() > 1 || self.tabs[active].sessions.len() > 1;
                         let pane_result = {
                             let tab = &mut self.tabs[active];
-                            let temp_broadcast = BroadcastState {
-                                enabled: tab.broadcast_enabled,
-                            };
+                            let temp_broadcast = BroadcastState { enabled: tab.broadcast_enabled };
                             render_pane_tree(
                                 ui, ctx,
                                 &mut tab.layout,
@@ -1081,6 +1082,11 @@ impl eframe::App for PortalApp {
                     }
                 }
             });
+
+        // ── Snippet run drawer (shown from terminal view only) ─────────────────────
+        if self.snippet_view_state.quick_selector_open && self.current_view == AppView::Terminal {
+            self.show_snippet_run_drawer(ctx);
+        }
     }
 }
 

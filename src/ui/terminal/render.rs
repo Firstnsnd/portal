@@ -1524,10 +1524,8 @@ pub fn render_pane_tree(
             } else {
                 theme.border
             };
-            let painter = ctx.layer_painter(egui::LayerId::new(
-                egui::Order::Middle,
-                egui::Id::new("divider").with(divider_id),
-            ));
+            // Use painter_at to clip to the divider's rect, preventing it from appearing in overlays
+            let painter = ui.painter_at(divider_rect);
             painter.rect_filled(divider_rect, 0.0, div_color);
 
             result

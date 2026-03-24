@@ -72,9 +72,11 @@ pub fn dialog_frame(theme: &ThemeColors) -> egui::Frame {
 /// Style a dropdown/combobox popup for consistent appearance.
 /// Sets window fill, inactive/hovered bg, selection colors.
 pub fn style_dropdown(ui: &mut egui::Ui, theme: &ThemeColors) {
-    ui.style_mut().visuals.window_fill = ui.visuals().extreme_bg_color;
-    ui.style_mut().visuals.widgets.inactive.bg_fill = theme.bg_elevated;
-    ui.style_mut().visuals.widgets.hovered.bg_fill = theme.bg_primary;
+    ui.style_mut().visuals.window_fill = theme.menu_bg;
+    ui.style_mut().visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+    ui.style_mut().visuals.widgets.hovered.bg_fill = theme.hover_bg;
+    ui.style_mut().visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, theme.fg_primary);
+    ui.style_mut().visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, theme.fg_primary);
     ui.style_mut().visuals.selection.bg_fill = theme.accent_alpha(30);
     ui.style_mut().visuals.selection.stroke = egui::Stroke::NONE;
 }

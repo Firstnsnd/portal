@@ -459,7 +459,7 @@ impl PortalApp {
                         .color(theme.red)
                         .size(FONT_SM));
                 } else {
-                    ui.label(widgets::field_label(lang.t("host"), &theme));
+                    ui.label(widgets::field_label(lang.t("tunnel_ssh_host"), &theme));
                     ui.add_space(SPACE_XS);
 
                     if self.add_tunnel_dialog.selected_host_idx.is_none() {
@@ -476,7 +476,7 @@ impl PortalApp {
                         .selected_text(egui::RichText::new(&selected_name)
                             .color(theme.fg_primary)
                             .size(FONT_MD))
-                        .width(f32::INFINITY)
+                        .width(ui.available_width())
                         .show_ui(ui, |ui| {
                             widgets::style_dropdown(ui, &self.theme);
                             for (idx, name) in &ssh_hosts {
@@ -518,38 +518,38 @@ impl PortalApp {
                 ui.add_space(SPACE_MD);
 
                 // Local host
-                ui.label(widgets::field_label(lang.t("local_host"), &theme));
+                ui.label(widgets::field_label(lang.t("tunnel_local_host"), &theme));
                 ui.add_space(SPACE_XS);
                 ui.add(egui::TextEdit::singleline(&mut self.add_tunnel_dialog.local_host)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("127.0.0.1")
+                    .desired_width(ui.available_width())
+                    .hint_text(lang.t("tunnel_local_host_placeholder"))
                     .font(egui::FontId::proportional(FONT_MD)));
                 ui.add_space(SPACE_MD);
 
                 // Local port
-                ui.label(widgets::field_label(lang.t("local_port"), &theme));
+                ui.label(widgets::field_label(lang.t("tunnel_local_port"), &theme));
                 ui.add_space(SPACE_XS);
                 ui.add(egui::TextEdit::singleline(&mut self.add_tunnel_dialog.local_port)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("8080")
+                    .desired_width(ui.available_width())
+                    .hint_text(lang.t("tunnel_local_port_placeholder"))
                     .font(egui::FontId::proportional(FONT_MD)));
                 ui.add_space(SPACE_MD);
 
                 // Remote host
-                ui.label(widgets::field_label(lang.t("remote_host"), &theme));
+                ui.label(widgets::field_label(lang.t("tunnel_remote_host"), &theme));
                 ui.add_space(SPACE_XS);
                 ui.add(egui::TextEdit::singleline(&mut self.add_tunnel_dialog.remote_host)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("localhost")
+                    .desired_width(ui.available_width())
+                    .hint_text(lang.t("tunnel_remote_host_placeholder"))
                     .font(egui::FontId::proportional(FONT_MD)));
                 ui.add_space(SPACE_MD);
 
                 // Remote port
-                ui.label(widgets::field_label(lang.t("remote_port"), &theme));
+                ui.label(widgets::field_label(lang.t("tunnel_remote_port"), &theme));
                 ui.add_space(SPACE_XS);
                 ui.add(egui::TextEdit::singleline(&mut self.add_tunnel_dialog.remote_port)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("3306")
+                    .desired_width(ui.available_width())
+                    .hint_text(lang.t("tunnel_remote_port_placeholder"))
                     .font(egui::FontId::proportional(FONT_MD)));
                 ui.add_space(SPACE_LG);
 

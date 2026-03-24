@@ -895,6 +895,7 @@ impl PortalApp {
                                     .selected_text(egui::RichText::new(&current_label).size(12.0))
                                     .width(ui.available_width() - 8.0)
                                     .show_ui(ui, |ui| {
+                                        widgets::style_dropdown(ui, &self.theme);
                                         for cred in &self.credentials {
                                             let label = format!("{} ({})", cred.name, match &cred.credential_type {
                                                 crate::config::CredentialType::Password { .. } => lang.t("password"),
@@ -1029,6 +1030,7 @@ impl PortalApp {
                             .selected_text(current_label)
                             .width(ui.available_width() - 8.0)
                             .show_ui(ui, |ui| {
+                                widgets::style_dropdown(ui, &self.theme);
                                 if ui.selectable_label(self.add_host_dialog.jump_host.is_none(), lang.t("jump_host_none")).clicked() {
                                     self.add_host_dialog.jump_host = None;
                                 }
@@ -1183,7 +1185,7 @@ impl PortalApp {
                                     ui.add_space(SPACE_SM);
                                     if ui.add(
                                         egui::Button::new(egui::RichText::new("Remove old key").color(theme.fg_primary).size(11.0))
-                                            .fill(theme.bg_secondary)
+                                            .fill(theme.button_bg)
                                             .rounding(4.0)
                                             .stroke(egui::Stroke::new(1.0, theme.red))
                                             .min_size(egui::vec2(0.0, 24.0))
