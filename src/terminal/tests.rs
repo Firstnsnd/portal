@@ -1286,3 +1286,321 @@ mod pty_cleanup_tests {
         // The original bug would have caused "out of pty devices" error
     }
 }
+
+/// VTE parsing tests for SSH ls output
+/// These tests ensure that ANSI escape sequences from ls --color=auto
+/// are correctly parsed and rendered to the terminal grid
+#[cfg(test)]
+mod vte_ls_tests {
+    use crate::terminal::{TerminalGrid, VteHandler};
+    use crate::terminal::types::CellAttrs;
+
+    /// Helper to feed VTE data (bytes) to a grid
+    fn feed_vte_data(grid: &mut TerminalGrid, data: &[u8]) {
+        let mut parser = vte::Parser::new();
+        let mut attrs = CellAttrs::default();
+        let mut handler = VteHandler {
+            grid,
+            attrs: &mut attrs,
+        };
+        for byte in data {
+            parser.advance(&mut handler, *byte);
+        }
+    }
+
+    /// Helper to get the visible content as a string (for testing)
+    fn get_visible_content(grid: &TerminalGrid) -> String {
+        let mut result = String::new();
+        for row_idx in 0..grid.rows {
+            let row = &grid.cells[row_idx];
+            // Find the range of non-space characters (trim leading and trailing spaces)
+            let first_non_space = row.iter().position(|c| c.c != ' ' && c.c != '\0');
+            let last_non_space = row.iter().rposition(|c| c.c != ' ' && c.c != '\0');
+            if let (Some(start), Some(end)) = (first_non_space, last_non_space) {
+                let line: String = row[start..=end].iter().map(|c| c.c).collect();
+                result.push_str(&line);
+                result.push('\n');
+            }
+        }
+        result
+    }
+
+    fn create_test_grid(cols: usize, rows: usize) -> TerminalGrid {
+        TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024)
+    }
+
+    #[test]
+    fn test_vte_simple_text() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Feed simple text without any ANSI codes
+        feed_vte_data(&mut grid, b"hello world");
+
+        // Check that text was rendered
+        assert_eq!(grid.cells[0][0].c, 'h');
+        assert_eq!(grid.cells[0][1].c, 'e');
+        assert_eq!(grid.cells[0][5].c, ' ');
+        assert_eq!(grid.cells[0][6].c, 'w');
+    }
+
+    #[test]
+    fn test_vte_text_with_newline() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Feed text with newline (CR+LF)
+        feed_vte_data(&mut grid, b"line1\r\nline2");
+
+        // First line should have "line1"
+        assert_eq!(grid.cells[0][0].c, 'l');
+        assert_eq!(grid.cells[0][4].c, '1');
+
+        // Second line should have "line2" at cursor_row
+        assert_eq!(grid.cells[1][0].c, 'l');
+        assert_eq!(grid.cells[1][4].c, '2');
+    }
+
+    #[test]
+    fn test_vte_basic_color_codes() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Feed text with basic ANSI color codes
+        // ESC[31m = red foreground, ESC[0m = reset
+        let data = b"\x1b[31mRed text\x1b[0m normal text";
+        feed_vte_data(&mut grid, data);
+
+        // All text should be rendered (colors don't affect character rendering)
+        // Just check that characters are present
+        assert_eq!(grid.cells[0][0].c, 'R');
+        assert_eq!(grid.cells[0][3].c, ' ');
+        assert_eq!(grid.cells[0][4].c, 't');
+
+        // "Red text " is 8 characters (including trailing space)
+        // Position 8 = space before "normal", Position 9 = 'n'
+        assert_eq!(grid.cells[0][8].c, ' ');
+        assert_eq!(grid.cells[0][9].c, 'n');
+        assert_eq!(grid.cells[0][15].c, ' ');
+    }
+
+    #[test]
+    fn test_vte_ls_output_with_colors() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Simulate ls --color=auto output with ANSI color codes
+        // ESC[0m = reset
+        // ESC[01;34m = bold blue (directory)
+        // ESC[01;32m = bold green (executable)
+        // ESC[m = reset (short form)
+        let ls_output = b"\x1b[0m\x1b[01;34mCargo.toml\x1b[0m\r\n\x1b[01;32mmain\x1b[0m\r\n";
+        feed_vte_data(&mut grid, ls_output);
+
+        // First line should have "Cargo.toml"
+        // C(0) a(1) r(2) g(3) o(4) .(5) t(6) o(7) m(8) l(9)
+        assert_eq!(grid.cells[0][0].c, 'C');
+        assert_eq!(grid.cells[0][1].c, 'a');
+        assert_eq!(grid.cells[0][8].c, 'm');
+        assert_eq!(grid.cells[0][9].c, 'l');
+
+        // Second line should have "main"
+        assert_eq!(grid.cells[1][0].c, 'm');
+        assert_eq!(grid.cells[1][1].c, 'a');
+        assert_eq!(grid.cells[1][3].c, 'n');
+    }
+
+    #[test]
+    fn test_vte_ls_output_with_directory_color() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Simulate a typical ls output with directory coloring
+        // \x1b[1;34m = bold blue for directories
+        let data = b"\x1b[0m\x1b[1;34msrc/\x1b[0m\r\n\x1b[1;34mtarget/\x1b[0m\r\n";
+        feed_vte_data(&mut grid, data);
+
+        // First line: src/
+        assert_eq!(grid.cells[0][0].c, 's');
+        assert_eq!(grid.cells[0][1].c, 'r');
+        assert_eq!(grid.cells[0][2].c, 'c');
+        assert_eq!(grid.cells[0][3].c, '/');
+
+        // Second line: target/
+        assert_eq!(grid.cells[1][0].c, 't');
+        assert_eq!(grid.cells[1][5].c, 't');
+        assert_eq!(grid.cells[1][6].c, '/');
+    }
+
+    #[test]
+    fn test_vte_complex_ls_output() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Simulate a more complex ls output with multiple file types
+        // Directory: \x1b[1;34m (bold blue)
+        // Symlink: \x1b[1;36m (bold cyan)
+        // Executable: \x1b[1;32m (bold green)
+        let data = b"\x1b[0m\x1b[1;34msrc/\x1b[0m \x1b[1;36mlink\x1b[0m -> target\r\n\x1b[1;32mbinary\x1b[0m *\r\n";
+        feed_vte_data(&mut grid, data);
+
+        // First row should contain 's', 'r', 'c', '/'
+        let found_src = grid.cells[0].iter().any(|c| c.c == 's');
+        assert!(found_src, "Should find 's' from 'src/' on first row");
+
+        // Check that we have content beyond just ANSI codes
+        let mut content_chars = 0;
+        for row in &grid.cells {
+            for cell in row {
+                if cell.c != ' ' && cell.c != '\0' {
+                    content_chars += 1;
+                }
+            }
+        }
+        assert!(content_chars > 20, "Should have rendered multiple characters, got {}", content_chars);
+    }
+
+    #[test]
+    fn test_vte_prompt_then_ls() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Simulate: prompt, user types 'ls', ls output
+        let data = b"$ ls\r\n\x1b[0mfile1.txt  file2.txt  \x1b[1;34mdir1/\x1b[0m\r\n$ ";
+        feed_vte_data(&mut grid, data);
+
+        // Check that prompt is visible
+        let content = get_visible_content(&grid);
+        assert!(content.contains("$ ls"), "Should contain the prompt");
+        assert!(content.contains("file1.txt"), "Should contain file1.txt");
+        assert!(content.contains("dir1/"), "Should contain dir1/");
+    }
+
+    #[test]
+    fn test_vte_multiple_color_sequences() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Test multiple color sequences in one line
+        // This is common in ls output with multiple colored files
+        let data = b"\x1b[1;34mdir1/\x1b[0m \x1b[1;32mscript.sh\x1b[0m \x1b[0;37mfile.txt\x1b[0m\r\n";
+        feed_vte_data(&mut grid, data);
+
+        // All three items should be present
+        let content = get_visible_content(&grid);
+        assert!(content.contains("dir1/"), "Should contain dir1/");
+        assert!(content.contains("script.sh"), "Should contain script.sh");
+        assert!(content.contains("file.txt"), "Should contain file.txt");
+    }
+
+    #[test]
+    fn test_vte_grid_cells_updated_correctly() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Feed ls output and verify exact cell contents
+        let data = b"\x1b[1;34mtest\x1b[0m\r\n";
+        feed_vte_data(&mut grid, data);
+
+        // Verify characters at specific positions
+        // "test" should be at (0,0), (0,1), (0,2), (0,3)
+        assert_eq!(grid.cells[0][0].c, 't');
+        assert_eq!(grid.cells[0][1].c, 'e');
+        assert_eq!(grid.cells[0][2].c, 's');
+        assert_eq!(grid.cells[0][3].c, 't');
+    }
+
+    #[test]
+    fn test_vte_cursor_position_after_color_codes() {
+        let mut grid = create_test_grid(80, 24);
+
+        // ANSI codes should not move cursor, only printable chars do
+        let data = b"\x1b[1;34m\x1b[0mABC";
+        feed_vte_data(&mut grid, data);
+
+        // Cursor should be after "ABC", not counting ANSI codes
+        assert_eq!(grid.cursor_col, 3);
+        assert_eq!(grid.cells[0][0].c, 'A');
+        assert_eq!(grid.cells[0][1].c, 'B');
+        assert_eq!(grid.cells[0][2].c, 'C');
+    }
+
+    /// Test that simulates the exact SSH data flow:
+    /// 1. SSH receives data from channel
+    /// 2. Data is parsed byte-by-byte via VTE
+    /// 3. Grid cells are updated
+    /// 4. Grid can be read back correctly
+    #[test]
+    fn test_ssh_ls_flow_simulation() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Simulate what SSH receives when user types 'ls' and presses Enter
+        // The data would include:
+        // - The echo of 'ls' command
+        // - CR+LF (moves to next line)
+        // - ls output with ANSI color codes
+        // - New prompt
+
+        let ssh_data = b"\x1b[?2004l\r\n\x1b[01;34mCargo.toml\x1b[0m\r\n\x1b[01;34msrc/\x1b[0m\r\n\x1b[01;32mbinary\x1b[0m\r\n$ ";
+
+        feed_vte_data(&mut grid, ssh_data);
+
+        // Verify content was rendered to grid
+        // After \r\n, cursor is at row 1, so "Cargo.toml" starts there
+        assert_eq!(grid.cells[1][0].c, 'C');
+        assert_eq!(grid.cells[1][1].c, 'a');
+        assert_eq!(grid.cells[1][9].c, 'l');
+
+        // Second row of output (row 2 after initial \r\n) should have "src/"
+        assert_eq!(grid.cells[2][0].c, 's');
+        assert_eq!(grid.cells[2][1].c, 'r');
+        assert_eq!(grid.cells[2][2].c, 'c');
+        assert_eq!(grid.cells[2][3].c, '/');
+
+        // Third row of output should have "binary"
+        assert_eq!(grid.cells[3][0].c, 'b');
+        assert_eq!(grid.cells[3][1].c, 'i');
+        assert_eq!(grid.cells[3][4].c, 'r');
+        assert_eq!(grid.cells[3][5].c, 'y');
+
+        // Fourth row should have "$ "
+        assert_eq!(grid.cells[4][0].c, '$');
+        assert_eq!(grid.cells[4][1].c, ' ');
+    }
+
+    /// Test that the grid content can be extracted correctly
+    /// This simulates what the rendering code does
+    #[test]
+    fn test_grid_content_extraction() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Write ls output
+        let ls_data = b"\x1b[1;34mdir1/\x1b[0m \x1b[1;32mscript.sh\x1b[0m\r\n";
+        feed_vte_data(&mut grid, ls_data);
+
+        // Extract content (similar to what get_visible_content does)
+        let mut content = String::new();
+        for row_idx in 0..grid.rows {
+            let row = &grid.cells[row_idx];
+            let first_non_space = row.iter().position(|c| c.c != ' ' && c.c != '\0');
+            let last_non_space = row.iter().rposition(|c| c.c != ' ' && c.c != '\0');
+            if let (Some(start), Some(end)) = (first_non_space, last_non_space) {
+                let line: String = row[start..=end].iter().map(|c| c.c).collect();
+                content.push_str(&line);
+                content.push('\n');
+            }
+        }
+
+        // Verify extracted content contains the expected items
+        assert!(content.contains("dir1/"), "Should contain dir1/");
+        assert!(content.contains("script.sh"), "Should contain script.sh");
+    }
+
+    /// Test multiple file outputs with colors
+    #[test]
+    fn test_vte_ls_multiple_files() {
+        let mut grid = create_test_grid(80, 24);
+
+        // Simulate ls output with many files
+        let data = b"\x1b[0m\x1b[1;34mconfig/\x1b[0m \x1b[1;34msrc/\x1b[0m \x1b[0mREADME.md \x1b[1;32mmain\x1b[0m\r\n";
+        feed_vte_data(&mut grid, data);
+
+        // Extract and verify all items are present
+        let content = get_visible_content(&grid);
+        assert!(content.contains("config/"), "Should contain config/");
+        assert!(content.contains("src/"), "Should contain src/");
+        assert!(content.contains("README.md"), "Should contain README.md");
+        assert!(content.contains("main"), "Should contain main");
+    }
+}
