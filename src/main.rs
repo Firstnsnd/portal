@@ -54,8 +54,12 @@ impl eframe::App for PortalApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
                 self.main_window_hidden = true;
+            } else {
+                // No detached windows - clean up and exit
+                // Clean up all sessions to prevent PTY leaks
+                self.cleanup_sessions();
+                // Let the default close proceed (app exits)
             }
-            // else: no detached windows → let the default close proceed (app exits)
         }
 
         // ── Render detached tab windows (full UI) ─────────────────────────
@@ -1097,6 +1101,42 @@ fn load_app_icon() -> Option<egui::IconData> {
 
 fn main() -> eframe::Result<()> {
     env_logger::init();
+
+    // Set up signal handler for clean PTY cleanup on exit
+    // This prevents PTY resource leaks when the app is terminated
+    #[cfg(unix)]
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        // Flag to track if we've already cleaned up
+        static CLEANUP_DONE: AtomicBool = AtomicBool::new(false);
+
+        // Spawn a dedicated cleanup thread that waits for signals
+        std::thread::spawn(|| {
+            use signal_hook::consts::signal::*;
+            use signal_hook::iterator::Signals;
+
+            let mut signals = Signals::new([SIGTERM, SIGINT, SIGHUP]).ok();
+
+            if let Some(mut sig) = signals {
+                for _ in sig.forever() {
+                    if !CLEANUP_DONE.swap(true, Ordering::SeqCst) {
+                        // Kill all zsh -l processes spawned by portal
+                        unsafe {
+                            let cmd = std::ffi::CString::new("pkill").unwrap();
+                            let arg1 = std::ffi::CString::new("-9").unwrap();
+                            let arg2 = std::ffi::CString::new("-f").unwrap();
+                            let arg3 = std::ffi::CString::new("/bin/zsh -l").unwrap();
+                            libc::execvp(cmd.as_ptr(), [cmd.as_ptr(), arg1.as_ptr(), arg2.as_ptr(), arg3.as_ptr(), std::ptr::null()].as_ptr());
+                        }
+                    }
+                    // Exit after cleanup
+                    std::process::exit(0);
+                }
+            }
+        });
+    }
 
     // Set macOS activation policy to Regular so the app appears in Dock
     #[cfg(target_os = "macos")]

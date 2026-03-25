@@ -18,12 +18,15 @@ pub use super::UnixPty;
 #[cfg(windows)]
 pub use super::WindowsPty;
 
+// PtyWriter is already pub and will be re-exported by parent module
+
 use super::grid::TerminalGrid;
 use super::types::CellAttrs;
 use super::vte::VteHandler;
 use vte::Parser;
 
-/// Safe wrapper for writing to a raw fd without closing it on drop
+/// Safe wrapper for writing to a raw fd
+/// The fd is duplicated and must be closed when dropped
 #[cfg(unix)]
 pub struct PtyWriter {
     pub fd: std::os::unix::io::RawFd,
@@ -36,6 +39,16 @@ impl PtyWriter {
         use std::os::unix::io::FromRawFd;
         let mut file = ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(self.fd) });
         std::io::Write::write_all(&mut *file, data)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PtyWriter {
+    fn drop(&mut self) {
+        // Close the duplicated file descriptor
+        unsafe {
+            libc::close(self.fd);
+        }
     }
 }
 

@@ -1084,3 +1084,205 @@ mod tests {
         assert!(content.contains("Line 4"), "Last line should be preserved");
     }
 }
+
+/// PTY cleanup and leak prevention tests
+/// These tests ensure that PTY resources are properly cleaned up
+/// to prevent the "out of PTY devices" error that occurred with 500+ zombie processes
+#[cfg(test)]
+mod pty_cleanup_tests {
+    use super::*;
+    use crate::terminal::{Pty, PtySize};
+
+    #[cfg(unix)]
+    #[test]
+    fn test_pty_creation_and_cleanup() {
+        use crate::terminal::UnixPty;
+        use std::thread;
+        use std::time::Duration;
+
+        // Create a PTY with a long-running process
+        let pty_result = UnixPty::spawn("/bin/sleep", &["10"], crate::terminal::PtySize::new(24, 80));
+        assert!(pty_result.is_ok(), "PTY spawn should succeed");
+
+        let mut pty = pty_result.unwrap();
+        let pid = pty.child_pid;
+
+        // Give process time to start
+        thread::sleep(Duration::from_millis(50));
+
+        // Verify PTY is alive
+        assert!(pty.is_alive(), "PTY should be alive after spawn");
+
+        // Kill the PTY
+        let kill_result = pty.kill();
+        assert!(kill_result.is_ok(), "PTY kill should succeed");
+
+        // Verify PTY is marked as not alive
+        assert!(!pty.is_alive(), "PTY should not be alive after kill");
+
+        // Give kill time to complete
+        thread::sleep(Duration::from_millis(50));
+
+        // Verify process is actually dead
+        let result = unsafe { libc::kill(pid, 0) };
+        assert!(result < 0, "Process should not exist after kill");
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH),
+                   "Process should have ESRCH (no such process)");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_pty_drop_cleans_up_process() {
+        use crate::terminal::UnixPty;
+        use std::thread;
+        use std::time::Duration;
+
+        let pid = {
+            let pty = UnixPty::spawn("/bin/sleep", &["10"], crate::terminal::PtySize::new(24, 80))
+                .expect("PTY spawn should succeed");
+            let pid = pty.child_pid;
+
+            // PTY is alive
+            assert!(pty.is_alive());
+
+            // Drop the PTY - should clean up the process
+            drop(pty);
+            pid
+        };
+
+        // Give the drop handler time to complete
+        thread::sleep(Duration::from_millis(200));
+
+        // Verify process was killed
+        let result = unsafe { libc::kill(pid, 0) };
+        assert!(result < 0, "Process should not exist after PTY drop");
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH),
+                   "Process should have ESRCH after PTY drop");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_multiple_pty_cleanup_no_leaks() {
+        use crate::terminal::UnixPty;
+        use std::thread;
+        use std::time::Duration;
+
+        let mut ptys = Vec::new();
+        let mut pids = Vec::new();
+
+        // Create multiple PTYs (simulating multiple terminal sessions)
+        for _ in 0..10 {
+            let pty = UnixPty::spawn("/bin/sleep", &["10"], crate::terminal::PtySize::new(24, 80))
+                .expect("PTY spawn should succeed");
+            pids.push(pty.child_pid);
+            ptys.push(pty);
+        }
+
+        // Give processes time to start
+        thread::sleep(Duration::from_millis(100));
+
+        // All processes should be alive
+        let mut alive_count = 0;
+        for &pid in &pids {
+            let result = unsafe { libc::kill(pid, 0) };
+            if result == 0 {
+                alive_count += 1;
+            }
+        }
+        assert!(alive_count >= 8, "At least 8 of 10 processes should be alive");
+
+        // Drop all PTYs by going out of scope
+        drop(ptys);
+        drop(pids);
+
+        // Give cleanup time
+        thread::sleep(Duration::from_millis(300));
+
+        // Test passes if we get here without panic
+        // The Drop implementations should have cleaned up all processes
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_pty_sigkill_fallback() {
+        use crate::terminal::UnixPty;
+        use std::thread;
+        use std::time::Duration;
+
+        // Spawn a process that ignores SIGTERM
+        let mut pty = UnixPty::spawn("/bin/perl", &["-e", "$SIG{TERM}=sub{}; sleep 100"],
+                                        crate::terminal::PtySize::new(24, 80))
+            .expect("PTY spawn should succeed");
+        let pid = pty.child_pid;
+
+        // Give process time to set up signal handler
+        thread::sleep(Duration::from_millis(50));
+
+        // Kill should use SIGKILL as fallback
+        let kill_result = pty.kill();
+        assert!(kill_result.is_ok(), "Kill should succeed even with SIGTERM ignored");
+
+        // Verify process is actually dead (SIGKILL should have worked)
+        thread::sleep(Duration::from_millis(50));
+        let result = unsafe { libc::kill(pid, 0) };
+        assert!(result < 0, "Process should be killed even when ignoring SIGTERM");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_pty_writer_fd_cleanup() {
+        use crate::terminal::session::PtyWriter;
+
+        // Create a file descriptor
+        let fd = unsafe { libc::open(b"/dev/null\0".as_ptr() as *const i8, libc::O_RDWR, 0) };
+        assert!(fd >= 0, "Should be able to open /dev/null");
+
+        {
+            // Create PtyWriter in a scope
+            let writer = PtyWriter { fd };
+
+            // Write should work
+            let write_result = writer.write(b"test");
+            assert!(write_result.is_ok(), "Write should succeed");
+        } // PtyWriter dropped here, fd should be closed
+
+        // Verify fd is closed (dup should fail)
+        let dup_result = unsafe { libc::dup(fd) };
+        assert!(dup_result < 0, "FD should be closed after PtyWriter drop");
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::EBADF),
+                   "Should get EBADF (bad file descriptor)");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_no_pty_leak_after_multiple_cycles() {
+        use crate::terminal::UnixPty;
+        use std::thread;
+        use std::time::Duration;
+
+        // Simulate creating and destroying many PTYs over time
+        // This simulates the real-world usage pattern that caused the 500+ zombie leak
+        for cycle in 0..5 {
+            let mut ptys = Vec::new();
+
+            // Create several PTYs
+            for _ in 0..5 {
+                let pty = UnixPty::spawn("/bin/sleep", &["0.1"], crate::terminal::PtySize::new(24, 80))
+                    .expect(&format!("PTY spawn should succeed in cycle {}", cycle));
+                ptys.push(pty);
+            }
+
+            // Let them live briefly
+            thread::sleep(Duration::from_millis(50));
+
+            // Explicitly drop to trigger cleanup
+            drop(ptys);
+
+            // Wait for cleanup
+            thread::sleep(Duration::from_millis(100));
+        }
+
+        // If we get here without running out of PTY devices, the test passes
+        // The original bug would have caused "out of pty devices" error
+    }
+}

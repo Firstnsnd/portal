@@ -373,3 +373,13 @@ impl TerminalSession {
         }
     }
 }
+
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        // Explicitly drop the session to ensure PTY is cleaned up
+        // This prevents PTY resource leaks when the app exits
+        if let Some(session) = self.session.take() {
+            drop(session);
+        }
+    }
+}

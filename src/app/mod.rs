@@ -218,4 +218,31 @@ impl PortalApp {
             snippet_view_state: SnippetViewState::default(),
         }
     }
+
+    /// Clean up all terminal sessions on exit to prevent PTY leaks
+    /// This is critical because PTY devices are limited system resources
+    pub fn cleanup_sessions(&mut self) {
+        // Clean up main window tabs
+        for tab in &mut self.tabs {
+            for session in &mut tab.sessions {
+                session.session = None;
+            }
+        }
+
+        // Clean up detached windows
+        for window in &mut self.detached_windows {
+            for tab in &mut window.tabs {
+                for session in &mut tab.sessions {
+                    session.session = None;
+                }
+            }
+        }
+    }
+}
+
+impl Drop for PortalApp {
+    fn drop(&mut self) {
+        // Ensure all PTY sessions are properly cleaned up
+        self.cleanup_sessions();
+    }
 }
