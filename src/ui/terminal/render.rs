@@ -407,6 +407,7 @@ pub fn render_terminal_session(
         }
 
         let mut ime_committed = false;
+        let mut text_event_processed = false;
         let has_ime_events = events.iter().any(|e| matches!(e, egui::Event::Ime(_)));
 
         let has_non_ascii_text = events.iter().any(|e| {
@@ -461,16 +462,13 @@ pub fn render_terminal_session(
             for event in &events {
                 match event {
                     egui::Event::Text(text) => {
-                        // Skip Text events if IME committed text in this frame (prevents duplicates)
-                        // On macOS, IME Commit and Text events arrive together for the same input
-                        if ime_committed {
-                            continue;
-                        }
-                        // Also skip if there are IME events in the current frame
-                        if has_ime_events {
-                            continue;
-                        }
-                        if *ime_composing {
+                        // Mark that we received a Text event (even if we skip it due to IME)
+                        // This prevents Key events from sending duplicate characters
+                        text_event_processed = true;
+
+                        // Skip Text events if IME is composing or if IME committed in this frame
+                        // This prevents duplicate input when both IME and Text events fire
+                        if *ime_composing || ime_committed {
                             continue;
                         }
                         if session.last_non_ascii_input {
@@ -493,6 +491,7 @@ pub fn render_terminal_session(
                             if !safe_text.is_empty() {
                                 session.write(&safe_text);
                                 input_bytes.extend_from_slice(safe_text.as_bytes());
+                                text_event_processed = true;
                             }
                             session.last_non_ascii_input = true;
                         } else {
@@ -505,6 +504,7 @@ pub fn render_terminal_session(
                             if !safe_text.is_empty() {
                                 session.write(&safe_text);
                                 input_bytes.extend_from_slice(safe_text.as_bytes());
+                                text_event_processed = true;
                             }
                             // Update flag: regular ASCII text means we're no longer in IME mode
                             if !is_punct {
@@ -602,7 +602,9 @@ pub fn render_terminal_session(
                             };
                             if special {
                                 session.selection.clear();
-                            } else if !*ime_composing && !ime_committed {
+                            } else if !*ime_composing && !ime_committed && !text_event_processed {
+                                // Skip character input from Key events if we already processed Text events
+                                // This prevents duplicate input on macOS where both events fire
                                 if let Some(ch) = key_to_char(key, modifiers.shift) {
                                     let is_ime_punct = is_chinese_ime_punct(ch);
                                     if is_ime_punct && (session.last_non_ascii_input || has_non_ascii_text) {
