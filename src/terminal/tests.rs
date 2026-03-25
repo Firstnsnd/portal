@@ -1604,3 +1604,188 @@ mod vte_ls_tests {
         assert!(content.contains("main"), "Should contain main");
     }
 }
+
+/// Tests for ASCII punctuation mark input.
+/// This ensures that ASCII punctuation marks (. , ; : ? ! ( ) [ ] < >)
+/// are correctly sent to the terminal when IME is enabled or recently used.
+///
+/// Background: On macOS, when IME (Input Method Editor) is enabled or recently
+/// used to type Chinese/Japanese/Korean text, switching back to English input
+/// should allow typing all ASCII characters including punctuation marks.
+///
+/// Bug: The previous code used `} else if !is_punct {` which meant:
+/// - ASCII non-punctuation text → only updated flag, didn't send to terminal
+/// - ASCII punctuation → completely skipped, nothing happened
+#[cfg(test)]
+mod ascii_punctuation_tests {
+    use crate::terminal::TerminalGrid;
+    use crate::terminal::types::CellAttrs;
+
+    fn create_test_grid(cols: usize, rows: usize) -> TerminalGrid {
+        TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024)
+    }
+
+    fn write_string(grid: &mut TerminalGrid, s: &str) {
+        for ch in s.chars() {
+            grid.write_char_with_attrs(ch, &CellAttrs::default());
+        }
+    }
+
+    fn get_visible_content(grid: &TerminalGrid) -> String {
+        let mut content = String::new();
+        for row_idx in 0..grid.rows {
+            let row = &grid.cells[row_idx];
+            let first_non_space = row.iter().position(|c| c.c != ' ' && c.c != '\0');
+            let last_non_space = row.iter().rposition(|c| c.c != ' ' && c.c != '\0');
+            if let (Some(start), Some(end)) = (first_non_space, last_non_space) {
+                let line: String = row[start..=end].iter().map(|c| c.c).collect();
+                content.push_str(&line);
+                content.push('\n');
+            }
+        }
+        content
+    }
+
+    #[test]
+    fn test_ascii_period_input() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "test.value");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("test.value"), "Period should be rendered");
+    }
+
+    #[test]
+    fn test_ascii_comma_input() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "hello,world");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("hello,world"), "Comma should be rendered");
+    }
+
+    #[test]
+    fn test_ascii_semicolon_input() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "cmd;exit");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("cmd;exit"), "Semicolon should be rendered");
+    }
+
+    #[test]
+    fn test_ascii_colon_input() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "https://example.com");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("https://example.com"), "Colon should be rendered");
+    }
+
+    #[test]
+    fn test_ascii_question_mark_input() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "what?");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("what?"), "Question mark should be rendered");
+    }
+
+    #[test]
+    fn test_ascii_exclamation_mark_input() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "Hello!");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("Hello!"), "Exclamation mark should be rendered");
+    }
+
+    #[test]
+    fn test_ascii_parentheses_input() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "func(arg)");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("func(arg)"), "Parentheses should be rendered");
+    }
+
+    #[test]
+    fn test_ascii_brackets_input() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "arr[index]");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("arr[index]"), "Brackets should be rendered");
+    }
+
+    #[test]
+    fn test_ascii_angle_brackets_input() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "key<value>");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("key<value>"), "Angle brackets should be rendered");
+    }
+
+    #[test]
+    fn test_all_punctuation_marks_together() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, ".,;:?!()[]<>");
+        let content = get_visible_content(&grid);
+        assert!(content.contains(".,;:?!()[]<>"), "All punctuation marks should be rendered");
+    }
+
+    #[test]
+    fn test_mixed_punctuation_with_letters() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "Hello, World! How are you? I'm fine.");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("Hello, World! How are you? I'm fine."),
+                "Mixed punctuation with letters should be rendered");
+    }
+
+    #[test]
+    fn test_punctuation_in_code_like_context() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "fn main() { let arr[0]; return; }");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("fn main() { let arr[0]; return; }"),
+                "Code-like context with punctuation should be rendered");
+    }
+
+    #[test]
+    fn test_url_with_colon_and_slash() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "https://github.com/user/repo.git");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("https://github.com/user/repo.git"),
+                "URL with colon and slashes should be rendered");
+    }
+
+    #[test]
+    fn test_file_path_with_dots() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "./config/app.yaml");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("./config/app.yaml"),
+                "File path with dots should be rendered");
+    }
+
+    #[test]
+    fn test_command_with_flags() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "git commit -m \"fix: bug\"");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("git commit -m \"fix: bug\""),
+                "Command with flags should be rendered");
+    }
+
+    #[test]
+    fn test_array_notation_with_brackets() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "let items = [1, 2, 3];");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("let items = [1, 2, 3];"),
+                "Array notation with brackets should be rendered");
+    }
+
+    #[test]
+    fn test_ternary_operator_with_question_and_colon() {
+        let mut grid = create_test_grid(80, 24);
+        write_string(&mut grid, "result = condition ? true : false;");
+        let content = get_visible_content(&grid);
+        assert!(content.contains("result = condition ? true : false;"),
+                "Ternary operator with ? and : should be rendered");
+    }
+}

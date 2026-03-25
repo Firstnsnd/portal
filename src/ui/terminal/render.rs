@@ -479,6 +479,7 @@ pub fn render_terminal_session(
                             text.chars().next().map(|c| is_chinese_ime_punct(c)).unwrap_or(false);
 
                         if !text.chars().all(|c| c.is_ascii()) {
+                            // Non-ASCII text (Chinese, Japanese, Korean, etc.)
                             session.selection.clear();
                             let safe_text: String = text.chars()
                                 .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
@@ -488,8 +489,21 @@ pub fn render_terminal_session(
                                 input_bytes.extend_from_slice(safe_text.as_bytes());
                             }
                             session.last_non_ascii_input = true;
-                        } else if !is_punct {
-                            session.last_non_ascii_input = false;
+                        } else {
+                            // ASCII text (letters, numbers, symbols, spaces, punctuation)
+                            // Send to terminal and update the last_non_ascii_input flag
+                            session.selection.clear();
+                            let safe_text: String = text.chars()
+                                .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
+                                .collect();
+                            if !safe_text.is_empty() {
+                                session.write(&safe_text);
+                                input_bytes.extend_from_slice(safe_text.as_bytes());
+                            }
+                            // Update flag: regular ASCII text means we're no longer in IME mode
+                            if !is_punct {
+                                session.last_non_ascii_input = false;
+                            }
                         }
                     }
                     egui::Event::Key { key, pressed: true, modifiers, .. } => {
