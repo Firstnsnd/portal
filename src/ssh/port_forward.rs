@@ -22,6 +22,8 @@ pub enum ForwardState {
 pub struct PortForward {
     pub config: PortForwardConfig,
     pub state: Arc<std::sync::Mutex<ForwardState>>,
+    /// Allocated port for remote forwards (returned by tcpip_forward)
+    pub allocated_port: Arc<std::sync::Mutex<Option<u32>>>,
     cancel_tx: watch::Sender<bool>,
 }
 
@@ -31,6 +33,7 @@ impl PortForward {
         let pf = Self {
             config,
             state: Arc::new(std::sync::Mutex::new(ForwardState::Starting)),
+            allocated_port: Arc::new(std::sync::Mutex::new(None)),
             cancel_tx,
         };
         (pf, cancel_rx)
@@ -83,12 +86,13 @@ pub async fn start_local_forward(
     let remote_host = config.remote_host.clone();
     let remote_port = config.remote_port as u32;
 
-    loop {
+    // Main accept loop with explicit return type
+    let result: Result<(), ()> = loop {
         tokio::select! {
             _ = cancel_rx.changed() => {
                 if *cancel_rx.borrow() {
                     log::info!("Local forward {} stopped by cancellation", bind_addr);
-                    break;
+                    break Ok(());
                 }
             }
             result = listener.accept() => {
@@ -110,16 +114,26 @@ pub async fn start_local_forward(
                     }
                     Err(e) => {
                         log::warn!("Local forward accept error: {}", e);
+                        // Continue accepting on error
                     }
                 }
             }
         }
-    }
+    };
+
+    // Listener is dropped here, which closes the TCP socket
+    drop(listener);
 
     if let Ok(mut s) = state.lock() {
         if *s == ForwardState::Active {
             *s = ForwardState::Stopped;
         }
+    }
+
+    // Log completion
+    match result {
+        Ok(_) => log::info!("Local forward {} completed", bind_addr),
+        Err(_) => {} // Already logged above
     }
 }
 

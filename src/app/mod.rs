@@ -2,20 +2,24 @@
 //!
 //! This module contains the main application structure and core logic.
 
+#![allow(unexpected_cfgs)]
+
 mod tab_management;
 
 use crate::config::{HostEntry, Credential, ConnectionRecord, ShortcutAction, Snippet};
 use crate::sftp::{LocalBrowser, SftpBrowser};
 use crate::ui::types::{
-    BatchExecutionState, HostFilter, CredentialDialog, AddHostDialog, AddTunnelDialog,
-    AppView, SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog,
-    SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog,
-    KeychainDeleteRequest, TerminalSession, SnippetViewState,
+    dialogs::{
+        HostFilter, CredentialDialog, AddHostDialog, AddTunnelDialog,
+        AppView, KeychainDeleteRequest, SnippetViewState,
+    },
+    session::TerminalSession,
+    sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog,
+        SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog},
 };
 use crate::ui::pane::{Tab, DetachedWindow, TabDragState};
 use crate::ui::input::ShortcutResolver;
-use crate::ui::{ThemeColors, ThemePreset, Language};
-use eframe::egui;
+use crate::ui::{ThemeColors, ThemePreset, Language, fonts};
 use std::path::PathBuf;
 
 #[cfg(target_os = "macos")]
@@ -70,8 +74,6 @@ pub struct PortalApp {
     // Broadcast state
     #[allow(dead_code)]
     pub broadcast_state: crate::ui::types::BroadcastState,
-    // Batch execution state
-    pub batch_execution: BatchExecutionState,
     // Keychain
     pub keychain_confirm_delete: Option<KeychainDeleteRequest>,
     pub credential_dialog: CredentialDialog,
@@ -124,60 +126,8 @@ impl PortalApp {
         let theme_preset = ThemePreset::TokyoNight;
         let theme = theme_preset.colors();
 
-        let mut fonts = egui::FontDefinitions::default();
-
-        // Load custom font if specified
-        if !custom_font_path.is_empty() {
-            if let Ok(font_data) = std::fs::read(&custom_font_path) {
-                fonts.font_data.insert(
-                    "CustomFont".to_owned(),
-                    egui::FontData::from_owned(font_data),
-                );
-                fonts.families
-                    .entry(egui::FontFamily::Monospace)
-                    .or_insert_with(Vec::new)
-                    .insert(0, "CustomFont".to_owned());
-            }
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            if let Ok(font_data) = std::fs::read("/System/Library/Fonts/Monaco.dfont") {
-                fonts.font_data.insert(
-                    "Monaco".to_owned(),
-                    egui::FontData::from_owned(font_data),
-                );
-                fonts.families
-                    .entry(egui::FontFamily::Monospace)
-                    .or_insert_with(Vec::new)
-                    .push("Monaco".to_owned());
-            }
-
-            // CJK fallback font for Chinese/Japanese/Korean characters
-            let cjk_paths = [
-                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-                "/System/Library/Fonts/STHeiti Medium.ttc",
-                "/System/Library/Fonts/Hiragino Sans GB.ttc",
-            ];
-            for path in &cjk_paths {
-                if let Ok(font_data) = std::fs::read(path) {
-                    fonts.font_data.insert(
-                        "CJK".to_owned(),
-                        egui::FontData::from_owned(font_data),
-                    );
-                    fonts.families
-                        .entry(egui::FontFamily::Monospace)
-                        .or_insert_with(Vec::new)
-                        .push("CJK".to_owned());
-                    fonts.families
-                        .entry(egui::FontFamily::Proportional)
-                        .or_insert_with(Vec::new)
-                        .push("CJK".to_owned());
-                    break;
-                }
-            }
-        }
-
+        // Load fonts using shared utility
+        let fonts = fonts::load_fonts(&custom_font_path);
         cc.egui_ctx.set_fonts(fonts);
 
         // Visuals will be applied on the first frame via visuals_dirty flag,
@@ -249,7 +199,6 @@ impl PortalApp {
             next_viewport_id: 0,
             main_window_hidden: false,
             broadcast_state: crate::ui::types::BroadcastState::default(),
-            batch_execution: BatchExecutionState::default(),
             keychain_confirm_delete: None,
             credential_dialog: CredentialDialog::default(),
             add_tunnel_dialog: AddTunnelDialog::default(),
@@ -268,5 +217,32 @@ impl PortalApp {
             snippets,
             snippet_view_state: SnippetViewState::default(),
         }
+    }
+
+    /// Clean up all terminal sessions on exit to prevent PTY leaks
+    /// This is critical because PTY devices are limited system resources
+    pub fn cleanup_sessions(&mut self) {
+        // Clean up main window tabs
+        for tab in &mut self.tabs {
+            for session in &mut tab.sessions {
+                session.session = None;
+            }
+        }
+
+        // Clean up detached windows
+        for window in &mut self.detached_windows {
+            for tab in &mut window.tabs {
+                for session in &mut tab.sessions {
+                    session.session = None;
+                }
+            }
+        }
+    }
+}
+
+impl Drop for PortalApp {
+    fn drop(&mut self) {
+        // Ensure all PTY sessions are properly cleaned up
+        self.cleanup_sessions();
     }
 }

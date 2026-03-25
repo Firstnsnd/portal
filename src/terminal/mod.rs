@@ -1,5 +1,9 @@
 //! Terminal PTY abstraction layer
 
+mod color;
+mod types;
+mod grid;
+mod vte;
 mod session;
 
 #[cfg(unix)]
@@ -7,7 +11,12 @@ mod unix_pty;
 #[cfg(windows)]
 mod windows_pty;
 
-pub use session::{TerminalCell, TerminalGrid, CellAttrs, VteHandler, RealPtySession, DEFAULT_BG};
+// Re-export core types for external use
+pub use color::DEFAULT_BG;
+pub use grid::TerminalGrid;
+pub use types::{TerminalCell, CellAttrs};
+pub use vte::VteHandler;
+pub use session::RealPtySession;
 
 // PTY abstraction types
 use std::process::ExitStatus;
@@ -98,3 +107,8 @@ pub use unix_pty::UnixPty;
 
 #[cfg(windows)]
 pub use windows_pty::WindowsPty;
+
+#[cfg(test)]
+mod tests {
+    include!("tests.rs");
+}

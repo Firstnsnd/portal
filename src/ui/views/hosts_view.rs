@@ -1,119 +1,27 @@
 use eframe::egui;
-use egui::Widget;
 use std::sync::{Arc, Mutex};
 
 use crate::app::PortalApp;
 use crate::config::HostEntry;
 use crate::ssh::test_connection;
-use crate::ui::types::{AuthMethodChoice, TestConnState, AppView, KeySourceChoice, BatchTarget, BatchStatus, BatchResult, BatchUpdate};
+use crate::ui::types::dialogs::{AuthMethodChoice, TestConnState, KeySourceChoice, CredentialMode};
 use crate::ui::i18n::format_time_ago;
 use crate::ui::tokens::*;
+use crate::ui::views::nav_panel;
 use crate::ui::widgets;
 
 impl PortalApp {
     /// Navigation strip on the left (always visible)
     pub fn show_nav_panel(&mut self, ctx: &egui::Context) {
-        let theme = self.theme.clone();
-        let language = self.language;
-        let nav_width = (ctx.screen_rect().width() * 0.14).min(200.0).max(150.0);
-        egui::SidePanel::left("nav")
-            .exact_width(nav_width)
-            .resizable(false)
-            .frame(egui::Frame {
-                fill: theme.bg_secondary,
-                inner_margin: egui::Margin::same(0.0),
-                stroke: egui::Stroke::NONE,
-                ..Default::default()
-            })
-            .show(ctx, |ui| {
-                ui.add_space(32.0);
-
-                let nav_btn = |ui: &mut egui::Ui, icon: &str, label: &str, active: bool| -> bool {
-                    let width = ui.available_width();
-                    let (rect, resp) = ui.allocate_exact_size(
-                        egui::vec2(width, 42.0),
-                        egui::Sense::click(),
-                    );
-                    let bg = if active {
-                        theme.accent_alpha(45)
-                    } else if resp.hovered() {
-                        theme.hover_bg
-                    } else {
-                        egui::Color32::TRANSPARENT
-                    };
-                    let shadow_color = if active {
-                        theme.accent_alpha(80)
-                    } else if resp.hovered() {
-                        theme.hover_shadow
-                    } else {
-                        egui::Color32::TRANSPARENT
-                    };
-                    ui.painter().rect_filled(
-                        egui::Rect::from_min_max(
-                            egui::pos2(rect.min.x, rect.max.y - 1.0),
-                            rect.max,
-                        ),
-                        0.0,
-                        shadow_color,
-                    );
-                    ui.painter().rect_filled(rect, 0.0, bg);
-                    if active {
-                        ui.painter().rect_filled(
-                            egui::Rect::from_min_max(rect.min, egui::pos2(rect.min.x + 3.0, rect.max.y)),
-                            egui::Rounding { nw: 0.0, ne: 2.0, sw: 0.0, se: 2.0 },
-                            theme.accent,
-                        );
-                    }
-                    let color = if active { theme.fg_primary } else if resp.hovered() { theme.fg_primary } else { theme.fg_dim };
-                    ui.painter().text(
-                        egui::pos2(rect.min.x + 16.0, rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        format!("{}  {}", icon, label),
-                        egui::FontId::proportional(14.0),
-                        color,
-                    );
-                    resp.clicked()
-                };
-
-                if nav_btn(ui, "☰", language.t("hosts"), self.current_view == AppView::Hosts) {
-                    self.current_view = AppView::Hosts;
-                }
-                if nav_btn(ui, ">_", language.t("terminal"), self.current_view == AppView::Terminal) {
-                    self.current_view = AppView::Terminal;
-                }
-                if nav_btn(ui, "\u{2195}", language.t("sftp"), self.current_view == AppView::Sftp) {
-                    self.current_view = AppView::Sftp;
-                }
-                // if nav_btn(ui, "⚡", "批量执行", self.current_view == AppView::Batch) {
-                //     self.current_view = AppView::Batch;
-                // }
-                if nav_btn(ui, "\u{1f511}", language.t("keychain"), self.current_view == AppView::Keychain) {
-                    self.current_view = AppView::Keychain;
-                }
-                if nav_btn(ui, "\u{2318}", language.t("snippets"), self.current_view == AppView::Snippets) {
-                    self.current_view = AppView::Snippets;
-                }
-                if nav_btn(ui, "\u{1f310}", language.t("tunnels"), self.current_view == AppView::Tunnels) {
-                    self.current_view = AppView::Tunnels;
-                }
-
-                // Settings button at bottom - fill remaining space to reach window bottom
-                let available_size = ui.available_size();
-                egui::Frame::none()
-                    .fill(theme.bg_secondary)
-                    .show(ui, |ui| {
-                        ui.allocate_ui_with_layout(
-                            available_size,
-                            egui::Layout::bottom_up(egui::Align::LEFT),
-                            |ui| {
-                                ui.add_space(8.0);
-                                if nav_btn(ui, "⚙", language.t("settings"), self.current_view == AppView::Settings) {
-                                    self.current_view = AppView::Settings;
-                                }
-                            },
-                        );
-                    });
-            });
+        if let Some(clicked_view) = nav_panel::show_nav_panel(
+            ctx,
+            self.current_view,
+            &self.theme,
+            &self.language,
+            None,
+        ) {
+            self.current_view = clicked_view;
+        }
     }
 
     /// Full hosts page content (used by both main and detached windows)
@@ -147,22 +55,25 @@ impl PortalApp {
         egui::TopBottomPanel::top("hosts_nav_bar")
             .frame(egui::Frame {
                 fill: self.theme.bg_secondary,
-                inner_margin: egui::Margin::symmetric(16.0, 8.0),
+                inner_margin: egui::Margin::symmetric(8.0, 4.0),
                 stroke: egui::Stroke::NONE,
                 ..Default::default()
             })
             .show(ctx, |ui| {
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     // Left side: Hosts title
-                    ui.label(egui::RichText::new(self.language.t("hosts")).color(self.theme.fg_dim).size(13.0).strong());
+                    ui.label(egui::RichText::new(self.language.t("hosts")).color(self.theme.fg_dim).size(FONT_BASE).strong());
 
                     // Right side: New Host button
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.add(widgets::text_button(self.language.t("new_host"), self.theme.accent)).clicked() {
-                            self.add_host_dialog.open_new();
+                            let current_time = ctx.input(|i| i.time);
+                            self.add_host_dialog.open_new(current_time);
                         }
                     });
                 });
+                ui.add_space(4.0);
             });
 
         egui::CentralPanel::default()
@@ -174,7 +85,7 @@ impl PortalApp {
                 egui::ScrollArea::vertical()
                     .id_salt("hosts_page_scroll")
                     .show(ui, |ui| {
-                        ui.add_space(12.0);
+                        ui.add_space(SPACE_MD);
 
                         // Filter bar (in content area, right-aligned with margin)
                         ui.horizontal(|ui| {
@@ -195,85 +106,85 @@ impl PortalApp {
 
                             // Group filter dropdown
                             let group_label = if self.host_filter.group.is_empty() {
-                                "Group".to_string()
+                                self.language.t("group").to_string()
                             } else {
                                 self.host_filter.group.clone()
                             };
                             egui::ComboBox::from_id_salt("group_filter")
-                                .selected_text(egui::RichText::new(group_label).color(self.theme.accent).size(12.0))
+                                .selected_text(egui::RichText::new(group_label).color(self.theme.accent).size(FONT_MD))
                                 .width(90.0)
                                 .show_ui(ui, |ui| {
                                     widgets::style_dropdown(ui, &self.theme);
 
                                     // All option
-                                    if egui::Button::new(
-                                        egui::RichText::new("All")
+                                    if ui.add(egui::Button::new(
+                                        egui::RichText::new(self.language.t("snippet_default_group"))
                                             .color(if self.host_filter.group.is_empty() { self.theme.accent } else { self.theme.fg_primary })
-                                            .size(12.0)
-                                    ).frame(false).ui(ui).clicked() {
+                                            .size(FONT_MD)
+                                    ).frame(false)).clicked() {
                                         self.host_filter.group.clear();
                                         ui.close_menu();
                                     }
 
                                     for group in &all_groups {
-                                        if egui::Button::new(
+                                        if ui.add(egui::Button::new(
                                             egui::RichText::new(group)
                                                 .color(if self.host_filter.group == *group { self.theme.accent } else { self.theme.fg_primary })
-                                                .size(12.0)
-                                        ).frame(false).ui(ui).clicked() {
+                                                .size(FONT_MD)
+                                        ).frame(false)).clicked() {
                                             self.host_filter.group = group.clone();
                                             ui.close_menu();
                                         }
                                     }
                                 });
 
-                            ui.add_space(6.0);
+                            ui.add_space(SPACE_SM - 2.0);
 
                             // Tag filter dropdown
                             let tag_label = if self.host_filter.tag.is_empty() {
-                                "Tag".to_string()
+                                self.language.t("tag").to_string()
                             } else {
                                 self.host_filter.tag.clone()
                             };
                             egui::ComboBox::from_id_salt("tag_filter")
-                                .selected_text(egui::RichText::new(tag_label).color(self.theme.accent).size(12.0))
+                                .selected_text(egui::RichText::new(tag_label).color(self.theme.accent).size(FONT_MD))
                                 .width(90.0)
                                 .show_ui(ui, |ui| {
                                     widgets::style_dropdown(ui, &self.theme);
 
                                     // All option
-                                    if egui::Button::new(
-                                        egui::RichText::new("All")
+                                    if ui.add(egui::Button::new(
+                                        egui::RichText::new(self.language.t("snippet_default_group"))
                                             .color(if self.host_filter.tag.is_empty() { self.theme.accent } else { self.theme.fg_primary })
-                                            .size(12.0)
-                                    ).frame(false).ui(ui).clicked() {
+                                            .size(FONT_MD)
+                                    ).frame(false)).clicked() {
                                         self.host_filter.tag.clear();
                                         ui.close_menu();
                                     }
 
                                     for tag in &all_tags {
-                                        if egui::Button::new(
+                                        if ui.add(egui::Button::new(
                                             egui::RichText::new(tag)
                                                 .color(if self.host_filter.tag == *tag { self.theme.accent } else { self.theme.fg_primary })
-                                                .size(12.0)
-                                        ).frame(false).ui(ui).clicked() {
+                                                .size(FONT_MD)
+                                        ).frame(false)).clicked() {
                                             self.host_filter.tag = tag.clone();
                                             ui.close_menu();
                                         }
                                     }
                                 });
 
-                            ui.add_space(8.0);
+                            ui.add_space(SPACE_SM);
 
                             // Clear button
                             if self.host_filter.is_active() {
-                                if ui.add(widgets::text_button("Clear", self.theme.accent)).clicked() {
+                                if ui.add(widgets::text_button(self.language.t("clear_history"), self.theme.accent)).clicked() {
                                     self.host_filter.clear();
                                 }
                             }
                         });
 
-                        ui.add_space(12.0);
+                        ui.add_space(SPACE_MD);
 
             // RECENT CONNECTIONS section
             {
@@ -293,10 +204,10 @@ impl PortalApp {
 
                 if !recent.is_empty() {
                     ui.horizontal(|ui| {
-                        ui.add_space(24.0);
-                        ui.label(egui::RichText::new(self.language.t("recent_connections")).color(self.theme.fg_dim).size(10.0).strong());
+                        ui.add_space(SPACE_XL);
+                        ui.label(egui::RichText::new(self.language.t("recent_connections")).color(self.theme.fg_dim).size(FONT_XS).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.add_space(24.0);
+                            ui.add_space(SPACE_XL);
                             if ui.add(
                                 egui::Button::new(egui::RichText::new(self.language.t("clear_history")).color(self.theme.fg_dim).size(10.0))
                                     .frame(false)
@@ -305,7 +216,7 @@ impl PortalApp {
                             }
                         });
                     });
-                    ui.add_space(4.0);
+                    ui.add_space(SPACE_XS);
 
                     for record in &recent {
                         let row_h = 44.0;
@@ -377,6 +288,33 @@ impl PortalApp {
                                 btn_text_color,
                             );
                             if resp.clicked() && over_btn {
+                                // Look up the actual host entry from hosts list to preserve credentials
+                                if let Some(host_entry) = self.hosts.iter().find(|h| {
+                                    !h.is_local && h.host == record.host && h.port == record.port && h.username == record.username
+                                }).cloned() {
+                                    connect_history_host = Some(host_entry);
+                                } else {
+                                    // Fallback: create entry without credentials (will prompt for auth)
+                                    connect_history_host = Some(HostEntry::new_ssh(
+                                        record.host_name.clone(),
+                                        record.host.clone(),
+                                        record.port,
+                                        record.username.clone(),
+                                        String::new(),
+                                        None,
+                                        Vec::new(),
+                                    ));
+                                }
+                            }
+                        }
+                        if resp.double_clicked() {
+                            // Look up the actual host entry from hosts list to preserve credentials
+                            if let Some(host_entry) = self.hosts.iter().find(|h| {
+                                !h.is_local && h.host == record.host && h.port == record.port && h.username == record.username
+                            }).cloned() {
+                                connect_history_host = Some(host_entry);
+                            } else {
+                                // Fallback: create entry without credentials (will prompt for auth)
                                 connect_history_host = Some(HostEntry::new_ssh(
                                     record.host_name.clone(),
                                     record.host.clone(),
@@ -388,29 +326,18 @@ impl PortalApp {
                                 ));
                             }
                         }
-                        if resp.double_clicked() {
-                            connect_history_host = Some(HostEntry::new_ssh(
-                                record.host_name.clone(),
-                                record.host.clone(),
-                                record.port,
-                                record.username.clone(),
-                                String::new(),
-                                None,
-                                Vec::new(),
-                            ));
-                        }
                     }
 
-                    ui.add_space(20.0);
+                    ui.add_space(SPACE_XL);
                 }
             }
 
             // LOCAL section
             ui.horizontal(|ui| {
-                ui.add_space(24.0);
-                ui.label(egui::RichText::new(self.language.t("local")).color(self.theme.fg_dim).size(10.0).strong());
+                ui.add_space(SPACE_XL);
+                ui.label(egui::RichText::new(self.language.t("local")).color(self.theme.fg_dim).size(FONT_XS).strong());
             });
-            ui.add_space(4.0);
+            ui.add_space(SPACE_XS);
 
             for (_i, host) in self.hosts.iter().enumerate() {
                 if !host.is_local { continue; }
@@ -446,14 +373,14 @@ impl PortalApp {
                 }
             }
 
-            ui.add_space(20.0);
+            ui.add_space(SPACE_XL);
 
             // SSH HOSTS section
             ui.horizontal(|ui| {
-                ui.add_space(24.0);
-                ui.label(egui::RichText::new(self.language.t("ssh_hosts")).color(self.theme.fg_dim).size(10.0).strong());
+                ui.add_space(SPACE_XL);
+                ui.label(egui::RichText::new(self.language.t("ssh_hosts")).color(self.theme.fg_dim).size(FONT_XS).strong());
             });
-            ui.add_space(4.0);
+            ui.add_space(SPACE_XS);
 
             // Collect groups (from filtered hosts)
             let mut groups: Vec<String> = Vec::new();
@@ -616,12 +543,12 @@ impl PortalApp {
 
             // Grouped SSH hosts
             for group in &groups {
-                ui.add_space(12.0);
+                ui.add_space(SPACE_MD);
                 ui.horizontal(|ui| {
-                    ui.add_space(24.0);
-                    ui.label(egui::RichText::new(group).color(self.theme.fg_dim).size(10.0));
+                    ui.add_space(SPACE_XL);
+                    ui.label(widgets::section_header(group, &self.theme));
                 });
-                ui.add_space(2.0);
+                ui.add_space(SPACE_XS);
                 for (i, host) in self.hosts.iter().enumerate() {
                     if host.is_local || host.group != *group { continue; }
                     // Apply filter
@@ -767,7 +694,7 @@ impl PortalApp {
                 }
             }
 
-            ui.add_space(20.0);
+            ui.add_space(SPACE_XL);
         }); // end ScrollArea
     }); // end CentralPanel
 
@@ -781,7 +708,8 @@ impl PortalApp {
         }
         if let Some(idx) = edit_host_index {
             let host = self.hosts[idx].clone();
-            self.add_host_dialog.open_edit(idx, &host);
+            let current_time = ctx.input(|i| i.time);
+            self.add_host_dialog.open_edit(idx, &host, current_time);
         }
         if let Some(host) = connect_history_host {
             self.add_tab_ssh(&host);
@@ -794,10 +722,6 @@ impl PortalApp {
 
     /// Right-side drawer for adding / editing a host (shown in Hosts view)
     pub fn show_add_host_drawer(&mut self, ctx: &egui::Context) {
-        if !self.add_host_dialog.open {
-            return;
-        }
-
         // Poll the async test result
         let polled_result: Option<Result<String, String>> = self
             .add_host_dialog
@@ -831,58 +755,50 @@ impl PortalApp {
 
         let mut save_clicked = false;
         let mut test_clicked = false;
+        let drawer_width = ctx.screen_rect().width().min(DRAWER_WIDTH).max(280.0);
 
         egui::SidePanel::right("add_host_drawer")
-            .exact_width(ctx.screen_rect().width().min(DRAWER_WIDTH).max(280.0))
+            .exact_width(drawer_width)
             .resizable(false)
             .frame(egui::Frame {
                 fill: theme.bg_secondary,
-                inner_margin: egui::Margin::same(0.0),
-                stroke: egui::Stroke::NONE,
+                inner_margin: egui::Margin::symmetric(SPACE_XL, SPACE_MD),
+                stroke: egui::Stroke::new(1.0, theme.border),
                 ..Default::default()
             })
             .show(ctx, |ui| {
-                egui::Frame {
-                    fill: theme.bg_elevated,
-                    inner_margin: egui::Margin::symmetric(20.0, 12.0),
-                    ..Default::default()
-                }
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(drawer_title).color(theme.fg_primary).size(16.0).strong());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Header with title and close button
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(drawer_title)
+                        .color(theme.fg_primary)
+                        .size(FONT_BASE)
+                        .strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(
+                            egui::Button::new(egui::RichText::new("\u{2715}").color(theme.fg_dim).size(FONT_MD))
+                                .frame(false)
+                        ).clicked() {
+                            self.add_host_dialog.open = false;
+                        }
+                        if self.add_host_dialog.edit_index.is_some() {
                             if ui.add(
-                                egui::Button::new(egui::RichText::new("✕").color(theme.fg_dim).size(16.0))
+                                egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
                                     .frame(false)
-                            ).clicked() {
-                                self.add_host_dialog.reset();
+                            ).on_hover_text(lang.t("delete"))
+                            .clicked() {
+                                self.confirm_delete_host = self.add_host_dialog.edit_index;
+                                self.add_host_dialog.open = false;
                             }
-                            if self.add_host_dialog.edit_index.is_some() {
-                                if ui.add(
-                                    egui::Button::new(egui::RichText::new("\u{1F5D1}").size(14.0))
-                                        .frame(false)
-                                ).on_hover_text(lang.t("delete"))
-                                .clicked() {
-                                    self.confirm_delete_host = self.add_host_dialog.edit_index;
-                                    self.add_host_dialog.reset();
-                                }
-                            }
-                        });
+                        }
                     });
                 });
+                ui.add_space(SPACE_LG);
 
-                ui.separator();
-
+                // Scrollable content area
                 egui::ScrollArea::vertical()
                     .id_salt("drawer_scroll")
                     .show(ui, |ui| {
-                    ui.add_space(4.0);
-                    egui::Frame {
-                        inner_margin: egui::Margin::symmetric(20.0, 12.0),
-                        ..Default::default()
-                    }
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 8.0;
+                        ui.spacing_mut().item_spacing.y = SPACE_MD;
 
                         ui.label(widgets::field_label(lang.t("label"), &theme));
                         ui.add(
@@ -890,9 +806,10 @@ impl PortalApp {
                                 .hint_text(egui::RichText::new("My Server").color(theme.hint_color()).italics())
                                 .desired_width(f32::INFINITY)
                                 .text_color(theme.fg_primary)
+                                .font(egui::FontId::proportional(13.0))
                         );
 
-                        ui.add_space(4.0);
+                        ui.add_space(SPACE_XS);
 
                         ui.label(widgets::field_label(lang.t("host_ip"), &theme));
                         ui.add(
@@ -900,9 +817,10 @@ impl PortalApp {
                                 .hint_text(egui::RichText::new("192.168.1.1").color(theme.hint_color()).italics())
                                 .desired_width(f32::INFINITY)
                                 .text_color(theme.fg_primary)
+                                .font(egui::FontId::proportional(13.0))
                         );
 
-                        ui.add_space(4.0);
+                        ui.add_space(SPACE_XS);
 
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
@@ -911,9 +829,11 @@ impl PortalApp {
                                     egui::TextEdit::singleline(&mut self.add_host_dialog.port)
                                         .desired_width(70.0)
                                         .text_color(theme.fg_primary)
+                                        .hint_text(egui::RichText::new("22").color(theme.hint_color()).italics())
+                                        .font(egui::FontId::proportional(13.0))
                                 );
                             });
-                            ui.add_space(8.0);
+                            ui.add_space(SPACE_SM);
                             ui.vertical(|ui| {
                                 ui.label(widgets::field_label(lang.t("group"), &theme));
                                 ui.add(
@@ -921,29 +841,31 @@ impl PortalApp {
                                         .hint_text(egui::RichText::new("Production").color(theme.hint_color()).italics())
                                         .desired_width(f32::INFINITY)
                                         .text_color(theme.fg_primary)
+                                        .font(egui::FontId::proportional(13.0))
                                 );
                             });
                         });
 
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_SM);
 
                         ui.vertical(|ui| {
-                            ui.label(widgets::field_label("Tags", &theme));
+                            ui.label(widgets::field_label(lang.t("tag"), &theme));
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.add_host_dialog.tags)
                                     .hint_text(egui::RichText::new("web, database, production").color(theme.hint_color()).italics())
                                     .desired_width(f32::INFINITY)
                                     .text_color(theme.fg_primary)
+                                    .font(egui::FontId::proportional(13.0))
                             );
                         });
 
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_SM);
                         ui.separator();
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_SM);
 
                         // ── Credential selection ──
                         ui.label(widgets::field_label(lang.t("authentication"), &theme));
-                        ui.add_space(4.0);
+                        ui.add_space(SPACE_XS);
 
                         // Username (always visible for SSH login)
                         ui.label(widgets::field_label(lang.t("username"), &theme));
@@ -952,39 +874,40 @@ impl PortalApp {
                                 .hint_text(egui::RichText::new("root").color(theme.hint_color()).italics())
                                 .desired_width(f32::INFINITY)
                                 .text_color(theme.fg_primary)
+                                .font(egui::FontId::proportional(13.0))
                         );
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_SM);
 
                         // Credential mode selector: None / Existing / New
                         ui.horizontal(|ui| {
                             ui.selectable_value(
                                 &mut self.add_host_dialog.credential_mode,
-                                crate::ui::types::CredentialMode::None,
+                                CredentialMode::None,
                                 egui::RichText::new(lang.t("credential_none")).size(12.0),
                             );
                             if !self.credentials.is_empty() {
                                 ui.selectable_value(
                                     &mut self.add_host_dialog.credential_mode,
-                                    crate::ui::types::CredentialMode::Existing,
+                                    CredentialMode::Existing,
                                     egui::RichText::new(lang.t("credential_existing")).size(12.0),
                                 );
                             }
                             ui.selectable_value(
                                 &mut self.add_host_dialog.credential_mode,
-                                crate::ui::types::CredentialMode::Inline,
+                                CredentialMode::Inline,
                                 egui::RichText::new(lang.t("credential_inline")).size(12.0),
                             );
                         });
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_SM);
 
                         match self.add_host_dialog.credential_mode {
-                            crate::ui::types::CredentialMode::None => {
+                            CredentialMode::None => {
                                 // No authentication
                             }
-                            crate::ui::types::CredentialMode::Existing => {
+                            CredentialMode::Existing => {
                                 // Dropdown to pick an existing credential
                                 ui.label(widgets::field_label(lang.t("select_credential"), &theme));
-                                ui.add_space(4.0);
+                                ui.add_space(SPACE_XS);
                                 let current_label = self.add_host_dialog.selected_credential_id.as_ref()
                                     .and_then(|id| self.credentials.iter().find(|c| c.id == *id))
                                     .map(|c| c.name.clone())
@@ -993,6 +916,7 @@ impl PortalApp {
                                     .selected_text(egui::RichText::new(&current_label).size(12.0))
                                     .width(ui.available_width() - 8.0)
                                     .show_ui(ui, |ui| {
+                                        widgets::style_dropdown(ui, &self.theme);
                                         for cred in &self.credentials {
                                             let label = format!("{} ({})", cred.name, match &cred.credential_type {
                                                 crate::config::CredentialType::Password { .. } => lang.t("password"),
@@ -1005,7 +929,7 @@ impl PortalApp {
                                         }
                                     });
                             }
-                            crate::ui::types::CredentialMode::Inline => {
+                            CredentialMode::Inline => {
                                 // Inline credential creation (same fields as before)
                                 ui.horizontal(|ui| {
                                     ui.selectable_value(
@@ -1019,7 +943,7 @@ impl PortalApp {
                                         egui::RichText::new(lang.t("ssh_key")).size(12.0),
                                     );
                                 });
-                                ui.add_space(4.0);
+                                ui.add_space(SPACE_XS);
 
                                 match self.add_host_dialog.auth_method {
                                     AuthMethodChoice::Password => {
@@ -1030,6 +954,7 @@ impl PortalApp {
                                                 .hint_text(egui::RichText::new("Enter password").color(theme.hint_color()).italics())
                                                 .desired_width(f32::INFINITY)
                                                 .text_color(theme.fg_primary)
+                                                .font(egui::FontId::proportional(13.0))
                                         );
                                     }
                                     AuthMethodChoice::Key => {
@@ -1041,7 +966,7 @@ impl PortalApp {
                                             ).clicked() {
                                                 self.add_host_dialog.key_source = KeySourceChoice::LocalFile;
                                             }
-                                            ui.add_space(8.0);
+                                            ui.add_space(SPACE_SM);
                                             let import_color = if self.add_host_dialog.key_source == KeySourceChoice::ImportContent { theme.accent } else { theme.fg_dim };
                                             if ui.add(
                                                 egui::Button::new(egui::RichText::new("Import Content").color(import_color).size(12.0))
@@ -1050,7 +975,7 @@ impl PortalApp {
                                                 self.add_host_dialog.key_source = KeySourceChoice::ImportContent;
                                             }
                                         });
-                                        ui.add_space(4.0);
+                                        ui.add_space(SPACE_XS);
 
                                         match self.add_host_dialog.key_source {
                                             KeySourceChoice::LocalFile => {
@@ -1060,6 +985,7 @@ impl PortalApp {
                                                         .hint_text(egui::RichText::new("~/.ssh/id_rsa").color(theme.hint_color()).italics())
                                                         .desired_width(f32::INFINITY)
                                                         .text_color(theme.fg_primary)
+                                                        .font(egui::FontId::proportional(13.0))
                                                 );
                                             }
                                             KeySourceChoice::ImportContent => {
@@ -1068,7 +994,7 @@ impl PortalApp {
                                                     egui::TextEdit::multiline(&mut self.add_host_dialog.key_content)
                                                         .id(egui::Id::new("import_private_key"))
                                                         .hint_text(egui::RichText::new("-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----").color(theme.hint_color()).italics())
-                                                        .font(egui::TextStyle::Monospace)
+                                                        .font(egui::FontId::monospace(12.0))
                                                         .desired_width(f32::INFINITY)
                                                         .desired_rows(6)
                                                         .frame(true)
@@ -1080,7 +1006,7 @@ impl PortalApp {
                                         if self.add_host_dialog.key_in_keychain {
                                             ui.label(egui::RichText::new(lang.t("key_stored_in_keychain")).color(theme.green).size(11.0));
                                         }
-                                        ui.add_space(4.0);
+                                        ui.add_space(SPACE_XS);
                                         ui.label(widgets::field_label(lang.t("key_passphrase"), &theme));
                                         ui.add(
                                             egui::TextEdit::singleline(&mut self.add_host_dialog.key_passphrase)
@@ -1088,13 +1014,14 @@ impl PortalApp {
                                                 .hint_text(egui::RichText::new("Leave empty if none").color(theme.hint_color()).italics())
                                                 .desired_width(f32::INFINITY)
                                                 .text_color(theme.fg_primary)
+                                                .font(egui::FontId::proportional(13.0))
                                         );
                                     }
                                 }
                             }
                         }
 
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_SM);
 
                         // Startup commands
                         ui.label(widgets::field_label(lang.t("startup_commands"), &theme));
@@ -1102,12 +1029,12 @@ impl PortalApp {
                             egui::TextEdit::multiline(&mut self.add_host_dialog.startup_commands)
                                 .desired_rows(3)
                                 .desired_width(f32::INFINITY)
-                                .font(egui::TextStyle::Monospace)
+                                .font(egui::FontId::monospace(12.0))
                                 .hint_text(egui::RichText::new(format!("{}\nexport PATH=/usr/local/bin:$PATH\nsource ~/.profile", lang.t("startup_commands_hint"))).color(theme.hint_color()).italics())
                                 .text_color(theme.fg_primary)
                         );
 
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_SM);
 
                         // Agent forwarding
                         ui.horizontal(|ui| {
@@ -1115,7 +1042,7 @@ impl PortalApp {
                         });
                         ui.label(egui::RichText::new(lang.t("agent_forwarding_desc")).color(theme.fg_dim).size(11.0));
 
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_SM);
 
                         // Jump Host
                         ui.label(widgets::field_label(lang.t("jump_host"), &theme));
@@ -1127,6 +1054,7 @@ impl PortalApp {
                             .selected_text(current_label)
                             .width(ui.available_width() - 8.0)
                             .show_ui(ui, |ui| {
+                                widgets::style_dropdown(ui, &self.theme);
                                 if ui.selectable_label(self.add_host_dialog.jump_host.is_none(), lang.t("jump_host_none")).clicked() {
                                     self.add_host_dialog.jump_host = None;
                                 }
@@ -1142,13 +1070,13 @@ impl PortalApp {
                             });
                         ui.label(egui::RichText::new(lang.t("jump_host_desc")).color(theme.fg_dim).size(11.0));
 
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_SM);
                         ui.separator();
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_SM);
 
                         // Port forwards section
                         ui.label(widgets::field_label(lang.t("port_forwards"), &theme));
-                        ui.add_space(4.0);
+                        ui.add_space(SPACE_XS);
 
                         // List existing port forwards
                         let mut remove_fwd_idx = None;
@@ -1178,7 +1106,7 @@ impl PortalApp {
                             self.add_host_dialog.port_forwards.remove(idx);
                         }
 
-                        ui.add_space(4.0);
+                        ui.add_space(SPACE_XS);
 
                         // Add new forward form
                         ui.horizontal(|ui| {
@@ -1193,7 +1121,7 @@ impl PortalApp {
                                 egui::RichText::new(lang.t("remote_forward")).size(11.0),
                             );
                         });
-                        ui.add_space(4.0);
+                        ui.add_space(SPACE_XS);
 
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
@@ -1202,21 +1130,23 @@ impl PortalApp {
                                     egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_local_host)
                                         .desired_width(100.0)
                                         .text_color(theme.fg_primary)
-                                        .font(egui::TextStyle::Small)
+                                        .font(egui::FontId::proportional(12.0))
+                                        .hint_text(egui::RichText::new("localhost").color(theme.hint_color()).italics())
                                 );
                             });
-                            ui.add_space(4.0);
+                            ui.add_space(SPACE_XS);
                             ui.vertical(|ui| {
                                 ui.label(egui::RichText::new(lang.t("forward_local_port")).color(theme.fg_dim).size(10.0));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_local_port)
                                         .desired_width(50.0)
                                         .text_color(theme.fg_primary)
-                                        .font(egui::TextStyle::Small)
+                                        .font(egui::FontId::proportional(12.0))
+                                        .hint_text(egui::RichText::new("8080").color(theme.hint_color()).italics())
                                 );
                             });
                         });
-                        ui.add_space(2.0);
+                        ui.add_space(SPACE_XS / 2.0);
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.label(egui::RichText::new(lang.t("forward_remote_host")).color(theme.fg_dim).size(10.0));
@@ -1224,21 +1154,23 @@ impl PortalApp {
                                     egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_remote_host)
                                         .desired_width(100.0)
                                         .text_color(theme.fg_primary)
-                                        .font(egui::TextStyle::Small)
+                                        .font(egui::FontId::proportional(12.0))
+                                        .hint_text(egui::RichText::new("localhost").color(theme.hint_color()).italics())
                                 );
                             });
-                            ui.add_space(4.0);
+                            ui.add_space(SPACE_XS);
                             ui.vertical(|ui| {
                                 ui.label(egui::RichText::new(lang.t("forward_remote_port")).color(theme.fg_dim).size(10.0));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_remote_port)
                                         .desired_width(50.0)
                                         .text_color(theme.fg_primary)
-                                        .font(egui::TextStyle::Small)
+                                        .font(egui::FontId::proportional(12.0))
+                                        .hint_text(egui::RichText::new("3000").color(theme.hint_color()).italics())
                                 );
                             });
                         });
-                        ui.add_space(4.0);
+                        ui.add_space(SPACE_XS);
                         if ui.add(widgets::text_button(lang.t("add_forward"), theme.accent)).clicked() {
                             let lp: u16 = self.add_host_dialog.new_forward_local_port.trim().parse().unwrap_or(0);
                             let rp: u16 = self.add_host_dialog.new_forward_remote_port.trim().parse().unwrap_or(0);
@@ -1257,7 +1189,7 @@ impl PortalApp {
                             }
                         }
 
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_SM);
 
                         if !self.add_host_dialog.error.is_empty() {
                             ui.label(egui::RichText::new(&self.add_host_dialog.error).color(theme.red).size(12.0));
@@ -1278,10 +1210,10 @@ impl PortalApp {
                                 ui.label(egui::RichText::new(format!("✗ {}", msg)).color(theme.red).size(12.0));
                                 // Show "Remove old key" button for host key verification failures
                                 if self.add_host_dialog.show_remove_key_button {
-                                    ui.add_space(8.0);
+                                    ui.add_space(SPACE_SM);
                                     if ui.add(
                                         egui::Button::new(egui::RichText::new("Remove old key").color(theme.fg_primary).size(11.0))
-                                            .fill(theme.bg_secondary)
+                                            .fill(theme.button_bg)
                                             .rounding(4.0)
                                             .stroke(egui::Stroke::new(1.0, theme.red))
                                             .min_size(egui::vec2(0.0, 24.0))
@@ -1303,42 +1235,39 @@ impl PortalApp {
                                 }
                                 // Show message after key removal attempt
                                 if !self.add_host_dialog.remove_key_message.is_empty() {
-                                    ui.add_space(4.0);
+                                    ui.add_space(SPACE_XS);
                                     ui.label(egui::RichText::new(&self.add_host_dialog.remove_key_message)
                                         .color(theme.accent).size(11.0));
                                 }
                             }
                         }
 
-                        ui.add_space(16.0);
+                        ui.add_space(SPACE_LG);
                         ui.separator();
-                        ui.add_space(12.0);
+                        ui.add_space(SPACE_MD);
 
                         ui.horizontal(|ui| {
-                            if ui.add(
-                                egui::Button::new(egui::RichText::new(lang.t("save")).color(theme.bg_primary).size(12.0))
-                                    .fill(theme.accent)
-                                    .rounding(4.0)
-                                    .min_size(egui::vec2(70.0, 28.0))
-                            ).clicked() {
-                                save_clicked = true;
-                            }
-
-                            ui.add_space(8.0);
-
                             let is_testing = matches!(self.add_host_dialog.test_conn_state, TestConnState::Testing);
                             if ui.add_enabled(
                                 !is_testing,
-                                egui::Button::new(egui::RichText::new(lang.t("test")).color(theme.fg_primary).size(12.0))
-                                    .fill(theme.bg_elevated)
-                                    .rounding(4.0)
-                                    .min_size(egui::vec2(70.0, 28.0))
+                                widgets::primary_button(lang.t("test"), &theme)
                             ).clicked() {
                                 test_clicked = true;
                             }
+
+                            ui.add_space(SPACE_SM);
+
+                            if ui.add(widgets::secondary_button(lang.t("cancel"), &theme)).clicked() {
+                                self.add_host_dialog.open = false;
+                            }
+
+                            ui.add_space(SPACE_SM);
+
+                            if ui.add(widgets::primary_button(lang.t("save"), &theme)).clicked() {
+                                save_clicked = true;
+                            }
                         });
                     });
-                });
             });
 
         if test_clicked {
@@ -1351,8 +1280,8 @@ impl PortalApp {
             } else {
                 // Build ResolvedAuth based on credential mode
                 let resolved = match self.add_host_dialog.credential_mode {
-                    crate::ui::types::CredentialMode::None => crate::config::ResolvedAuth::None,
-                    crate::ui::types::CredentialMode::Existing => {
+                    CredentialMode::None => crate::config::ResolvedAuth::None,
+                    CredentialMode::Existing => {
                         if let Some(ref cid) = self.add_host_dialog.selected_credential_id {
                             if let Some(cred) = self.credentials.iter().find(|c| c.id == *cid) {
                                 crate::config::resolve_credential(cred)
@@ -1363,7 +1292,7 @@ impl PortalApp {
                             crate::config::ResolvedAuth::None
                         }
                     }
-                    crate::ui::types::CredentialMode::Inline => {
+                    CredentialMode::Inline => {
                         match self.add_host_dialog.auth_method {
                             AuthMethodChoice::Password => {
                                 let pw = self.add_host_dialog.password.clone();
@@ -1437,11 +1366,11 @@ impl PortalApp {
 
             // Determine credential_id based on mode
             let credential_id = match self.add_host_dialog.credential_mode {
-                crate::ui::types::CredentialMode::None => None,
-                crate::ui::types::CredentialMode::Existing => {
+                CredentialMode::None => None,
+                CredentialMode::Existing => {
                     self.add_host_dialog.selected_credential_id.clone()
                 }
-                crate::ui::types::CredentialMode::Inline => {
+                CredentialMode::Inline => {
                     // Create a new credential entity from inline fields
                     let cred = match self.add_host_dialog.auth_method {
                         AuthMethodChoice::Password => {
@@ -1551,739 +1480,8 @@ impl PortalApp {
             }
 
             self.save_hosts();
-            self.add_host_dialog.reset();
+            self.add_host_dialog.open = false;
         }
-    }
+    } // Close show_add_host_drawer
 
-    /// Format duration for display
-    fn format_duration(&self, duration: std::time::Duration) -> String {
-        let secs = duration.as_secs();
-        if secs < 60 {
-            format!("{}s", secs)
-        } else if secs < 3600 {
-                            format!("{}m {}s", secs / 60, secs % 60)
-                        } else {
-                            format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
-                        }
-    }
-
-    /// Execute batch command on all targets in parallel
-    fn execute_batch_command(&mut self, _ctx: &egui::Context) {
-        if self.batch_execution.targets.is_empty() {
-            return;
-        }
-
-        let command = self.batch_execution.command.trim().to_string();
-        if command.is_empty() {
-            return;
-        }
-
-        // Add to history
-        if !self.batch_execution.command_history.contains(&command) {
-            self.batch_execution.command_history.push(command.clone());
-        }
-
-        // Create channel for result updates
-        let (result_tx, result_rx) = std::sync::mpsc::channel();
-        self.batch_execution.result_rx = Some(result_rx);
-
-        // Create pending results for all targets
-        self.batch_execution.results.clear();
-        self.batch_execution.expanded_results.clear();
-        for target in self.batch_execution.targets.clone() {
-            self.batch_execution.results.push(BatchResult {
-                target: target.clone(),
-                status: BatchStatus::Pending,
-                output: String::new(),
-                timestamp: std::time::Instant::now(),
-            });
-        }
-
-        self.batch_execution.executing = true;
-
-        // Collect session references before spawning tasks
-        let session_refs: Vec<(usize, Option<Arc<Mutex<crate::terminal::TerminalGrid>>>, String)> = self.batch_execution.targets
-            .iter()
-            .enumerate()
-            .map(|(idx, target)| {
-                let session = if target.tab_idx != usize::MAX && target.tab_idx < self.tabs.len() {
-                    let tab = &self.tabs[target.tab_idx];
-                    if target.session_idx < tab.sessions.len() {
-                        Some(tab.sessions[target.session_idx].grid.clone())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                (idx, session, target.name.clone())
-            })
-            .collect();
-
-        // Spawn parallel execution tasks
-        let runtime = self.runtime.handle();
-        for (idx, session_ref, target_name) in session_refs {
-            let tx = result_tx.clone();
-
-            if session_ref.is_none() {
-                // Target not connected to a session - mark as failed
-                let _ = tx.send(BatchUpdate::StatusChanged {
-                    index: idx,
-                    status: BatchStatus::Failed("No active session".to_string()),
-                });
-                continue;
-            }
-
-            // Spawn async task to execute command and capture output
-            let _ = runtime.spawn(async move {
-                // Mark as running
-                let _ = tx.send(BatchUpdate::StatusChanged {
-                    index: idx,
-                    status: BatchStatus::Running,
-                });
-
-                // Send command to session
-                if let Some(session_ref) = session_ref {
-                    // Lock the grid to check if we can access it
-                    let can_access = session_ref.lock().is_ok();
-
-                    if can_access {
-                        // For now, we'll simulate execution
-                        // In a real implementation, we'd need to:
-                        // 1. Send the command bytes
-                        // 2. Wait for execution
-                        // 3. Capture the output from the grid
-
-                        // TODO: Implement actual command execution and output capture
-                        // For now, mark as success with placeholder output
-                        tokio::time::sleep(tokio::time::Duration::from_millis(500 + (idx as u64 * 100))).await;
-
-                        let _ = tx.send(BatchUpdate::StatusChanged {
-                            index: idx,
-                            status: BatchStatus::Success,
-                        });
-
-                        let _ = tx.send(BatchUpdate::Output {
-                            index: idx,
-                            output: format!("Command executed on {}\nOutput placeholder", target_name),
-                        });
-                    } else {
-                        let _ = tx.send(BatchUpdate::StatusChanged {
-                            index: idx,
-                            status: BatchStatus::Failed("Failed to lock session".to_string()),
-                        });
-                    }
-                }
-            });
-        }
-
-        // Drop the original sender so the channel closes when all tasks complete
-        drop(result_tx);
-    }
-
-    /// Check for batch execution result updates
-    pub fn check_batch_execution_updates(&mut self) {
-        if let Some(ref rx) = self.batch_execution.result_rx {
-            while let Ok(update) = rx.try_recv() {
-                match update {
-                    BatchUpdate::StatusChanged { index, status } => {
-                        if index < self.batch_execution.results.len() {
-                            self.batch_execution.results[index].status = status;
-                        }
-                    }
-                    BatchUpdate::Output { index, output } => {
-                        if index < self.batch_execution.results.len() {
-                            self.batch_execution.results[index].output = output;
-                        }
-                    }
-                }
-            }
-
-            // Check if all executions are complete
-            let all_complete = self.batch_execution.results.iter().all(|r| {
-                matches!(r.status, BatchStatus::Success | BatchStatus::Failed(_))
-            });
-
-            if all_complete {
-                self.batch_execution.executing = false;
-                self.batch_execution.result_rx = None;
-            }
-        }
-    }
-
-    /// Show batch execution page (main view)
-    pub fn show_batch_page(&mut self, ctx: &egui::Context) {
-        // Top navigation bar (matching hosts page style)
-        egui::TopBottomPanel::top("batch_nav_bar")
-            .frame(egui::Frame {
-                fill: self.theme.bg_secondary,
-                inner_margin: egui::Margin::symmetric(16.0, 8.0),
-                stroke: egui::Stroke::NONE,
-                ..Default::default()
-            })
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(self.language.t("batch")).color(self.theme.fg_dim).size(13.0).strong());
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Select hosts button
-                        if ui.add(
-                            egui::Button::new(egui::RichText::new(self.language.t("batch_select_hosts")).color(self.theme.accent).size(12.0))
-                                .frame(false)
-                        ).clicked() {
-                            self.batch_execution.show_hosts_drawer = true;
-                        }
-                    });
-                });
-            });
-
-        // Main content area
-        egui::CentralPanel::default()
-            .frame(egui::Frame {
-                fill: self.theme.bg_primary,
-                ..Default::default()
-            })
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("batch_page_scroll")
-                    .show(ui, |ui| {
-                        ui.add_space(12.0);
-
-                        // ── TARGETS section ──
-                        ui.horizontal(|ui| {
-                            ui.add_space(24.0);
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "{} ({})",
-                                    self.language.t("batch_targets"),
-                                    self.batch_execution.targets.len()
-                                ))
-                                .color(self.theme.fg_dim).size(10.0).strong()
-                            );
-                        });
-                        ui.add_space(4.0);
-
-                        if self.batch_execution.targets.is_empty() {
-                            let width = ui.available_width();
-                            let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 36.0), egui::Sense::hover());
-                            ui.painter().text(
-                                egui::pos2(rect.min.x + 46.0, rect.center().y),
-                                egui::Align2::LEFT_CENTER,
-                                self.language.t("batch_no_targets"),
-                                egui::FontId::proportional(12.0),
-                                self.theme.fg_dim,
-                            );
-                        } else {
-                            let mut remove_idx: Option<usize> = None;
-                            for (i, target) in self.batch_execution.targets.iter().enumerate() {
-                                let is_connected = target.tab_idx != usize::MAX;
-                                let width = ui.available_width();
-                                let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 36.0), egui::Sense::click());
-                                let hovered = resp.hovered();
-                                if hovered {
-                                    ui.painter().rect_filled(rect, 0.0, self.theme.hover_bg);
-                                }
-                                // Status dot
-                                ui.painter().text(
-                                    egui::pos2(rect.min.x + 24.0, rect.center().y),
-                                    egui::Align2::LEFT_CENTER,
-                                    if is_connected { "●" } else { "○" },
-                                    egui::FontId::proportional(10.0),
-                                    if is_connected { self.theme.green } else { self.theme.fg_dim },
-                                );
-                                // Target name
-                                ui.painter().text(
-                                    egui::pos2(rect.min.x + 46.0, rect.center().y),
-                                    egui::Align2::LEFT_CENTER,
-                                    &target.name,
-                                    egui::FontId::proportional(13.0),
-                                    self.theme.fg_primary,
-                                );
-                                // Remove button on hover
-                                if hovered {
-                                    let visible_right = ui.clip_rect().max.x;
-                                    let btn_rect = egui::Rect::from_center_size(
-                                        egui::pos2(visible_right - 40.0, rect.center().y),
-                                        egui::vec2(40.0, 22.0),
-                                    );
-                                    let pointer_pos = ui.ctx().input(|inp| inp.pointer.hover_pos());
-                                    let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
-                                    let btn_bg = if over_btn { self.theme.red } else { self.theme.bg_elevated };
-                                    let btn_fg = if over_btn { egui::Color32::WHITE } else { self.theme.fg_dim };
-                                    ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::NONE);
-                                    ui.painter().text(btn_rect.center(), egui::Align2::CENTER_CENTER, "✕", egui::FontId::proportional(11.0), btn_fg);
-                                    if resp.clicked() {
-                                        if let Some(pos) = ui.ctx().input(|inp| inp.pointer.interact_pos()) {
-                                            if btn_rect.contains(pos) {
-                                                remove_idx = Some(i);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            if let Some(idx) = remove_idx {
-                                self.batch_execution.targets.remove(idx);
-                            }
-
-                            // Clear all link
-                            ui.add_space(4.0);
-                            ui.horizontal(|ui| {
-                                ui.add_space(24.0);
-                                if ui.add(
-                                    egui::Button::new(egui::RichText::new(self.language.t("batch_clear_all")).color(self.theme.fg_dim).size(11.0))
-                                        .frame(false)
-                                ).clicked() {
-                                    self.batch_execution.targets.clear();
-                                    self.batch_execution.results.clear();
-                                }
-                            });
-                        }
-
-                        ui.add_space(16.0);
-
-                        // ── COMMAND section ──
-                        ui.horizontal(|ui| {
-                            ui.add_space(24.0);
-                            ui.label(egui::RichText::new(self.language.t("batch_command")).color(self.theme.fg_dim).size(10.0).strong());
-
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.add_space(24.0);
-                                if !self.batch_execution.command_history.is_empty() {
-                                    if ui.add(
-                                        egui::Button::new(egui::RichText::new("🕒").size(12.0)).frame(false)
-                                    ).clicked() {
-                                        self.batch_execution.show_history = !self.batch_execution.show_history;
-                                    }
-                                }
-                            });
-                        });
-                        ui.add_space(4.0);
-
-                        // Command history dropdown
-                        if self.batch_execution.show_history {
-                            egui::Frame {
-                                fill: self.theme.bg_secondary,
-                                rounding: egui::Rounding::same(6.0),
-                                inner_margin: egui::Margin::symmetric(24.0, 6.0),
-                                ..Default::default()
-                            }
-                            .show(ui, |ui| {
-                                ui.spacing_mut().item_spacing.y = 4.0;
-                                for cmd in self.batch_execution.command_history.clone() {
-                                    if ui.add_sized(
-                                        [ui.available_width(), 24.0],
-                                        egui::Button::new(
-                                            egui::RichText::new(cmd.lines().next().unwrap_or(&cmd))
-                                                .color(self.theme.fg_primary).size(12.0)
-                                        ).frame(false).fill(egui::Color32::TRANSPARENT).rounding(4.0)
-                                    ).clicked() {
-                                        self.batch_execution.command = cmd;
-                                        self.batch_execution.show_history = false;
-                                    }
-                                }
-                            });
-                            ui.add_space(4.0);
-                        }
-
-                        // Command input
-                        egui::Frame {
-                            inner_margin: egui::Margin::symmetric(24.0, 0.0),
-                            ..Default::default()
-                        }
-                        .show(ui, |ui| {
-                            ui.add(
-                                egui::TextEdit::multiline(&mut self.batch_execution.command)
-                                    .hint_text(egui::RichText::new("ls -la /tmp").color(self.theme.hint_color()).italics())
-                                    .desired_rows(3)
-                                    .desired_width(f32::INFINITY)
-                                    .font(egui::TextStyle::Monospace)
-                                    .text_color(self.theme.fg_primary)
-                            );
-                        });
-
-                        ui.add_space(12.0);
-
-                        // Execute buttons
-                        let can_execute = !self.batch_execution.command.trim().is_empty()
-                            && !self.batch_execution.targets.is_empty()
-                            && !self.batch_execution.executing;
-                        let has_results = !self.batch_execution.results.is_empty();
-
-                        ui.horizontal(|ui| {
-                            ui.add_space(24.0);
-                            if ui.add_enabled(
-                                can_execute,
-                                egui::Button::new(
-                                    egui::RichText::new(format!("▶ {}", self.language.t("batch_execute")))
-                                        .color(self.theme.bg_primary).size(12.0)
-                                )
-                                .fill(self.theme.accent)
-                                .rounding(4.0)
-                                .min_size(egui::vec2(80.0, 28.0))
-                            ).clicked() {
-                                self.execute_batch_command(ctx);
-                            }
-
-                            if has_results && !self.batch_execution.executing {
-                                if ui.add(
-                                    egui::Button::new(
-                                        egui::RichText::new(format!("↻ {}", self.language.t("batch_reexecute")))
-                                            .color(self.theme.fg_primary).size(12.0)
-                                    )
-                                    .stroke(egui::Stroke::new(1.0, self.theme.border))
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .rounding(4.0)
-                                    .min_size(egui::vec2(80.0, 28.0))
-                                ).clicked() {
-                                    self.execute_batch_command(ctx);
-                                }
-                            }
-
-                            if self.batch_execution.executing {
-                                ui.spinner();
-                                ui.label(egui::RichText::new(self.language.t("batch_executing")).color(self.theme.fg_dim).size(11.0));
-                            }
-                        });
-
-                        // ── RESULTS section ──
-                        if !self.batch_execution.results.is_empty() {
-                            ui.add_space(16.0);
-                            ui.horizontal(|ui| {
-                                ui.add_space(24.0);
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{} ({})",
-                                        self.language.t("batch_results"),
-                                        self.batch_execution.results.len()
-                                    ))
-                                    .color(self.theme.fg_dim).size(10.0).strong()
-                                );
-                            });
-                            ui.add_space(4.0);
-
-                            // Collect results data to avoid borrow issues
-                            let results_data: Vec<(usize, BatchStatus, String, std::time::Instant, String)> = self.batch_execution.results
-                                .iter().enumerate()
-                                .map(|(idx, r)| (idx, r.status.clone(), r.target.name.clone(), r.timestamp, r.output.clone()))
-                                .collect();
-                            let expanded_set: std::collections::HashSet<usize> = self.batch_execution.expanded_results.iter().copied().collect();
-
-                            for (result_idx, status, target_name, timestamp, output_text) in results_data {
-                                let (icon, icon_color) = match status {
-                                    BatchStatus::Pending => ("⏳", self.theme.fg_dim),
-                                    BatchStatus::Running => ("⟳", self.theme.accent),
-                                    BatchStatus::Success => ("✓", self.theme.green),
-                                    BatchStatus::Failed(_) => ("✗", self.theme.red),
-                                };
-                                let is_expanded = expanded_set.contains(&result_idx);
-
-                                // Result row (host-list style)
-                                let width = ui.available_width();
-                                let row_h = if is_expanded { 36.0 } else { 36.0 };
-                                let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, row_h), egui::Sense::click());
-                                let hovered = resp.hovered();
-                                if hovered {
-                                    ui.painter().rect_filled(rect, 0.0, self.theme.hover_bg);
-                                }
-
-                                // Status icon
-                                ui.painter().text(
-                                    egui::pos2(rect.min.x + 24.0, rect.center().y),
-                                    egui::Align2::LEFT_CENTER,
-                                    icon,
-                                    egui::FontId::proportional(12.0),
-                                    icon_color,
-                                );
-                                // Target name
-                                ui.painter().text(
-                                    egui::pos2(rect.min.x + 46.0, rect.center().y),
-                                    egui::Align2::LEFT_CENTER,
-                                    &target_name,
-                                    egui::FontId::proportional(13.0),
-                                    self.theme.fg_primary,
-                                );
-                                // Status text
-                                let status_text = match &status {
-                                    BatchStatus::Pending => self.language.t("batch_waiting"),
-                                    BatchStatus::Running => self.language.t("batch_running"),
-                                    BatchStatus::Success => self.language.t("batch_success"),
-                                    BatchStatus::Failed(_) => self.language.t("batch_failed"),
-                                };
-                                ui.painter().text(
-                                    egui::pos2(rect.min.x + 200.0, rect.center().y),
-                                    egui::Align2::LEFT_CENTER,
-                                    status_text,
-                                    egui::FontId::proportional(11.0),
-                                    icon_color,
-                                );
-                                // Expand indicator
-                                let visible_right = ui.clip_rect().max.x;
-                                ui.painter().text(
-                                    egui::pos2(visible_right - 40.0, rect.center().y),
-                                    egui::Align2::LEFT_CENTER,
-                                    if is_expanded { "▼" } else { "▶" },
-                                    egui::FontId::proportional(10.0),
-                                    self.theme.fg_dim,
-                                );
-
-                                if resp.clicked() {
-                                    if is_expanded {
-                                        self.batch_execution.expanded_results.retain(|&x| x != result_idx);
-                                    } else {
-                                        self.batch_execution.expanded_results.push(result_idx);
-                                    }
-                                }
-
-                                // Expanded output
-                                if is_expanded {
-                                    egui::Frame {
-                                        fill: self.theme.bg_secondary,
-                                        rounding: egui::Rounding::same(4.0),
-                                        inner_margin: egui::Margin::symmetric(16.0, 10.0),
-                                        outer_margin: egui::Margin { left: 24.0, right: 24.0, top: 0.0, bottom: 4.0 },
-                                        ..Default::default()
-                                    }
-                                    .show(ui, |ui| {
-                                        if output_text.is_empty() {
-                                            ui.label(
-                                                egui::RichText::new(self.language.t("batch_no_output"))
-                                                    .color(self.theme.fg_dim).size(11.0).italics()
-                                            );
-                                        } else {
-                                            let output_lines = output_text.lines().count();
-                                            let display_output = if output_lines > 10 {
-                                                output_text.lines().take(10).collect::<Vec<&str>>().join("\n")
-                                            } else {
-                                                output_text.clone()
-                                            };
-                                            ui.label(
-                                                egui::RichText::new(display_output)
-                                                    .text_style(egui::TextStyle::Monospace)
-                                                    .color(self.theme.fg_primary).size(11.0)
-                                            );
-                                            if output_lines > 10 {
-                                                ui.add_space(4.0);
-                                                ui.label(
-                                                    egui::RichText::new(format!("... ({} more lines)", output_lines - 10))
-                                                        .color(self.theme.fg_dim).size(10.0).italics()
-                                                );
-                                            }
-                                        }
-                                        // Timestamp
-                                        ui.add_space(4.0);
-                                        let elapsed = timestamp.elapsed();
-                                        ui.horizontal(|ui| {
-                                            ui.label(
-                                                egui::RichText::new(format!("{} {}", self.format_duration(elapsed), self.language.t("batch_ago")))
-                                                    .color(self.theme.fg_dim).size(10.0)
-                                            );
-
-                                            // Action buttons
-                                            if matches!(status, BatchStatus::Success | BatchStatus::Failed(_)) {
-                                                let can_jump = self.batch_execution.results.get(result_idx)
-                                                    .map_or(false, |r| r.target.tab_idx != usize::MAX);
-                                                if ui.add_enabled(
-                                                    can_jump,
-                                                    egui::Button::new(egui::RichText::new(self.language.t("batch_jump_to_session")).color(self.theme.accent).size(10.0)).frame(false)
-                                                ).clicked() {
-                                                    // TODO: Implement jump to session
-                                                }
-                                            }
-                                        });
-                                    });
-                                }
-                            }
-                        }
-
-                        ui.add_space(20.0);
-                    });
-            });
-
-        // Show hosts selection drawer
-        self.show_batch_hosts_drawer(ctx);
-    }
-
-    /// Show hosts selection drawer (right side)
-    pub fn show_batch_hosts_drawer(&mut self, ctx: &egui::Context) {
-        if !self.batch_execution.show_hosts_drawer {
-            return;
-        }
-
-        let drawer_width = ctx.screen_rect().width().min(320.0).max(280.0);
-        egui::SidePanel::right("batch_hosts_drawer")
-            .exact_width(drawer_width)
-            .resizable(false)
-            .frame(egui::Frame {
-                fill: self.theme.bg_secondary,
-                inner_margin: egui::Margin::same(0.0),
-                stroke: egui::Stroke::NONE,
-                ..Default::default()
-            })
-            .show(ctx, |ui| {
-                // Header
-                egui::Frame {
-                    fill: self.theme.bg_elevated,
-                    inner_margin: egui::Margin::symmetric(20.0, 16.0),
-                    ..Default::default()
-                }
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(self.language.t("batch_select_hosts"))
-                                .color(self.theme.fg_primary)
-                                .size(17.0)
-                                .strong()
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new("✕")
-                                        .color(self.theme.fg_dim)
-                                        .size(18.0)
-                                )
-                                .frame(false)
-                            ).clicked() {
-                                self.batch_execution.show_hosts_drawer = false;
-                            }
-                        });
-                    });
-                });
-
-                egui::ScrollArea::vertical()
-                    .id_salt("batch_hosts_drawer_scroll")
-                    .show(ui, |ui| {
-                        ui.add_space(4.0);
-
-                        // SSH hosts section
-                        ui.label(
-                            egui::RichText::new("SSH 主机")
-                                .color(self.theme.fg_dim)
-                                .size(10.0)
-                                .strong()
-                        );
-                        ui.add_space(4.0);
-
-                        let mut hosts_to_add: Vec<HostEntry> = vec![];
-                        let mut hosts_to_remove: Vec<usize> = vec![];
-
-                        for (_host_idx, host) in self.hosts.iter().enumerate() {
-                            if host.is_local {
-                                continue;
-                            }
-
-                            // Check if already in targets
-                            let is_selected = self.batch_execution.targets.iter()
-                                .any(|t| t.name == host.name);
-
-                            egui::Frame {
-                                fill: if is_selected { self.theme.bg_elevated } else { egui::Color32::TRANSPARENT },
-                                rounding: egui::Rounding::same(6.0),
-                                inner_margin: egui::Margin::symmetric(10.0, 8.0),
-                                stroke: if is_selected {
-                                    egui::Stroke::new(1.0, self.theme.accent)
-                                } else {
-                                    egui::Stroke::new(1.0, self.theme.border)
-                                },
-                                ..Default::default()
-                            }
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    // Checkbox
-                                    if ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new(if is_selected { "☑" } else { "☐" })
-                                                .size(14.0)
-                                        )
-                                        .frame(false)
-                                    ).clicked() {
-                                        if is_selected {
-                                            // Find and mark for removal
-                                            if let Some(idx) = self.batch_execution.targets.iter()
-                                                .position(|t| t.name == host.name) {
-                                                hosts_to_remove.push(idx);
-                                            }
-                                        } else {
-                                            hosts_to_add.push(host.clone());
-                                        }
-                                    }
-
-                                    ui.add_space(6.0);
-
-                                    // Host info
-                                    ui.vertical(|ui| {
-                                        ui.label(
-                                            egui::RichText::new(&host.name)
-                                                .color(self.theme.fg_primary)
-                                                .size(12.0)
-                                                .strong()
-                                        );
-                                        ui.label(
-                                            egui::RichText::new(format!("{}@{}:{}", host.username, host.host, host.port))
-                                                .color(self.theme.fg_dim)
-                                                .size(10.0)
-                                        );
-                                        if !host.group.is_empty() {
-                                            ui.label(
-                                                egui::RichText::new(&host.group)
-                                                    .color(self.theme.fg_dim)
-                                                    .size(9.0)
-                                            );
-                                        }
-                                    });
-                                });
-                            });
-
-                            ui.add_space(4.0);
-                        }
-
-                        // Apply removals (in reverse order to maintain indices)
-                        for idx in hosts_to_remove.into_iter().rev() {
-                            if idx < self.batch_execution.targets.len() {
-                                self.batch_execution.targets.remove(idx);
-                            }
-                        }
-
-                        // Apply additions
-                        for host in hosts_to_add {
-                            self.batch_execution.targets.push(BatchTarget {
-                                tab_idx: usize::MAX,
-                                session_idx: usize::MAX,
-                                global_id: usize::MAX,
-                                name: host.name.clone(),
-                            });
-                        }
-
-                        ui.add_space(12.0);
-
-                        // Quick actions
-                        ui.separator();
-                        ui.add_space(8.0);
-
-                        if ui.add_sized(
-                            [ui.available_width(), 28.0],
-                            egui::Button::new(
-                                egui::RichText::new(self.language.t("batch_add_from_hosts"))
-                                    .color(self.theme.accent)
-                                    .size(11.0)
-                            )
-                            .stroke(egui::Stroke::new(1.0, self.theme.accent))
-                            .fill(egui::Color32::TRANSPARENT)
-                            .rounding(4.0)
-                        ).clicked() {
-                            for host in &self.hosts {
-                                if !host.is_local && !self.batch_execution.targets.iter().any(|t| t.name == host.name) {
-                                    self.batch_execution.targets.push(BatchTarget {
-                                        tab_idx: usize::MAX,
-                                        session_idx: usize::MAX,
-                                        global_id: usize::MAX,
-                                        name: host.name.clone(),
-                                    });
-                                }
-                            }
-                        }
-
-                        ui.add_space(12.0);
-                    });
-            });
-    }
 }

@@ -12,9 +12,12 @@ use std::sync::Arc;
 
 /// Unix PTY implementation
 pub struct UnixPty {
-    master: File,
-    child_pid: i32,
-    alive: Arc<AtomicBool>,
+    /// Master file descriptor for the PTY
+    pub master: File,
+    /// Child process ID
+    pub child_pid: i32,
+    /// Atomic flag indicating if the PTY is still alive
+    pub alive: Arc<AtomicBool>,
 }
 
 impl Pty for UnixPty {
@@ -197,14 +200,39 @@ impl Pty for UnixPty {
         }
 
         unsafe {
+            // Try SIGTERM first for graceful shutdown
             if libc::kill(self.child_pid, libc::SIGTERM) < 0 {
-                return Err(Error::SpawnFailed(format!(
-                    "Failed to kill process: {}",
-                    std::io::Error::last_os_error()
-                )));
+                let err = std::io::Error::last_os_error();
+                // ESRCH = no such process, already dead
+                if err.raw_os_error() == Some(libc::ESRCH) {
+                    self.alive.store(false, Ordering::Relaxed);
+                    return Ok(());
+                }
+                return Err(Error::SpawnFailed(format!("Failed to kill process: {}", err)));
             }
+
+            // Wait up to 50ms for graceful exit
+            let mut status: i32 = 0;
+            for _ in 0..5 {
+                let result = libc::waitpid(self.child_pid, &mut status, libc::WNOHANG);
+                if result == self.child_pid {
+                    self.alive.store(false, Ordering::Relaxed);
+                    return Ok(());
+                }
+                if result < 0 {
+                    // ECHILD = no child to wait for, already dead
+                    if std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD) {
+                        self.alive.store(false, Ordering::Relaxed);
+                        return Ok(());
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+
+            // Force kill with SIGKILL
+            libc::kill(self.child_pid, libc::SIGKILL);
+            self.alive.store(false, Ordering::Relaxed);
         }
-        self.alive.store(false, Ordering::Relaxed);
         Ok(())
     }
 
@@ -253,7 +281,32 @@ impl Pty for UnixPty {
 
 impl Drop for UnixPty {
     fn drop(&mut self) {
-        let _ = self.kill();
+        // Always ensure child process is killed to prevent PTY leaks
+        // This is critical because PTY devices are limited system resources
+        unsafe {
+            // Try graceful shutdown first
+            if self.alive.load(Ordering::Relaxed) {
+                libc::kill(self.child_pid, libc::SIGTERM);
+                // Brief wait for graceful exit
+                let mut status: i32 = 0;
+                let start = std::time::Instant::now();
+                while start.elapsed() < std::time::Duration::from_millis(50) {
+                    if libc::waitpid(self.child_pid, &mut status, libc::WNOHANG) == self.child_pid {
+                        self.alive.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
+
+            // Force kill if still alive
+            libc::kill(self.child_pid, libc::SIGKILL);
+            self.alive.store(false, Ordering::Relaxed);
+
+            // Reap zombie (non-blocking, may fail if already reaped)
+            let mut status: i32 = 0;
+            libc::waitpid(self.child_pid, &mut status, libc::WNOHANG);
+        }
     }
 }
 

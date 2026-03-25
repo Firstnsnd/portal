@@ -73,7 +73,7 @@
 
 use eframe::egui;
 
-use crate::ui::types::{TerminalSession, AppView, BroadcastState};
+use crate::ui::types::{session::TerminalSession, dialogs::{AppView, BroadcastState}};
 
 /// Split direction for pane layout
 #[derive(Clone, Copy, PartialEq)]
@@ -203,14 +203,97 @@ pub struct Tab {
     pub broadcast_enabled: bool,
 }
 
+/// Per-tab animation state for smooth reordering
+#[derive(Clone, Default)]
+pub struct TabAnimation {
+    /// Current X offset (animation progress)
+    current_offset: f32,
+    /// Target X offset (where we want to be)
+    target_offset: f32,
+    /// Start X offset (where animation began)
+    start_offset: f32,
+    /// Animation start time
+    start_time: Option<f64>,
+}
+
 /// Drag state for tab ghost visualization
-#[derive(Default, Clone)]
+#[derive(Clone, Default)]
 pub struct TabDragState {
     pub source_index: Option<usize>,
     pub target_index: Option<usize>,
     pub ghost_title: String,
     pub ghost_size: egui::Vec2,
-    pub insert_position: Option<usize>,
+    /// Insert position: true = insert before target, false = insert after target
+    pub insert_before: bool,
+    /// true = merge tabs, false = reorder tabs
+    pub is_merge: bool,
+    /// Per-tab animation states (index in this vec = tab index)
+    tab_animations: Vec<TabAnimation>,
+}
+
+impl TabDragState {
+    /// Ensure animations vector has correct size
+    pub fn ensure_size(&mut self, tab_count: usize) {
+        while self.tab_animations.len() < tab_count {
+            self.tab_animations.push(TabAnimation::default());
+        }
+        while self.tab_animations.len() > tab_count {
+            self.tab_animations.pop();
+        }
+    }
+
+    /// Update animation target for a specific tab
+    pub fn set_target_offset(&mut self, tab_index: usize, offset: f32, current_time: f64) {
+        if tab_index < self.tab_animations.len() {
+            let anim = &mut self.tab_animations[tab_index];
+            if anim.target_offset != offset {
+                anim.start_offset = anim.current_offset;
+                anim.target_offset = offset;
+                anim.start_time = Some(current_time);
+            }
+        }
+    }
+
+    /// Get current animated offset for a tab
+    pub fn get_offset(&mut self, tab_index: usize, current_time: f64) -> f32 {
+        if tab_index >= self.tab_animations.len() {
+            return 0.0;
+        }
+        let anim = &mut self.tab_animations[tab_index];
+        if let Some(start_time) = anim.start_time {
+            let elapsed = (current_time - start_time) as f32;
+            let duration = 0.25; // 250ms for snappy but smooth animation
+            let progress = (elapsed / duration).min(1.0);
+
+            // Ease-out cubic: fast start, slow end
+            let eased = 1.0 - (1.0 - progress).powi(3);
+
+            anim.current_offset = anim.start_offset + (anim.target_offset - anim.start_offset) * eased;
+
+            if progress >= 1.0 {
+                anim.start_time = None; // Animation complete
+            }
+        } else {
+            anim.current_offset = anim.target_offset;
+        }
+        anim.current_offset
+    }
+
+    /// Reset all animations
+    pub fn reset(&mut self) {
+        self.source_index = None;
+        self.target_index = None;
+        self.ghost_title.clear();
+        self.ghost_size = egui::Vec2::ZERO;
+        self.insert_before = true;
+        self.is_merge = false;
+        for anim in &mut self.tab_animations {
+            anim.current_offset = 0.0;
+            anim.target_offset = 0.0;
+            anim.start_offset = 0.0;
+            anim.start_time = None;
+        }
+    }
 }
 
 /// A tab that has been detached into its own OS window (full UI)
@@ -226,6 +309,6 @@ pub struct DetachedWindow {
     pub ime_preedit: String,
     pub next_id: usize,
     pub tab_drag: TabDragState,
-#[allow(dead_code)]
+    #[allow(dead_code)]
     pub broadcast_state: BroadcastState,
 }

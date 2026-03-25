@@ -9,11 +9,10 @@
 //! - **input**: Keyboard input handling and shortcuts
 //! - **types**: Shared data structures (sessions, panes, dialogs)
 //! - **pane**: Split pane layout management
-//! - **terminal_render**: Terminal content rendering and text selection
-//! - **sftp_view**: SFTP file browser UI
-//! - **hosts_view**: SSH host management UI
-//! - **settings_view**: Application settings UI
-//! - **keychain_view**: System keychain management UI
+//! - **terminal**: Terminal content rendering and text selection
+//! - **views**: View-specific UI implementations (SFTP, Hosts, Settings, etc.)
+//! - **widgets**: Reusable UI widgets
+//! - **formatting**: Formatting utilities for display
 //!
 //! ## Key Concepts
 //!
@@ -42,21 +41,20 @@
 pub mod tokens;
 pub mod theme;
 pub mod i18n;
+pub mod fonts;
 pub mod input;
 pub mod types;
 pub mod pane;
-pub mod terminal_render;
-pub mod sftp_view;
-pub mod hosts_view;
-pub mod settings_view;
-pub mod keychain_view;
-pub mod snippet_view;
-pub mod tunnel_view;
+pub mod terminal;
+pub mod views;
 pub mod widgets;
+pub mod formatting;
 
 // Re-export all public types for convenient access via `use ui::*`
 pub use theme::{ThemeColors, ThemePreset};
 pub use i18n::Language;
-pub use types::{SessionBackend, TerminalSession, AppView, BroadcastState, SearchState};
+pub use types::{SessionBackend, TerminalSession, AppView, BroadcastState};
 pub use pane::{SplitDirection, PaneNode, PaneAction, Tab, DetachedWindow, TabDragState};
-pub use terminal_render::render_pane_tree;
+pub use terminal::render_pane_tree;
+pub use widgets::nav_button;
+pub use tokens::STATUS_BAR_HEIGHT;

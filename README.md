@@ -2,7 +2,7 @@
 
 A modern GUI terminal emulator built with Rust and egui, inspired by Termius.
 
-![Portal](https://img.shields.io/badge/Portal-0.10.0-blue)
+![Portal](https://img.shields.io/badge/Portal-0.11.0-blue)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)
 
 ## Features
@@ -44,12 +44,25 @@ A modern GUI terminal emulator built with Rust and egui, inspired by Termius.
 - **Click to Edit** - Click host row to open editor, "Connect" button for SSH
 - **Delete from Drawer** - Trash icon in edit drawer header
 
+### SSH Tunnels (Port Forwarding)
+- **Local Forwarding** - Map local port to remote host ( `-L` )
+- **Remote Forwarding** - Map remote port to local host ( `-R` )
+- **Tunnel Management** - Start/stop tunnels from host detail view
+- **Status Indicators** - Active, Starting, Stopped, Error states
+
+### Snippets
+- **Command Snippets** - Save and reuse frequently used commands
+- **Group Organization** - Organize snippets by group
+- **Quick Run** - Run snippets in active session with Cmd+Shift+S
+- **Multi-language Support** - English, Chinese, Japanese, Korean, French, Spanish, Russian
+
 ### UI / Theme
-- **Tokyo Night** dark color scheme
-- **Navigation Bar** - Hosts / Terminal / SFTP / Keychain / Settings view switching
+- **Dark Themes** - Tokyo Night, Dracula, One Dark, Solarized Dark, Nord
+- **Light Themes** - Solarized Light, GitHub Light, One Light
+- **Navigation Bar** - Hosts / Terminal / SFTP / Tunnels / Snippets / Keychain / Settings
 - **Tab Status Indicators** - Green=connected, Blue=connecting, Red=error
 - **Bottom Status Bar** - Connection type, shell, encoding
-- **Multi-language** - English, Chinese, Japanese, Korean
+- **Multi-language** - English, Chinese, Japanese, Korean, French, Spanish, Russian
 
 ## Quick Start
 
@@ -71,16 +84,21 @@ src/
 │   ├── mod.rs           # PortalApp struct and initialization
 │   └── tab_management.rs # Tab operations (add, split, close, detach)
 ├── ui/
-│   ├── hosts_view.rs    # Host list page, nav panel
-│   ├── settings_view.rs # Settings page
-│   ├── keychain_view.rs # Keychain management page
-│   ├── sftp_view.rs     # SFTP file browser UI
+│   ├── views/           # View pages
+│   │   ├── hosts_view.rs    # Host list page
+│   │   ├── tunnel_view.rs   # SSH tunnels page
+│   │   ├── snippet_view.rs  # Snippets page
+│   │   ├── keychain_view.rs # Keychain management page
+│   │   ├── sftp_view.rs     # SFTP file browser UI
+│   │   ├── settings_view.rs # Settings page
+│   │   └── tab_view.rs      # Tab bar component
 │   ├── types.rs         # Shared UI types (AppView, sessions, dialogs)
-│   ├── theme.rs         # Color themes
-│   ├── i18n.rs          # Internationalization (EN/ZH/JA/KO)
+│   ├── theme.rs         # Color themes (dark and light)
+│   ├── i18n.rs          # Internationalization (EN/ZH/JA/KO/FR/ES/RU)
 │   ├── pane.rs          # Split pane layout
 │   ├── terminal_render.rs # Terminal pane rendering
-│   └── input.rs         # Input handling
+│   ├── widgets.rs       # Reusable UI components
+│   └── tokens.rs        # Design tokens (spacing, sizing)
 ├── terminal/
 │   ├── session.rs       # TerminalGrid, TerminalCell, PTY management
 │   └── mod.rs
@@ -104,6 +122,7 @@ src/
 - **unicode-width** - CJK double-width detection
 - **arboard** - Clipboard access
 - **keyring** - System keychain credential storage
+- **cocoa** - macOS specific APIs (app activation, NSPanel)
 
 ## Building
 

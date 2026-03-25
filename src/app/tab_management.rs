@@ -3,7 +3,7 @@
 use crate::config::{HostEntry, resolve_auth, ResolvedAuth};
 use crate::ssh::JumpHostInfo;
 use crate::ui::pane::{SplitDirection, PaneNode, Tab, DetachedWindow, TabDragState};
-use crate::ui::types::{TerminalSession, AppView, BroadcastState};
+use crate::ui::types::{session::TerminalSession, dialogs::{AppView, BroadcastState}};
 use super::PortalApp;
 
 impl PortalApp {

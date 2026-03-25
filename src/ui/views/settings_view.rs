@@ -3,13 +3,24 @@ use eframe::egui;
 use crate::app::PortalApp;
 use crate::ui::theme::ThemePreset;
 use crate::ui::i18n::Language;
+use crate::ui::tokens::*;
 use crate::ui::widgets;
+use crate::ui::fonts;
 
 impl PortalApp {
     pub fn apply_visuals(&self, ctx: &egui::Context) {
-        let mut visuals = egui::Visuals::dark();
+        // Use light or dark base visuals depending on theme
+        let is_light_theme = matches!(self.theme_preset,
+            ThemePreset::SolarizedLight | ThemePreset::GitHubLight | ThemePreset::OneLight
+        );
+        let mut visuals = if is_light_theme {
+            egui::Visuals::light()
+        } else {
+            egui::Visuals::dark()
+        };
+
         visuals.panel_fill = self.theme.bg_primary;
-        visuals.window_fill = self.theme.bg_secondary;
+        visuals.window_fill = self.theme.menu_bg;
         visuals.extreme_bg_color = self.theme.input_bg;
         visuals.faint_bg_color = self.theme.bg_elevated;
 
@@ -42,7 +53,8 @@ impl PortalApp {
         // Override text cursor color
         visuals.text_cursor.stroke = egui::Stroke::new(2.0, self.theme.fg_primary);
 
-        visuals.override_text_color = Some(self.theme.fg_primary);
+        // Don't override text color - let individual widgets control it
+        visuals.override_text_color = None;
 
         // Unified rounding (shadcn: 6px buttons/inputs, 8px windows)
         visuals.widgets.noninteractive.rounding = egui::Rounding::same(6.0);
@@ -58,57 +70,7 @@ impl PortalApp {
     }
 
     pub fn apply_fonts(&mut self, ctx: &egui::Context) {
-        let mut fonts = egui::FontDefinitions::default();
-
-        if !self.custom_font_path.is_empty() {
-            if let Ok(font_data) = std::fs::read(&self.custom_font_path) {
-                fonts.font_data.insert(
-                    "CustomFont".to_owned(),
-                    egui::FontData::from_owned(font_data),
-                );
-                fonts.families
-                    .entry(egui::FontFamily::Monospace)
-                    .or_insert_with(Vec::new)
-                    .insert(0, "CustomFont".to_owned());
-            }
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            if let Ok(font_data) = std::fs::read("/System/Library/Fonts/Monaco.dfont") {
-                fonts.font_data.insert(
-                    "Monaco".to_owned(),
-                    egui::FontData::from_owned(font_data),
-                );
-                fonts.families
-                    .entry(egui::FontFamily::Monospace)
-                    .or_insert_with(Vec::new)
-                    .push("Monaco".to_owned());
-            }
-            let cjk_paths = [
-                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-                "/System/Library/Fonts/STHeiti Medium.ttc",
-                "/System/Library/Fonts/Hiragino Sans GB.ttc",
-            ];
-            for path in &cjk_paths {
-                if let Ok(font_data) = std::fs::read(path) {
-                    fonts.font_data.insert(
-                        "CJK".to_owned(),
-                        egui::FontData::from_owned(font_data),
-                    );
-                    fonts.families
-                        .entry(egui::FontFamily::Monospace)
-                        .or_insert_with(Vec::new)
-                        .push("CJK".to_owned());
-                    fonts.families
-                        .entry(egui::FontFamily::Proportional)
-                        .or_insert_with(Vec::new)
-                        .push("CJK".to_owned());
-                    break;
-                }
-            }
-        }
-
+        let fonts = fonts::load_fonts(&self.custom_font_path);
         ctx.set_fonts(fonts);
         self.fonts_dirty = false;
     }
@@ -135,15 +97,15 @@ impl PortalApp {
         let mut changed = false;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(20.0);
+            ui.add_space(SPACE_XL);
             ui.horizontal(|ui| {
-                ui.add_space(24.0);
+                ui.add_space(SPACE_XL);
                 ui.label(widgets::section_header(lang.t("settings"), &theme));
             });
-            ui.add_space(16.0);
+            ui.add_space(SPACE_LG);
 
             egui::Frame {
-                inner_margin: egui::Margin::symmetric(24.0, 16.0),
+                inner_margin: egui::Margin::symmetric(SPACE_XL, SPACE_LG),
                 ..Default::default()
             }
             .show(ui, |ui| {
@@ -151,11 +113,11 @@ impl PortalApp {
 
                 // ── Font section ──
                 ui.label(egui::RichText::new(lang.t("font")).color(theme.fg_primary).size(14.0).strong());
-                ui.add_space(4.0);
+                ui.add_space(SPACE_XS);
 
                 ui.horizontal(|ui| {
                     ui.label(widgets::field_label(lang.t("font_size"), &theme));
-                    ui.add_space(8.0);
+                    ui.add_space(SPACE_SM);
                     let slider = ui.add(
                         egui::Slider::new(&mut self.font_size, 8.0..=32.0)
                             .step_by(1.0)
@@ -168,11 +130,13 @@ impl PortalApp {
 
                 ui.horizontal(|ui| {
                     ui.label(widgets::field_label(lang.t("custom_font"), &theme));
-                    ui.add_space(8.0);
+                    ui.add_space(SPACE_SM);
                     let resp = ui.add(
                         egui::TextEdit::singleline(&mut self.custom_font_path)
                             .hint_text(egui::RichText::new("/path/to/font.ttf").color(theme.hint_color()).italics())
                             .desired_width(300.0)
+                            .font(egui::FontId::proportional(13.0))
+                            .text_color(theme.fg_primary)
                     );
                     if resp.lost_focus() {
                         self.fonts_dirty = true;
@@ -180,17 +144,17 @@ impl PortalApp {
                     }
                 });
 
-                ui.add_space(16.0);
+                ui.add_space(SPACE_LG);
                 ui.separator();
-                ui.add_space(8.0);
+                ui.add_space(SPACE_SM);
 
                 // ── Terminal section ──
                 ui.label(egui::RichText::new(lang.t("terminal")).color(theme.fg_primary).size(14.0).strong());
-                ui.add_space(4.0);
+                ui.add_space(SPACE_XS);
 
                 ui.horizontal(|ui| {
                     ui.label(widgets::field_label(lang.t("scrollback_limit"), &theme));
-                    ui.add_space(8.0);
+                    ui.add_space(SPACE_SM);
                     let slider = ui.add(
                         egui::Slider::new(&mut self.scrollback_limit_mb, 10..=1000)
                             .step_by(10.0)
@@ -201,17 +165,17 @@ impl PortalApp {
                     }
                 });
 
-                ui.add_space(16.0);
+                ui.add_space(SPACE_LG);
                 ui.separator();
-                ui.add_space(8.0);
+                ui.add_space(SPACE_SM);
 
                 // ── SSH section ──
                 ui.label(egui::RichText::new("SSH").color(theme.fg_primary).size(14.0).strong());
-                ui.add_space(4.0);
+                ui.add_space(SPACE_XS);
 
                 ui.horizontal(|ui| {
                     ui.label(widgets::field_label(lang.t("ssh_keepalive"), &theme));
-                    ui.add_space(8.0);
+                    ui.add_space(SPACE_SM);
                     let slider = ui.add(
                         egui::Slider::new(&mut self.ssh_keepalive_interval, 0..=300)
                             .step_by(5.0)
@@ -221,15 +185,15 @@ impl PortalApp {
                         changed = true;
                     }
                 });
-                ui.label(egui::RichText::new(lang.t("ssh_keepalive_desc")).color(theme.fg_dim).size(11.0));
+                ui.label(egui::RichText::new(lang.t("ssh_keepalive_desc")).color(theme.fg_dim).size(FONT_SM));
 
-                ui.add_space(16.0);
+                ui.add_space(SPACE_LG);
                 ui.separator();
-                ui.add_space(8.0);
+                ui.add_space(SPACE_SM);
 
                 // ── Theme section ──
                 ui.label(egui::RichText::new(lang.t("theme")).color(theme.fg_primary).size(14.0).strong());
-                ui.add_space(4.0);
+                ui.add_space(SPACE_XS);
 
                 for preset in ThemePreset::all() {
                     if ui.selectable_value(&mut self.theme_preset, *preset, preset.label()).clicked() {
@@ -239,26 +203,26 @@ impl PortalApp {
                     }
                 }
 
-                ui.add_space(16.0);
+                ui.add_space(SPACE_LG);
                 ui.separator();
-                ui.add_space(8.0);
+                ui.add_space(SPACE_SM);
 
                 // ── Language section ──
                 ui.label(egui::RichText::new(lang.t("language_label")).color(theme.fg_primary).size(14.0).strong());
-                ui.add_space(4.0);
+                ui.add_space(SPACE_XS);
                 for lang_opt in Language::all() {
                     if ui.selectable_value(&mut self.language, *lang_opt, lang_opt.label()).clicked() {
                         changed = true;
                     }
                 }
 
-                ui.add_space(16.0);
+                ui.add_space(SPACE_LG);
                 ui.separator();
-                ui.add_space(8.0);
+                ui.add_space(SPACE_SM);
 
                 // ── Keyboard Shortcuts section ──
                 ui.label(egui::RichText::new(lang.t("keyboard_shortcuts")).color(theme.fg_primary).size(14.0).strong());
-                ui.add_space(8.0);
+                ui.add_space(SPACE_SM);
 
                 use crate::config::ShortcutAction;
                 use crate::ui::input::ShortcutResolver;
@@ -291,21 +255,21 @@ impl PortalApp {
                     let is_this_recording = self.recording_shortcut.as_ref() == Some(action);
 
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(lang.t(label_key)).color(theme.fg_primary).size(13.0));
+                        ui.label(egui::RichText::new(lang.t(label_key)).color(theme.fg_primary).size(FONT_BASE));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if is_this_recording {
-                                ui.label(egui::RichText::new(lang.t("press_key")).color(theme.accent).size(13.0).strong());
+                                ui.label(egui::RichText::new(lang.t("press_key")).color(theme.accent).size(FONT_BASE).strong());
                             } else {
                                 let edit_enabled = !is_recording;
                                 if ui.add_enabled(edit_enabled, egui::Button::new(
-                                    egui::RichText::new(&display).color(theme.fg_dim).size(13.0)
+                                    egui::RichText::new(&display).color(theme.fg_dim).size(FONT_BASE)
                                 ).min_size(egui::vec2(80.0, 24.0))).clicked() {
                                     self.recording_shortcut = Some(action.clone());
                                 }
                             }
                         });
                     });
-                    ui.add_space(2.0);
+                    ui.add_space(SPACE_XS / 2.0);
                 }
 
                 // Capture key combination when recording
@@ -353,9 +317,9 @@ impl PortalApp {
                     }
                 }
 
-                ui.add_space(12.0);
+                ui.add_space(SPACE_MD);
                 if ui.add(
-                    egui::Button::new(egui::RichText::new(lang.t("reset_defaults")).color(theme.fg_dim).size(13.0))
+                    egui::Button::new(egui::RichText::new(lang.t("reset_defaults")).color(theme.fg_dim).size(FONT_BASE))
                         .rounding(6.0)
                         .min_size(egui::vec2(140.0, 30.0))
                 ).clicked() {

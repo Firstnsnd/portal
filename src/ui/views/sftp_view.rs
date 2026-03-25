@@ -1,36 +1,15 @@
 use eframe::egui;
 
-use crate::PortalApp;
-use crate::sftp::{FileSelection, SftpConnectionState, SftpEntry, SftpEntryKind};
-use crate::ui::theme::ThemeColors;
-use crate::ui::i18n::Language;
-use crate::ui::types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog, SftpPanel};
+use crate::app::PortalApp;
+use crate::sftp::{SftpConnectionState, SftpEntryKind};
+use crate::ui::types::sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog, SftpPanel};
+use crate::ui::tokens::*;
+use crate::ui::widgets;
 
-/// A single entry in a drag payload.
-#[derive(Clone)]
-pub struct DragEntry {
-    pub full_path: String,
-    pub entry_name: String,
-    pub is_dir: bool,
-}
-
-/// Drag-and-drop payload for SFTP panel file transfers (supports multi-select).
-#[derive(Clone)]
-pub struct DragPayload {
-    pub is_local: bool,
-    pub entries: Vec<DragEntry>,
-}
-
-/// Actions produced by render_file_panel for the caller to apply to FileSelection.
-pub enum SelectionAction {
-    Single(usize),
-    Toggle(usize),
-    Range(usize),
-    SelectAll,
-    FocusMove(usize),
-    FocusExtend(usize),
-    DeselectAll,
-}
+// Import SFTP view components from subdirectory
+use crate::ui::views::sftp::{DragPayload, SelectionAction, MoveToDirRequest};
+use crate::ui::views::sftp::{render_breadcrumbs, render_file_panel, apply_selection_action};
+use crate::ui::views::sftp::render_transfer_progress;
 
 impl PortalApp {
     /// Render the SFTP view: left = local browser (always), right = host list or remote browser.
@@ -86,6 +65,10 @@ impl PortalApp {
         let mut local_right_delete_request = false;
         let mut remote_delete_request = false;
         let mut left_remote_delete_request = false;
+        let mut local_left_move_to_dir: Option<MoveToDirRequest> = None;
+        let mut local_right_move_to_dir: Option<MoveToDirRequest> = None;
+        let mut remote_move_to_dir: Option<MoveToDirRequest> = None;
+        let mut left_remote_move_to_dir: Option<MoveToDirRequest> = None;
 
         // Detect panel focus from mouse clicks
         if ui.ctx().input(|i| i.pointer.any_pressed()) {
@@ -197,6 +180,8 @@ impl PortalApp {
                     self.sftp_active_panel_is_local,
                     &self.language,
                     "local_left_scroll",
+                    self.sftp_editor_dialog.is_some(),
+                    &mut local_left_move_to_dir,
                 );
             } else {
                 // ── LEFT PANEL: Remote (independent connection) ──
@@ -479,6 +464,8 @@ impl PortalApp {
                                     self.sftp_active_panel_is_local,
                                     &self.language,
                                     "left_remote_scroll",
+                                    self.sftp_editor_dialog.is_some(),
+                                    &mut left_remote_move_to_dir,
                                 );
                             }
                             SftpConnectionState::Disconnected => {
@@ -610,6 +597,8 @@ impl PortalApp {
                     !self.sftp_active_panel_is_local,
                     &self.language,
                     "local_right_scroll",
+                    self.sftp_editor_dialog.is_some(),
+                    &mut local_right_move_to_dir,
                 );
             } else {
                 // ── RIGHT PANEL: Remote (host list or remote browser) ──
@@ -894,6 +883,8 @@ impl PortalApp {
                                 !self.sftp_active_panel_is_local,
                                 &self.language,
                                 "right_remote_scroll",
+                                self.sftp_editor_dialog.is_some(),
+                                &mut remote_move_to_dir,
                             );
                         }
                         SftpConnectionState::Disconnected => {
@@ -1125,108 +1116,20 @@ impl PortalApp {
             let mut should_cancel = false;
             if let Some(ref browser) = self.sftp_browser.as_ref() {
                 if let Some(ref progress) = browser.transfer {
-                let label = if progress.is_upload {
-                    self.language.tf("uploading", &progress.filename)
-                } else {
-                    self.language.tf("downloading", &progress.filename)
-                };
-                let pct = if progress.total_bytes > 0 {
-                    progress.bytes_transferred as f32 / progress.total_bytes as f32
-                } else {
-                    0.0
-                };
-                // Format speed
-                let speed = progress.speed_bps();
-                let speed_str = format_transfer_speed(speed);
-                // Format transferred / total
-                let size_str = format!(
-                    "{} / {}",
-                    format_file_size(progress.bytes_transferred),
-                    format_file_size(progress.total_bytes),
-                );
-
-                let bar_h = 40.0;
-                let bar_area = egui::Rect::from_min_size(
-                    egui::pos2(available.min.x, available.max.y - bar_h),
-                    egui::vec2(available.width(), bar_h),
-                );
-                ui.painter().rect_filled(bar_area, 0.0, self.theme.bg_elevated);
-
-                let pad_x = 12.0;
-                let stop_size = 20.0;
-                let stop_right_pad = 10.0;
-                let content_right = bar_area.max.x - stop_size - stop_right_pad * 2.0;
-
-                // ── Row 1: label + info text + stop button ──
-                let row1_cy = bar_area.min.y + bar_h * 0.30;
-
-                // Label: "Uploading filename"
-                let label_galley = ui.painter().layout_no_wrap(
-                    label,
-                    egui::FontId::proportional(12.0),
-                    self.theme.fg_primary,
-                );
-                let label_w = label_galley.size().x;
-                ui.painter().galley(
-                    egui::pos2(bar_area.min.x + pad_x, row1_cy - label_galley.size().y / 2.0),
-                    label_galley,
-                    self.theme.fg_primary,
-                );
-
-                // Info text (right-aligned, left of stop button)
-                let info_text = format!("{:.0}%   {}   {}", pct * 100.0, speed_str, size_str);
-                let info_galley = ui.painter().layout_no_wrap(
-                    info_text,
-                    egui::FontId::proportional(11.0),
-                    self.theme.fg_dim,
-                );
-                let info_x = (content_right - info_galley.size().x).max(bar_area.min.x + pad_x + label_w + 12.0);
-                ui.painter().galley(
-                    egui::pos2(info_x, row1_cy - info_galley.size().y / 2.0),
-                    info_galley,
-                    self.theme.fg_dim,
-                );
-
-                // Stop button (vertically centered in bar)
-                let stop_rect = egui::Rect::from_min_size(
-                    egui::pos2(bar_area.max.x - stop_size - stop_right_pad, bar_area.center().y - stop_size / 2.0),
-                    egui::vec2(stop_size, stop_size),
-                );
-                let stop_resp = ui.allocate_rect(stop_rect, egui::Sense::click());
-                let stop_color = if stop_resp.hovered() { self.theme.red } else { self.theme.fg_dim };
-                ui.painter().text(
-                    stop_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "\u{25A0}",
-                    egui::FontId::proportional(14.0),
-                    stop_color,
-                );
-                if stop_resp.on_hover_text(self.language.t("stop_transfer")).clicked() {
-                    should_cancel = true;
+                    should_cancel = render_transfer_progress(
+                        ui,
+                        progress,
+                        available,
+                        &self.theme,
+                        &self.language,
+                    );
                 }
-
-                // ── Row 2: full-width progress bar ──
-                let row2_cy = bar_area.min.y + bar_h * 0.75;
-                let pb_h = 6.0;
-                let pb_rect = egui::Rect::from_min_size(
-                    egui::pos2(bar_area.min.x + pad_x, row2_cy - pb_h / 2.0),
-                    egui::vec2(content_right - bar_area.min.x - pad_x, pb_h),
-                );
-                ui.painter().rect_filled(pb_rect, 3.0, self.theme.border);
-                let filled = egui::Rect::from_min_size(
-                    pb_rect.min,
-                    egui::vec2(pb_rect.width() * pct, pb_rect.height()),
-                );
-                ui.painter().rect_filled(filled, 3.0, self.theme.accent);
             }
             if should_cancel {
-                // Cancel transfer outside the immutable borrow
-                let _ = browser;
                 if let Some(ref mut b) = self.sftp_browser.as_mut() {
                     b.cancel_transfer();
                 }
             }
-        }
         }
 
         // ── Handle delete key requests ──
@@ -1267,6 +1170,52 @@ impl PortalApp {
                         panel: SftpPanel::LeftRemote,
                         names,
                     });
+                }
+            }
+        }
+
+        // ── Handle drag-to-folder move requests ──
+        if let Some(req) = local_left_move_to_dir {
+            let current_path = self.local_browser_left.current_path.clone();
+            let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
+            for entry in &req.source_entries {
+                let src = &entry.full_path;
+                let dst = format!("{}/{}", target_path.trim_end_matches('/'), entry.entry_name);
+                if let Err(e) = std::fs::rename(src, &dst) {
+                    log::error!("Failed to move {} to {}: {}", src, dst, e);
+                }
+            }
+            self.local_browser_left.refresh();
+        }
+        if let Some(req) = local_right_move_to_dir {
+            let current_path = self.local_browser_right.current_path.clone();
+            let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
+            for entry in &req.source_entries {
+                let src = &entry.full_path;
+                let dst = format!("{}/{}", target_path.trim_end_matches('/'), entry.entry_name);
+                if let Err(e) = std::fs::rename(src, &dst) {
+                    log::error!("Failed to move {} to {}: {}", src, dst, e);
+                }
+            }
+            self.local_browser_right.refresh();
+        }
+        if let Some(req) = remote_move_to_dir {
+            if let Some(ref browser) = self.sftp_browser {
+                let current_path = browser.current_path.clone();
+                let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
+                for entry in &req.source_entries {
+                    let dst = format!("{}/{}", target_path.trim_end_matches('/'), entry.entry_name);
+                    browser.rename(&entry.full_path, &dst);
+                }
+            }
+        }
+        if let Some(req) = left_remote_move_to_dir {
+            if let Some(ref browser) = self.sftp_browser_left {
+                let current_path = browser.current_path.clone();
+                let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
+                for entry in &req.source_entries {
+                    let dst = format!("{}/{}", target_path.trim_end_matches('/'), entry.entry_name);
+                    browser.rename(&entry.full_path, &dst);
                 }
             }
         }
@@ -1533,22 +1482,11 @@ impl PortalApp {
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
-                .fixed_size(egui::vec2(300.0, 0.0))
+                .min_size(egui::vec2(280.0, 0.0))
+                .default_size(egui::vec2(DIALOG_WIDTH_SM, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
-                .frame(egui::Frame {
-                    fill: self.theme.bg_secondary,
-                    rounding: egui::Rounding::same(10.0),
-                    inner_margin: egui::Margin::same(20.0),
-                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                    shadow: egui::epaint::Shadow {
-                        offset: egui::vec2(0.0, 4.0),
-                        blur: 20.0,
-                        spread: 2.0,
-                        color: egui::Color32::from_black_alpha(80),
-                    },
-                    ..Default::default()
-                })
+                .frame(widgets::dialog_frame(&self.theme))
                 .show(ui.ctx(), |ui| {
                     // Title
                     ui.horizontal(|ui| {
@@ -1563,6 +1501,9 @@ impl PortalApp {
                     let te = ui.add(
                         egui::TextEdit::singleline(&mut dialog.new_name)
                             .desired_width(260.0)
+                            .hint_text(egui::RichText::new(self.language.t("new_name")).color(self.theme.hint_color()).italics())
+                            .text_color(self.theme.fg_primary)
+                            .font(egui::FontId::proportional(13.0))
                     );
                     if te.lost_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
                         if !dialog.new_name.is_empty() && dialog.new_name != dialog.old_name {
@@ -1580,27 +1521,13 @@ impl PortalApp {
                     ui.add_space(16.0);
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("save")).color(egui::Color32::WHITE).size(13.0)
-                                )
-                                .fill(self.theme.accent)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::primary_button(self.language.t("save"), &self.theme)).clicked() {
                                 if !dialog.new_name.is_empty() && dialog.new_name != dialog.old_name {
                                     rename_action = Some((dialog.panel, dialog.old_name.clone(), dialog.new_name.clone()));
                                     close_rename = true;
                                 }
                             }
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("cancel")).color(self.theme.fg_dim).size(13.0)
-                                )
-                                .fill(self.theme.bg_elevated)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::secondary_button(self.language.t("cancel"), &self.theme)).clicked() {
                                 close_rename = true;
                             }
                         });
@@ -1651,22 +1578,11 @@ impl PortalApp {
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
-                .fixed_size(egui::vec2(300.0, 0.0))
+                .min_size(egui::vec2(280.0, 0.0))
+                .default_size(egui::vec2(DIALOG_WIDTH_SM, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
-                .frame(egui::Frame {
-                    fill: self.theme.bg_secondary,
-                    rounding: egui::Rounding::same(10.0),
-                    inner_margin: egui::Margin::same(20.0),
-                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                    shadow: egui::epaint::Shadow {
-                        offset: egui::vec2(0.0, 4.0),
-                        blur: 20.0,
-                        spread: 2.0,
-                        color: egui::Color32::from_black_alpha(80),
-                    },
-                    ..Default::default()
-                })
+                .frame(widgets::dialog_frame(&self.theme))
                 .show(ui.ctx(), |ui| {
                     // Title
                     ui.horizontal(|ui| {
@@ -1681,6 +1597,9 @@ impl PortalApp {
                     let te = ui.add(
                         egui::TextEdit::singleline(&mut dialog.name)
                             .desired_width(260.0)
+                            .hint_text(egui::RichText::new(self.language.t("folder_name")).color(self.theme.hint_color()).italics())
+                            .text_color(self.theme.fg_primary)
+                            .font(egui::FontId::proportional(13.0))
                     );
                     if te.lost_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
                         if !dialog.name.is_empty() {
@@ -1698,27 +1617,13 @@ impl PortalApp {
                     ui.add_space(16.0);
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("save")).color(egui::Color32::WHITE).size(13.0)
-                                )
-                                .fill(self.theme.accent)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::primary_button(self.language.t("save"), &self.theme)).clicked() {
                                 if !dialog.name.is_empty() {
                                     create_dir_action = Some((dialog.panel, dialog.name.clone()));
                                     close_new_folder = true;
                                 }
                             }
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("cancel")).color(self.theme.fg_dim).size(13.0)
-                                )
-                                .fill(self.theme.bg_elevated)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::secondary_button(self.language.t("cancel"), &self.theme)).clicked() {
                                 close_new_folder = true;
                             }
                         });
@@ -1767,22 +1672,11 @@ impl PortalApp {
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
-                .fixed_size(egui::vec2(300.0, 0.0))
+                .min_size(egui::vec2(280.0, 0.0))
+                .default_size(egui::vec2(DIALOG_WIDTH_SM, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
-                .frame(egui::Frame {
-                    fill: self.theme.bg_secondary,
-                    rounding: egui::Rounding::same(10.0),
-                    inner_margin: egui::Margin::same(20.0),
-                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                    shadow: egui::epaint::Shadow {
-                        offset: egui::vec2(0.0, 4.0),
-                        blur: 20.0,
-                        spread: 2.0,
-                        color: egui::Color32::from_black_alpha(80),
-                    },
-                    ..Default::default()
-                })
+                .frame(widgets::dialog_frame(&self.theme))
                 .show(ui.ctx(), |ui| {
                     // Title
                     ui.horizontal(|ui| {
@@ -1797,6 +1691,9 @@ impl PortalApp {
                     let te = ui.add(
                         egui::TextEdit::singleline(&mut dialog.name)
                             .desired_width(260.0)
+                            .hint_text(egui::RichText::new(self.language.t("file_name")).color(self.theme.hint_color()).italics())
+                            .text_color(self.theme.fg_primary)
+                            .font(egui::FontId::proportional(13.0))
                     );
                     if te.lost_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
                         if !dialog.name.is_empty() {
@@ -1814,27 +1711,13 @@ impl PortalApp {
                     ui.add_space(16.0);
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("save")).color(egui::Color32::WHITE).size(13.0)
-                                )
-                                .fill(self.theme.accent)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::primary_button(self.language.t("save"), &self.theme)).clicked() {
                                 if !dialog.name.is_empty() {
                                     create_file_action = Some((dialog.panel, dialog.name.clone()));
                                     close_new_file = true;
                                 }
                             }
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("cancel")).color(self.theme.fg_dim).size(13.0)
-                                )
-                                .fill(self.theme.bg_elevated)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::secondary_button(self.language.t("cancel"), &self.theme)).clicked() {
                                 close_new_file = true;
                             }
                         });
@@ -1889,22 +1772,11 @@ impl PortalApp {
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
-                .fixed_size(egui::vec2(300.0, 0.0))
+                .min_size(egui::vec2(280.0, 0.0))
+                .default_size(egui::vec2(DIALOG_WIDTH_SM, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
-                .frame(egui::Frame {
-                    fill: self.theme.bg_secondary,
-                    rounding: egui::Rounding::same(10.0),
-                    inner_margin: egui::Margin::same(20.0),
-                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                    shadow: egui::epaint::Shadow {
-                        offset: egui::vec2(0.0, 4.0),
-                        blur: 20.0,
-                        spread: 2.0,
-                        color: egui::Color32::from_black_alpha(80),
-                    },
-                    ..Default::default()
-                })
+                .frame(widgets::dialog_frame(&self.theme))
                 .show(ui.ctx(), |ui| {
                     // Warning icon + title
                     ui.horizontal(|ui| {
@@ -1929,25 +1801,11 @@ impl PortalApp {
                     // Right-aligned buttons
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("delete_file")).color(egui::Color32::WHITE).size(13.0)
-                                )
-                                .fill(self.theme.red)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::danger_button(self.language.t("delete_file"), &self.theme)).clicked() {
                                 delete_action = Some((panel, names.clone()));
                                 close_delete = true;
                             }
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(self.language.t("cancel")).color(self.theme.fg_dim).size(13.0)
-                                )
-                                .fill(self.theme.bg_elevated)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::secondary_button(self.language.t("cancel"), &self.theme)).clicked() {
                                 close_delete = true;
                             }
                         });
@@ -1969,22 +1827,11 @@ impl PortalApp {
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
-                .fixed_size(egui::vec2(400.0, 0.0))
+                .min_size(egui::vec2(280.0, 0.0))
+                .default_size(egui::vec2(400.0, 0.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .title_bar(false)
-                .frame(egui::Frame {
-                    fill: self.theme.bg_secondary,
-                    rounding: egui::Rounding::same(10.0),
-                    inner_margin: egui::Margin::same(20.0),
-                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                    shadow: egui::epaint::Shadow {
-                        offset: egui::vec2(0.0, 4.0),
-                        blur: 20.0,
-                        spread: 2.0,
-                        color: egui::Color32::from_black_alpha(80),
-                    },
-                    ..Default::default()
-                })
+                .frame(widgets::dialog_frame(&self.theme))
                 .show(ui.ctx(), |ui| {
                     ui.vertical_centered(|ui| {
                         // Error icon + title
@@ -1999,14 +1846,7 @@ impl PortalApp {
                         ui.add_space(20.0);
                         // Close button
                         ui.vertical_centered(|ui| {
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new("确定").color(egui::Color32::WHITE).size(13.0)
-                                )
-                                .fill(self.theme.accent)
-                                .rounding(6.0)
-                                .min_size(egui::vec2(100.0, 32.0))
-                            ).clicked() {
+                            if ui.add(widgets::primary_button("确定", &self.theme)).clicked() {
                                 close_error = true;
                             }
                         });
@@ -2116,7 +1956,6 @@ impl PortalApp {
                         is_new_file: false,
                         error: String::new(),
                         save_as_name: String::new(),
-                        
                     });
                 }
                 Err(e) => {
@@ -2131,7 +1970,6 @@ impl PortalApp {
                         is_new_file: false,
                         error: e,
                         save_as_name: String::new(),
-                        
                     });
                 }
             }
@@ -2152,7 +1990,6 @@ impl PortalApp {
                     is_new_file: false,
                     error: String::new(),
                     save_as_name: String::new(),
-                    
                 });
             }
         }
@@ -2176,7 +2013,6 @@ impl PortalApp {
                             is_new_file: false,
                             error: String::new(),
                             save_as_name: String::new(),
-                            
                         });
                     }
                     Err(e) => {
@@ -2191,7 +2027,6 @@ impl PortalApp {
                             is_new_file: false,
                             error: e,
                             save_as_name: String::new(),
-                            
                         });
                     }
                 }
@@ -2212,7 +2047,6 @@ impl PortalApp {
                         is_new_file: false,
                         error: String::new(),
                         save_as_name: String::new(),
-                        
                     });
                 }
             }
@@ -2232,7 +2066,6 @@ impl PortalApp {
                         is_new_file: false,
                         error: String::new(),
                         save_as_name: String::new(),
-                        
                     });
                 }
             }
@@ -2251,7 +2084,6 @@ impl PortalApp {
                             is_new_file: false,
                             error: String::new(),
                             save_as_name: String::new(),
-                            
                         });
                     }
                     Err(e) => {
@@ -2266,7 +2098,6 @@ impl PortalApp {
                             is_new_file: false,
                             error: e,
                             save_as_name: String::new(),
-                            
                         });
                     }
                 }
@@ -2281,22 +2112,19 @@ impl PortalApp {
 
         if let Some(ref mut dialog) = self.sftp_editor_dialog {
             let has_unsaved = dialog.content != dialog.original_content;
-            let title = if dialog.is_new_file && dialog.file_path.is_empty() {
-                format!("{}", self.language.t("new_file"))
-            } else if has_unsaved {
-                format!("{} *", dialog.file_name)
-            } else {
-                dialog.file_name.clone()
-            };
 
             let mut open = true;
-            egui::Window::new(&title)
+            // Use fixed title and ID to prevent window flickering when title changes (e.g. adding "*" for unsaved)
+            egui::Window::new("sftp_editor")
+                .id(egui::Id::new("sftp_editor_window"))
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(true)
                 .min_size(egui::vec2(400.0, 200.0))
                 .default_width(680.0)
+                .default_height(500.0)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .pivot(egui::Align2::CENTER_CENTER)
                 .title_bar(false)
                 .frame(egui::Frame {
                     fill: self.theme.bg_primary,
@@ -2422,6 +2250,8 @@ impl PortalApp {
                                     egui::TextEdit::singleline(&mut dialog.save_as_name)
                                         .desired_width(ui.available_width())
                                         .font(egui::FontId::monospace(12.0))
+                                        .hint_text(egui::RichText::new(self.language.t("file_name")).color(self.theme.hint_color()).italics())
+                                        .text_color(self.theme.fg_primary)
                                 );
                             });
                         });
@@ -2446,7 +2276,7 @@ impl PortalApp {
                             egui::ScrollArea::both()
                                 .max_height(max_editor_h)
                                 .show(ui, |ui| {
-                                    let text_edit_response = ui.add(
+                                    let response = ui.add(
                                         egui::TextEdit::multiline(&mut dialog.content)
                                             .id(egui::Id::new("sftp_editor_content"))
                                             .desired_width(f32::INFINITY)
@@ -2454,11 +2284,10 @@ impl PortalApp {
                                             .font(egui::FontId::monospace(self.font_size))
                                             .code_editor()
                                             .lock_focus(true)
+                                            .hint_text(egui::RichText::new(self.language.t("file_content")).color(self.theme.hint_color()).italics())
+                                            .text_color(self.theme.fg_primary)
                                     );
-                                    // Auto-focus the editor when dialog first opens
-                                    if !text_edit_response.has_focus() && !dialog.loading && dialog.error.is_empty() {
-                                        text_edit_response.request_focus();
-                                    }
+                                    let _ = response; // response unused, just for focus
                                 });
                         });
                     }
@@ -2589,387 +2418,4 @@ impl PortalApp {
             self.sftp_editor_dialog = None;
         }
     }
-}
-
-/// Render breadcrumb path navigation. Each path segment is a clickable button.
-pub fn render_breadcrumbs(
-    ui: &mut egui::Ui,
-    current_path: &str,
-    navigate_to: &mut Option<String>,
-    _is_local: bool,
-    theme: &ThemeColors,
-) {
-    let parts: Vec<&str> = current_path.split('/').filter(|s| !s.is_empty()).collect();
-
-    if ui
-        .add(egui::Button::new(egui::RichText::new("/").color(theme.fg_dim).size(12.0).family(egui::FontFamily::Monospace)).frame(false))
-        .clicked()
-    {
-        *navigate_to = Some("/".to_string());
-    }
-
-    for (i, part) in parts.iter().enumerate() {
-        ui.add_space(0.0);
-        ui.label(egui::RichText::new("/").color(theme.fg_dim).size(10.0));
-        ui.add_space(0.0);
-
-        let is_last = i == parts.len() - 1;
-        let text = egui::RichText::new(*part)
-            .color(if is_last { theme.fg_primary } else { theme.accent })
-            .size(12.0)
-            .family(egui::FontFamily::Monospace);
-
-        if is_last {
-            ui.label(text);
-        } else if ui.add(egui::Button::new(text).frame(false)).clicked() {
-            let target: String = format!("/{}", parts[..=i].join("/"));
-            *navigate_to = Some(target);
-        }
-    }
-}
-
-/// Apply a SelectionAction to a FileSelection.
-fn apply_selection_action(selection: &mut FileSelection, action: SelectionAction, entry_count: usize) {
-    match action {
-        SelectionAction::Single(i) => selection.select_one(i),
-        SelectionAction::Toggle(i) => selection.toggle(i),
-        SelectionAction::Range(i) => selection.select_range(i),
-        SelectionAction::SelectAll => selection.select_all(entry_count),
-        SelectionAction::FocusMove(i) => selection.select_one(i),
-        SelectionAction::FocusExtend(i) => selection.extend_to(i),
-        SelectionAction::DeselectAll => selection.clear(),
-    }
-}
-
-/// Render a file listing panel (reused for both local and remote).
-/// Each entry is draggable via egui DnD; the caller handles drop detection.
-pub fn render_file_panel(
-    ui: &mut egui::Ui,
-    entries: &[SftpEntry],
-    selection: &FileSelection,
-    navigate_to: &mut Option<String>,
-    selection_action: &mut Option<SelectionAction>,
-    is_local: bool,
-    current_path: &str,
-    theme: &ThemeColors,
-    context_menu_request: &mut Option<(egui::Pos2, Option<usize>)>,
-    open_file_request: &mut Option<usize>,
-    delete_request: &mut bool,
-    is_active_panel: bool,
-    language: &Language,
-    panel_id: &str,
-) {
-    let row_height = 26.0;
-    let status_bar_height = 24.0;
-
-    // Reserve space for the status bar at the bottom
-    let available = ui.available_rect_before_wrap();
-    let scroll_rect = egui::Rect::from_min_max(
-        available.min,
-        egui::pos2(available.max.x, available.max.y - status_bar_height),
-    );
-    let status_rect = egui::Rect::from_min_max(
-        egui::pos2(available.min.x, available.max.y - status_bar_height),
-        available.max,
-    );
-
-    // Keyboard handling (only for active panel)
-    if is_active_panel && !entries.is_empty() {
-        let modifiers = ui.ctx().input(|i| i.modifiers);
-        let cmd = modifiers.command; // Cmd on macOS, Ctrl on others
-        let shift = modifiers.shift;
-
-        // Cmd/Ctrl+A → select all
-        if cmd && ui.ctx().input(|i| i.key_pressed(egui::Key::A)) {
-            *selection_action = Some(SelectionAction::SelectAll);
-        }
-
-        // Arrow keys
-        let focus = selection.focus.unwrap_or(0);
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-            if focus > 0 {
-                let new_focus = focus - 1;
-                if shift {
-                    *selection_action = Some(SelectionAction::FocusExtend(new_focus));
-                } else {
-                    *selection_action = Some(SelectionAction::FocusMove(new_focus));
-                }
-            }
-        }
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-            if focus + 1 < entries.len() {
-                let new_focus = focus + 1;
-                if shift {
-                    *selection_action = Some(SelectionAction::FocusExtend(new_focus));
-                } else {
-                    *selection_action = Some(SelectionAction::FocusMove(new_focus));
-                }
-            }
-        }
-
-        // Enter → open focused entry
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
-            if let Some(f) = selection.focus {
-                if let Some(entry) = entries.get(f) {
-                    if entry.kind == SftpEntryKind::Directory {
-                        *navigate_to = Some(entry.name.clone());
-                    } else {
-                        *open_file_request = Some(f);
-                    }
-                }
-            }
-        }
-
-        // Delete / Backspace → request delete (only if no text input has focus)
-        if !ui.ctx().wants_keyboard_input() {
-            if ui.ctx().input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
-                if !selection.is_empty() {
-                    *delete_request = true;
-                }
-            }
-        }
-    }
-
-    // File listing scroll area
-    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(scroll_rect), |ui| {
-        egui::ScrollArea::vertical()
-            .id_salt(panel_id)
-            .show(ui, |ui| {
-            for (i, entry) in entries.iter().enumerate() {
-                let is_selected = selection.is_selected(i);
-                let is_focus = selection.focus == Some(i);
-                let is_dir = entry.kind == SftpEntryKind::Directory;
-
-                let width = ui.available_width();
-                let (rect, resp) = ui.allocate_exact_size(
-                    egui::vec2(width, row_height),
-                    egui::Sense::click_and_drag(),
-                );
-
-                // Background: selected, focused, or hovered
-                if is_selected || resp.hovered() {
-                    let bg = if is_selected {
-                        theme.accent_alpha(30)
-                    } else {
-                        theme.hover_bg
-                    };
-                    ui.painter().rect_filled(rect, 0.0, bg);
-                }
-
-                // Focus indicator (subtle left border)
-                if is_focus && is_active_panel {
-                    let focus_rect = egui::Rect::from_min_size(
-                        rect.min,
-                        egui::vec2(2.0, rect.height()),
-                    );
-                    ui.painter().rect_filled(focus_rect, 0.0, theme.accent);
-                }
-
-                // Icon
-                let icon = match entry.kind {
-                    SftpEntryKind::Directory => "\u{1F4C1}",
-                    SftpEntryKind::Symlink => "\u{1F517}",
-                    _ => "\u{1F4C4}",
-                };
-                ui.painter().text(
-                    egui::pos2(rect.min.x + 8.0, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    icon,
-                    egui::FontId::proportional(11.0),
-                    theme.fg_dim,
-                );
-
-                // Name
-                let name_color = if is_dir { theme.accent } else { theme.fg_primary };
-                let display_name = if is_dir {
-                    format!("{}/", entry.name)
-                } else {
-                    entry.name.clone()
-                };
-                ui.painter().text(
-                    egui::pos2(rect.min.x + 28.0, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    &display_name,
-                    egui::FontId::proportional(12.0),
-                    name_color,
-                );
-
-                // Size (right-aligned)
-                if !is_dir {
-                    if let Some(s) = entry.size {
-                        ui.painter().text(
-                            egui::pos2(rect.max.x - 8.0, rect.center().y),
-                            egui::Align2::RIGHT_CENTER,
-                            format_file_size(s),
-                            egui::FontId::proportional(11.0),
-                            theme.fg_dim,
-                        );
-                    }
-                }
-
-                // Permissions (right-aligned, before size)
-                if let Some(mode) = entry.permissions {
-                    ui.painter().text(
-                        egui::pos2(rect.max.x - 75.0, rect.center().y),
-                        egui::Align2::RIGHT_CENTER,
-                        format_permissions(mode),
-                        egui::FontId::monospace(10.0),
-                        theme.fg_dim,
-                    );
-                }
-
-                // Drag payload (multi-select aware) — only set when dragging
-                if resp.dragged() {
-                    if is_selected && selection.count() > 1 {
-                        // Dragging from a selected item → pack all selected entries
-                        let drag_entries: Vec<DragEntry> = selection.selected.iter()
-                            .filter_map(|&idx| entries.get(idx).map(|e| DragEntry {
-                                full_path: format!("{}/{}", current_path.trim_end_matches('/'), e.name),
-                                entry_name: e.name.clone(),
-                                is_dir: e.kind == SftpEntryKind::Directory,
-                            }))
-                            .collect();
-                        resp.dnd_set_drag_payload(DragPayload {
-                            is_local,
-                            entries: drag_entries,
-                        });
-                    } else {
-                        // Single item drag
-                        let full_path = format!(
-                            "{}/{}",
-                            current_path.trim_end_matches('/'),
-                            entry.name
-                        );
-                        resp.dnd_set_drag_payload(DragPayload {
-                            is_local,
-                            entries: vec![DragEntry {
-                                full_path,
-                                entry_name: entry.name.clone(),
-                                is_dir,
-                            }],
-                        });
-                    }
-                }
-
-                if resp.secondary_clicked() {
-                    if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
-                        *context_menu_request = Some((pos, Some(i)));
-                    }
-                } else if resp.double_clicked() {
-                    if is_dir {
-                        *navigate_to = Some(entry.name.clone());
-                    } else {
-                        *open_file_request = Some(i);
-                    }
-                } else if resp.clicked() {
-                    let modifiers = ui.ctx().input(|i| i.modifiers);
-                    if modifiers.command {
-                        *selection_action = Some(SelectionAction::Toggle(i));
-                    } else if modifiers.shift {
-                        *selection_action = Some(SelectionAction::Range(i));
-                    } else {
-                        *selection_action = Some(SelectionAction::Single(i));
-                    }
-                }
-            }
-
-            // Click on blank area → deselect all
-            let remaining = ui.available_rect_before_wrap();
-            let blank_resp = ui.allocate_rect(remaining, egui::Sense::click());
-            if blank_resp.secondary_clicked() {
-                if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
-                    *context_menu_request = Some((pos, None));
-                }
-            } else if blank_resp.clicked() {
-                *selection_action = Some(SelectionAction::DeselectAll);
-            }
-        });
-    });
-
-    // Status bar at the bottom
-    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(status_rect), |ui| {
-        ui.painter().rect_filled(status_rect, 0.0, theme.bg_secondary);
-
-        let sel_count = selection.count();
-        let dir_count = entries.iter().filter(|e| e.kind == SftpEntryKind::Directory).count();
-        let file_count = entries.iter().filter(|e| e.kind == SftpEntryKind::File).count();
-        let total_size: u64 = entries.iter()
-            .filter(|e| e.kind == SftpEntryKind::File)
-            .filter_map(|e| e.size)
-            .sum();
-
-        let status_text = if sel_count > 0 {
-            let sel_size: u64 = selection.selected.iter()
-                .filter_map(|&i| entries.get(i))
-                .filter(|e| e.kind == SftpEntryKind::File)
-                .filter_map(|e| e.size)
-                .sum();
-            format!(
-                "{} \u{2014} {}  |  {} files, {} folders",
-                language.tf("n_selected", &sel_count.to_string()),
-                format_file_size(sel_size),
-                file_count,
-                dir_count,
-            )
-        } else {
-            format!(
-                "{} files, {} folders  \u{2014}  {}",
-                file_count,
-                dir_count,
-                format_file_size(total_size),
-            )
-        };
-
-        ui.painter().text(
-            egui::pos2(status_rect.min.x + 8.0, status_rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            &status_text,
-            egui::FontId::proportional(11.0),
-            theme.fg_dim,
-        );
-    });
-    ui.allocate_rect(available, egui::Sense::hover());
-}
-
-/// Format transfer speed in human-readable form (e.g. "1.2 MB/s").
-pub fn format_transfer_speed(bps: f64) -> String {
-    if bps < 1024.0 {
-        format!("{:.0} B/s", bps)
-    } else if bps < 1024.0 * 1024.0 {
-        format!("{:.1} KB/s", bps / 1024.0)
-    } else if bps < 1024.0 * 1024.0 * 1024.0 {
-        format!("{:.1} MB/s", bps / (1024.0 * 1024.0))
-    } else {
-        format!("{:.1} GB/s", bps / (1024.0 * 1024.0 * 1024.0))
-    }
-}
-
-pub fn format_file_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-    }
-}
-
-/// Format Unix file permissions to rwxrwxrwx string.
-pub fn format_permissions(mode: u32) -> String {
-    let file_type = match mode & 0o170000 {
-        0o040000 => 'd',
-        0o120000 => 'l',
-        _ => '-',
-    };
-    let mut s = String::with_capacity(10);
-    s.push(file_type);
-    for shift in [6, 3, 0] {
-        let bits = (mode >> shift) & 0o7;
-        s.push(if bits & 4 != 0 { 'r' } else { '-' });
-        s.push(if bits & 2 != 0 { 'w' } else { '-' });
-        s.push(if bits & 1 != 0 { 'x' } else { '-' });
-    }
-    s
 }
