@@ -2,6 +2,26 @@
 
 All notable changes to Portal will be documented in this file.
 
+## [0.11.1] - 2026-03-25
+
+### Fixed
+- **Recent Connections Auth** - Fixed authentication not being preserved when connecting from recent connections list
+- **PTY Resource Leak** - Fixed PTY resource leak causing zombie processes to accumulate
+- **SFTP Resource Leaks** - Fixed resource leaks in SFTP browser and port forwarding
+- **Terminal Reflow** - Fixed empty terminal cursor issue during resize/reflow operations
+- **Keychain Form Placeholders** - Fixed placeholder text showing "???" due to missing i18n keys
+
+### Added
+- **VTE Test Suite** - Comprehensive ANSI escape sequence tests for SSH ls output parsing
+- **Terminal Reflow Tests** - Added test coverage for terminal resize and cursor positioning
+
+### Improved
+- **Form Input Styling** - Unified all form input styling across the application:
+  - Consistent font sizes (13px for singleline, 12px for multiline)
+  - Consistent text colors using theme.fg_primary
+  - All placeholders use italic styling with transparency
+  - Applied to 33 TextEdit widgets across all views
+
 ## [0.11.0] - 2026-03-24
 
 ### Added
