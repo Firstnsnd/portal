@@ -407,8 +407,19 @@ pub fn render_terminal_session(
         }
 
         let mut ime_committed = false;
-        let mut text_event_processed = false;
         let has_ime_events = events.iter().any(|e| matches!(e, egui::Event::Ime(_)));
+
+        // Pre-collect all characters from Text events to detect duplicates with Key events
+        // On macOS, typing a character generates both Text and Key events
+        let text_chars: std::collections::HashSet<char> = events.iter()
+            .filter_map(|e| {
+                if let egui::Event::Text(t) = e {
+                    t.chars().next()
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         let has_non_ascii_text = events.iter().any(|e| {
             if let egui::Event::Text(text) = e {
@@ -462,10 +473,6 @@ pub fn render_terminal_session(
             for event in &events {
                 match event {
                     egui::Event::Text(text) => {
-                        // Mark that we received a Text event (even if we skip it due to IME)
-                        // This prevents Key events from sending duplicate characters
-                        text_event_processed = true;
-
                         // Skip Text events if IME is composing or if IME committed in this frame
                         // This prevents duplicate input when both IME and Text events fire
                         if *ime_composing || ime_committed {
@@ -491,7 +498,6 @@ pub fn render_terminal_session(
                             if !safe_text.is_empty() {
                                 session.write(&safe_text);
                                 input_bytes.extend_from_slice(safe_text.as_bytes());
-                                text_event_processed = true;
                             }
                             session.last_non_ascii_input = true;
                         } else {
@@ -504,7 +510,6 @@ pub fn render_terminal_session(
                             if !safe_text.is_empty() {
                                 session.write(&safe_text);
                                 input_bytes.extend_from_slice(safe_text.as_bytes());
-                                text_event_processed = true;
                             }
                             // Update flag: regular ASCII text means we're no longer in IME mode
                             if !is_punct {
@@ -602,21 +607,25 @@ pub fn render_terminal_session(
                             };
                             if special {
                                 session.selection.clear();
-                            } else if !*ime_composing && !ime_committed && !text_event_processed {
+                            } else if !*ime_composing && !ime_committed {
                                 // Skip character input from Key events if we already processed Text events
                                 // This prevents duplicate input on macOS where both events fire
                                 if let Some(ch) = key_to_char(key, modifiers.shift) {
-                                    let is_ime_punct = is_chinese_ime_punct(ch);
-                                    if is_ime_punct && (session.last_non_ascii_input || has_non_ascii_text) {
-                                        // suppress duplicate punctuation from IME
-                                    } else {
-                                        if !is_ime_punct {
-                                            session.last_non_ascii_input = false;
+                                    // Skip this Key event character if it appears in any Text event
+                                    // This prevents duplicate input when both events fire for the same keypress
+                                    if !text_chars.contains(&ch) {
+                                        let is_ime_punct = is_chinese_ime_punct(ch);
+                                        if is_ime_punct && (session.last_non_ascii_input || has_non_ascii_text) {
+                                            // suppress duplicate punctuation from IME
+                                        } else {
+                                            if !is_ime_punct {
+                                                session.last_non_ascii_input = false;
+                                            }
+                                            session.selection.clear();
+                                            let s = ch.to_string();
+                                            session.write(&s);
+                                            input_bytes.extend_from_slice(s.as_bytes());
                                         }
-                                        session.selection.clear();
-                                        let s = ch.to_string();
-                                        session.write(&s);
-                                        input_bytes.extend_from_slice(s.as_bytes());
                                     }
                                 }
                             }

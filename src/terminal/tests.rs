@@ -1789,3 +1789,209 @@ mod ascii_punctuation_tests {
                 "Ternary operator with ? and : should be rendered");
     }
 }
+
+/// Tests for preventing duplicate character input on macOS.
+///
+/// Background: On macOS, egui fires both `Event::Text` and `Event::Key` events
+/// for the same keypress. Without proper deduplication, typing a single character
+/// like "c" would result in "cc" being sent to the terminal.
+///
+/// Fix: Pre-collect all characters from Text events into a HashSet, then skip
+/// Key event characters that match any Text event character.
+#[cfg(test)]
+mod duplicate_input_prevention_tests {
+    use std::collections::HashSet;
+
+    /// Simulates the logic used in render.rs to collect Text event characters
+    fn collect_text_chars_from_events(events: &[&str]) -> HashSet<char> {
+        events.iter()
+            .filter_map(|e| e.chars().next())
+            .collect()
+    }
+
+    /// Helper to simulate key_to_char conversion (simplified version of input.rs::key_to_char)
+    fn key_to_char_sim(key: &str, shift: bool) -> Option<char> {
+        match key {
+            "A" => Some(if shift { 'A' } else { 'a' }),
+            "B" => Some(if shift { 'B' } else { 'b' }),
+            "C" => Some(if shift { 'C' } else { 'c' }),
+            "L" => Some(if shift { 'L' } else { 'l' }),
+            "Period" => Some('.'),
+            "Comma" => Some(','),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn test_text_chars_collection_single_char() {
+        let events = vec!["c"];
+        let text_chars = collect_text_chars_from_events(&events);
+        assert_eq!(text_chars.len(), 1);
+        assert!(text_chars.contains(&'c'));
+    }
+
+    #[test]
+    fn test_text_chars_collection_multiple_chars() {
+        let events = vec!["h", "e", "l", "l", "o"];
+        let text_chars = collect_text_chars_from_events(&events);
+        assert!(text_chars.contains(&'h'));
+        assert!(text_chars.contains(&'e'));
+        assert!(text_chars.contains(&'l'));
+        assert!(text_chars.contains(&'o'));
+    }
+
+    #[test]
+    fn test_duplicate_detection_same_char() {
+        let text_events = vec!["l"];
+        let text_chars = collect_text_chars_from_events(&text_events);
+
+        // Simulate Key event for the same character
+        let key_char = key_to_char_sim("L", false);
+        assert_eq!(key_char, Some('l'));
+
+        // The Key event character should be detected as duplicate
+        assert!(text_chars.contains(&key_char.unwrap()),
+                "Key event char should be detected as duplicate when Text event has same char");
+    }
+
+    #[test]
+    fn test_no_duplicate_different_chars() {
+        let text_events = vec!["a", "b", "c"];
+        let text_chars = collect_text_chars_from_events(&text_events);
+
+        // Key event for different character
+        let key_char = key_to_char_sim("L", false);
+        assert_eq!(key_char, Some('l'));
+
+        // Should NOT be detected as duplicate
+        assert!(!text_chars.contains(&key_char.unwrap()),
+                "Key event char should NOT be duplicate when Text event has different chars");
+    }
+
+    #[test]
+    fn test_punctuation_not_duplicated() {
+        let text_events = vec!["."];
+        let text_chars = collect_text_chars_from_events(&text_events);
+
+        // Key event for period
+        let key_char = Some('.');
+
+        assert!(text_chars.contains(&key_char.unwrap()),
+                "Punctuation from Text event should prevent duplicate from Key event");
+    }
+
+    #[test]
+    fn test_empty_text_events_allows_key_input() {
+        let text_events: Vec<&str> = vec![];
+        let text_chars = collect_text_chars_from_events(&text_events);
+
+        // When no Text events, Key events should NOT be filtered
+        let key_char = key_to_char_sim("L", false);
+        assert!(!text_chars.contains(&key_char.unwrap()),
+                "With no Text events, Key event char should not be filtered");
+    }
+
+    #[test]
+    fn test_multiple_text_events_prevents_multiple_keys() {
+        let text_events = vec!["a", "b", "c", "1", "2", "3"];
+        let text_chars = collect_text_chars_from_events(&text_events);
+
+        // All these Key event chars should be filtered
+        for expected in &['a', 'b', 'c', '1', '2', '3'] {
+            assert!(text_chars.contains(expected),
+                    "Text event char '{}' should prevent duplicate Key event", expected);
+        }
+    }
+
+    #[test]
+    fn test_uppercase_and_lowercase_distinct() {
+        let text_events = vec!["a"];
+        let text_chars = collect_text_chars_from_events(&text_events);
+
+        // Lowercase 'a' in Text events should NOT filter uppercase 'A' from Key event
+        // (This is correct behavior - they are different characters)
+        let key_char_upper = key_to_char_sim("A", true);
+        assert_eq!(key_char_upper, Some('A'));
+
+        // In real usage, both 'a' and 'A' would generate Text events,
+        // so this test documents the expected behavior
+        assert!(!text_chars.contains(&'A'),
+                "Uppercase and lowercase are distinct characters");
+    }
+
+    #[test]
+    fn test_shift_char_handling() {
+        // Test that shift-modified characters are handled correctly
+        let text_events = vec!["A"];  // User types shift+A
+        let text_chars = collect_text_chars_from_events(&text_events);
+
+        // Key event for shift+A should produce same character
+        let key_char = key_to_char_sim("A", true);
+        assert_eq!(key_char, Some('A'));
+
+        assert!(text_chars.contains(&key_char.unwrap()),
+                "Shift+modified chars should be deduplicated correctly");
+    }
+
+    #[test]
+    fn test_comprehensive_typing_scenario() {
+        // Simulate typing "hello" - each character generates both Text and Key events
+        let text_events = vec!["h", "e", "l", "l", "o"];
+        let text_chars = collect_text_chars_from_events(&text_events);
+
+        // Simulate corresponding Key events
+        let key_chars: Vec<char> = vec!['h', 'e', 'l', 'l', 'o'];
+
+        for key_char in key_chars {
+            assert!(text_chars.contains(&key_char),
+                    "Key event for '{}' should be filtered (Text event exists)", key_char);
+        }
+
+        // Character NOT in Text events should NOT be filtered
+        assert!(!text_chars.contains(&'x'),
+                "Key event for char not in Text events should NOT be filtered");
+    }
+
+    #[test]
+    fn test_special_characters_in_text_events() {
+        // Test that special/punctuation characters are collected
+        let text_events = vec![".", ",", "!", "?"];
+        let text_chars = collect_text_chars_from_events(&text_events);
+
+        for expected in &['.', ',', '!', '?'] {
+            assert!(text_chars.contains(expected),
+                    "Special character '{}' should be in text_chars", expected);
+        }
+    }
+
+    #[test]
+    fn test_mixed_content_typing() {
+        // Simulate typing "test.value" - realistic command typing
+        let text_events = vec!["t", "e", "s", "t", ".", "v", "a", "l", "u", "e"];
+        let text_chars = collect_text_chars_from_events(&text_events);
+
+        // Verify all characters are in the set
+        for expected in "test.value".chars() {
+            assert!(text_chars.contains(&expected),
+                    "Character '{}' from 'test.value' should be in text_chars", expected);
+        }
+
+        // Verify counts (HashSet deduplicates, so 'l' appears once even though typed once)
+        // Note: 'l' appears twice in "test.value" but only once in set
+        assert!(text_chars.contains(&'l'), "Character 'l' should be in set");
+    }
+
+    #[test]
+    fn test_hashset_property_automatic_deduplication() {
+        // This test documents that HashSet automatically deduplicates
+        let text_events = vec!["a", "a", "a", "b", "b"];
+        let text_chars: HashSet<char> = text_events.iter()
+            .filter_map(|e| e.chars().next())
+            .collect();
+
+        // Even though 'a' appears 3 times, it's only once in the set
+        assert_eq!(text_chars.len(), 2, "HashSet should deduplicate automatically");
+        assert!(text_chars.contains(&'a'));
+        assert!(text_chars.contains(&'b'));
+    }
+}
