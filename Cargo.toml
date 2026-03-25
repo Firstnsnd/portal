@@ -1,6 +1,6 @@
 [package]
 name = "portal"
-version = "0.11.9"
+version = "0.11.10"
 edition = "2021"
 description = "A modern terminal emulator with GUI"
 
@@ -60,7 +60,7 @@ signal-hook = "0.3"
 [package.metadata.bundle]
 name = "Portal"
 identifier = "com.portal.app"
-version = "0.11.9"
+version = "0.11.10"
 copyright = "Copyright © 2024 Portal"
 category = "public.app-category.developer-tools"
 short_description = "A modern terminal emulator with GUI"
