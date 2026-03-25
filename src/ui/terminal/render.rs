@@ -407,7 +407,6 @@ pub fn render_terminal_session(
         }
 
         let mut ime_committed = false;
-        let has_ime_events = events.iter().any(|e| matches!(e, egui::Event::Ime(_)));
 
         // Pre-collect all characters from Text events to detect duplicates with Key events
         // On macOS, typing a character generates both Text and Key events

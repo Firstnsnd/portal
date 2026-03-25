@@ -1,6 +1,8 @@
 //! Portal - Modern Terminal Emulator with egui
 //! Termius-inspired UI with native terminal input
 
+#![allow(unexpected_cfgs)]  // Suppress warnings from objc crate's macros
+
 mod app;
 mod config;
 mod sftp;
@@ -1107,7 +1109,6 @@ fn main() -> eframe::Result<()> {
     #[cfg(unix)]
     {
         use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::Arc;
 
         // Flag to track if we've already cleaned up
         static CLEANUP_DONE: AtomicBool = AtomicBool::new(false);
@@ -1117,7 +1118,7 @@ fn main() -> eframe::Result<()> {
             use signal_hook::consts::signal::*;
             use signal_hook::iterator::Signals;
 
-            let mut signals = Signals::new([SIGTERM, SIGINT, SIGHUP]).ok();
+            let signals = Signals::new([SIGTERM, SIGINT, SIGHUP]).ok();
 
             if let Some(mut sig) = signals {
                 for _ in sig.forever() {
