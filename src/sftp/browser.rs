@@ -123,6 +123,11 @@ impl SftpBrowser {
 
     /// Re-establish the connection using stored params, then navigate back to the current path.
     fn auto_reconnect(&mut self) {
+        // Close old connection first to prevent resource leak
+        // This ensures the old async task exits and old channels are dropped
+        let _ = self.cmd_tx.send(SftpCommand::Disconnect);
+
+        // Create new channels for the reconnection
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (resp_tx, resp_rx) = mpsc::unbounded_channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -145,6 +150,7 @@ impl SftpBrowser {
             reconnect_path,
         ));
 
+        // Replace the old channels (old ones are dropped here)
         self.cmd_tx = cmd_tx;
         self.resp_rx = resp_rx;
         self.cancel_flag = cancel_flag;
