@@ -461,6 +461,12 @@ pub fn render_terminal_session(
             for event in &events {
                 match event {
                     egui::Event::Text(text) => {
+                        // Skip Text events if IME committed text in this frame (prevents duplicates)
+                        // On macOS, IME Commit and Text events arrive together for the same input
+                        if ime_committed {
+                            continue;
+                        }
+                        // Also skip if there are IME events in the current frame
                         if has_ime_events {
                             continue;
                         }
