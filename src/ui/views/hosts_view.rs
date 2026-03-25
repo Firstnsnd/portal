@@ -288,6 +288,33 @@ impl PortalApp {
                                 btn_text_color,
                             );
                             if resp.clicked() && over_btn {
+                                // Look up the actual host entry from hosts list to preserve credentials
+                                if let Some(host_entry) = self.hosts.iter().find(|h| {
+                                    !h.is_local && h.host == record.host && h.port == record.port && h.username == record.username
+                                }).cloned() {
+                                    connect_history_host = Some(host_entry);
+                                } else {
+                                    // Fallback: create entry without credentials (will prompt for auth)
+                                    connect_history_host = Some(HostEntry::new_ssh(
+                                        record.host_name.clone(),
+                                        record.host.clone(),
+                                        record.port,
+                                        record.username.clone(),
+                                        String::new(),
+                                        None,
+                                        Vec::new(),
+                                    ));
+                                }
+                            }
+                        }
+                        if resp.double_clicked() {
+                            // Look up the actual host entry from hosts list to preserve credentials
+                            if let Some(host_entry) = self.hosts.iter().find(|h| {
+                                !h.is_local && h.host == record.host && h.port == record.port && h.username == record.username
+                            }).cloned() {
+                                connect_history_host = Some(host_entry);
+                            } else {
+                                // Fallback: create entry without credentials (will prompt for auth)
                                 connect_history_host = Some(HostEntry::new_ssh(
                                     record.host_name.clone(),
                                     record.host.clone(),
@@ -298,17 +325,6 @@ impl PortalApp {
                                     Vec::new(),
                                 ));
                             }
-                        }
-                        if resp.double_clicked() {
-                            connect_history_host = Some(HostEntry::new_ssh(
-                                record.host_name.clone(),
-                                record.host.clone(),
-                                record.port,
-                                record.username.clone(),
-                                String::new(),
-                                None,
-                                Vec::new(),
-                            ));
                         }
                     }
 
