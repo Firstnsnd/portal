@@ -27,3 +27,6 @@ pub mod selection;
 // Re-export commonly used functions
 pub use render::render_pane_tree;
 
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;

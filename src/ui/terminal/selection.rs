@@ -26,8 +26,8 @@ pub fn is_cjk(cp: u32) -> bool {
 ///
 /// # Arguments
 ///
-/// * `grid` - The terminal grid
-/// * `row` - Row index
+/// * `cells` - The cell row (either from grid.cells or scrollback)
+/// * `cols` - Maximum columns in the grid
 /// * `col` - Column index
 ///
 /// # Behavior
@@ -42,11 +42,7 @@ pub fn is_cjk(cp: u32) -> bool {
 /// encountering a continuation cell, potentially over-extending the selection
 /// into adjacent characters. The fix is to include the continuation cell and
 /// immediately break, as continuation cells mark the right edge of wide characters.
-pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usize) -> (usize, usize) {
-    if row >= grid.rows {
-        return (col, col);
-    }
-    let cells = &grid.cells[row];
+pub fn find_word_boundaries_in_row(cells: &[crate::terminal::TerminalCell], cols: usize, col: usize) -> (usize, usize) {
     let cell = cells.get(col);
 
     // If we landed on a continuation cell, walk back to the owning main cell
@@ -106,7 +102,7 @@ pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usiz
 
     // Walk right for ASCII word
     let mut end = actual_col;
-    while end + 1 < cells.len().min(grid.cols) {
+    while end + 1 < cells.len().min(cols) {
         let next_idx = end + 1;
         let next_cell = &cells[next_idx];
 
@@ -133,4 +129,16 @@ pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usiz
     }
 
     (start, end)
+}
+
+/// Find word boundaries at the given grid position (legacy compatibility).
+///
+/// This function only works for visible grid rows. For scrollback rows,
+/// use `find_word_boundaries_in_row` with the actual cell row.
+#[allow(dead_code)]
+pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usize) -> (usize, usize) {
+    if row >= grid.rows {
+        return (col, col);
+    }
+    find_word_boundaries_in_row(&grid.cells[row], grid.cols, col)
 }
