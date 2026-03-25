@@ -441,8 +441,9 @@ impl PortalApp {
                 ui.add_space(SPACE_XS);
                 ui.add(egui::TextEdit::singleline(&mut self.snippet_view_state.new_name)
                     .desired_width(f32::INFINITY)
-                    .hint_text(lang.t("snippet_name"))
-                    .font(egui::FontId::proportional(FONT_MD)));
+                    .hint_text(egui::RichText::new(lang.t("snippet_name")).color(theme.hint_color()).italics())
+                    .font(egui::FontId::proportional(FONT_MD))
+                    .text_color(theme.fg_primary));
                 ui.add_space(SPACE_MD);
 
                 // Group field
@@ -450,8 +451,9 @@ impl PortalApp {
                 ui.add_space(SPACE_XS);
                 ui.add(egui::TextEdit::singleline(&mut self.snippet_view_state.new_group)
                     .desired_width(f32::INFINITY)
-                    .hint_text(lang.t("snippet_group"))
-                    .font(egui::FontId::proportional(FONT_MD)));
+                    .hint_text(egui::RichText::new(lang.t("snippet_group")).color(theme.hint_color()).italics())
+                    .font(egui::FontId::proportional(FONT_MD))
+                    .text_color(theme.fg_primary));
                 ui.add_space(SPACE_MD);
 
                 // Command field
@@ -460,8 +462,9 @@ impl PortalApp {
                 ui.add(egui::TextEdit::multiline(&mut self.snippet_view_state.new_command)
                     .desired_width(f32::INFINITY)
                     .desired_rows(6)
-                    .hint_text(lang.t("snippet_command"))
-                    .font(egui::FontId::monospace(FONT_MD)));
+                    .hint_text(egui::RichText::new(lang.t("snippet_command")).color(theme.hint_color()).italics())
+                    .font(egui::FontId::monospace(FONT_MD))
+                    .text_color(theme.fg_primary));
                 ui.add_space(SPACE_LG);
 
                 // Action buttons

@@ -334,7 +334,9 @@ impl PortalApp {
                 ui.add_space(4.0);
                 ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.name)
                     .desired_width(f32::INFINITY)
-                    .font(egui::FontId::proportional(13.0)));
+                    .hint_text(egui::RichText::new("My SSH Key").color(theme.hint_color()).italics())
+                    .font(egui::FontId::proportional(13.0))
+                    .text_color(theme.fg_primary));
                 ui.add_space(12.0);
 
                 // Type selector
@@ -361,7 +363,9 @@ impl PortalApp {
                         ui.add_space(4.0);
                         ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.username)
                             .desired_width(f32::INFINITY)
-                            .font(egui::FontId::proportional(13.0)));
+                            .hint_text(egui::RichText::new("root").color(theme.hint_color()).italics())
+                            .font(egui::FontId::proportional(13.0))
+                            .text_color(theme.fg_primary));
                         ui.add_space(12.0);
 
                         // Password field
@@ -370,7 +374,9 @@ impl PortalApp {
                         ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.password)
                             .desired_width(f32::INFINITY)
                             .password(true)
-                            .font(egui::FontId::proportional(13.0)));
+                            .hint_text(egui::RichText::new("Enter password").color(theme.hint_color()).italics())
+                            .font(egui::FontId::proportional(13.0))
+                            .text_color(theme.fg_primary));
                     }
                     CredentialTypeChoice::SshKey => {
                         // Key source selector
@@ -394,8 +400,9 @@ impl PortalApp {
                                 ui.add_space(4.0);
                                 ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.key_path)
                                     .desired_width(f32::INFINITY)
-                                    .hint_text("~/.ssh/id_rsa")
-                                    .font(egui::FontId::proportional(13.0)));
+                                    .hint_text(egui::RichText::new("~/.ssh/id_rsa").color(theme.hint_color()).italics())
+                                    .font(egui::FontId::proportional(13.0))
+                                    .text_color(theme.fg_primary));
                             }
                             KeySourceChoice::ImportContent => {
                                 ui.label(widgets::field_label(lang.t("key_content"), &theme));
@@ -403,7 +410,9 @@ impl PortalApp {
                                 ui.add(egui::TextEdit::multiline(&mut self.credential_dialog.key_content)
                                     .desired_width(f32::INFINITY)
                                     .desired_rows(4)
-                                    .font(egui::FontId::monospace(11.0)));
+                                    .hint_text(egui::RichText::new("-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----").color(theme.hint_color()).italics())
+                                    .font(egui::FontId::monospace(11.0))
+                                    .text_color(theme.fg_primary));
                             }
                         }
                         ui.add_space(12.0);
@@ -414,7 +423,9 @@ impl PortalApp {
                         ui.add(egui::TextEdit::singleline(&mut self.credential_dialog.key_passphrase)
                             .desired_width(f32::INFINITY)
                             .password(true)
-                            .font(egui::FontId::proportional(13.0)));
+                            .hint_text(egui::RichText::new("Leave empty if none").color(theme.hint_color()).italics())
+                            .font(egui::FontId::proportional(13.0))
+                            .text_color(theme.fg_primary));
                     }
                 }
                 ui.add_space(16.0);

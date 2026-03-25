@@ -521,8 +521,9 @@ impl PortalApp {
                 ui.add_space(SPACE_XS);
                 ui.add(egui::TextEdit::singleline(&mut self.add_tunnel_dialog.local_host)
                     .desired_width(ui.available_width())
-                    .hint_text(lang.t("tunnel_local_host_placeholder"))
-                    .font(egui::FontId::proportional(FONT_MD)));
+                    .hint_text(egui::RichText::new(lang.t("tunnel_local_host_placeholder")).color(theme.hint_color()).italics())
+                    .font(egui::FontId::proportional(FONT_MD))
+                    .text_color(theme.fg_primary));
                 ui.add_space(SPACE_MD);
 
                 // Local port
@@ -530,8 +531,9 @@ impl PortalApp {
                 ui.add_space(SPACE_XS);
                 ui.add(egui::TextEdit::singleline(&mut self.add_tunnel_dialog.local_port)
                     .desired_width(ui.available_width())
-                    .hint_text(lang.t("tunnel_local_port_placeholder"))
-                    .font(egui::FontId::proportional(FONT_MD)));
+                    .hint_text(egui::RichText::new(lang.t("tunnel_local_port_placeholder")).color(theme.hint_color()).italics())
+                    .font(egui::FontId::proportional(FONT_MD))
+                    .text_color(theme.fg_primary));
                 ui.add_space(SPACE_MD);
 
                 // Remote host
@@ -539,8 +541,9 @@ impl PortalApp {
                 ui.add_space(SPACE_XS);
                 ui.add(egui::TextEdit::singleline(&mut self.add_tunnel_dialog.remote_host)
                     .desired_width(ui.available_width())
-                    .hint_text(lang.t("tunnel_remote_host_placeholder"))
-                    .font(egui::FontId::proportional(FONT_MD)));
+                    .hint_text(egui::RichText::new(lang.t("tunnel_remote_host_placeholder")).color(theme.hint_color()).italics())
+                    .font(egui::FontId::proportional(FONT_MD))
+                    .text_color(theme.fg_primary));
                 ui.add_space(SPACE_MD);
 
                 // Remote port
@@ -548,8 +551,9 @@ impl PortalApp {
                 ui.add_space(SPACE_XS);
                 ui.add(egui::TextEdit::singleline(&mut self.add_tunnel_dialog.remote_port)
                     .desired_width(ui.available_width())
-                    .hint_text(lang.t("tunnel_remote_port_placeholder"))
-                    .font(egui::FontId::proportional(FONT_MD)));
+                    .hint_text(egui::RichText::new(lang.t("tunnel_remote_port_placeholder")).color(theme.hint_color()).italics())
+                    .font(egui::FontId::proportional(FONT_MD))
+                    .text_color(theme.fg_primary));
                 ui.add_space(SPACE_LG);
 
                 // Error message

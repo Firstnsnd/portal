@@ -135,6 +135,8 @@ impl PortalApp {
                         egui::TextEdit::singleline(&mut self.custom_font_path)
                             .hint_text(egui::RichText::new("/path/to/font.ttf").color(theme.hint_color()).italics())
                             .desired_width(300.0)
+                            .font(egui::FontId::proportional(13.0))
+                            .text_color(theme.fg_primary)
                     );
                     if resp.lost_focus() {
                         self.fonts_dirty = true;

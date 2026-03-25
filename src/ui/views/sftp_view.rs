@@ -1501,6 +1501,9 @@ impl PortalApp {
                     let te = ui.add(
                         egui::TextEdit::singleline(&mut dialog.new_name)
                             .desired_width(260.0)
+                            .hint_text(egui::RichText::new(self.language.t("new_name")).color(self.theme.hint_color()).italics())
+                            .text_color(self.theme.fg_primary)
+                            .font(egui::FontId::proportional(13.0))
                     );
                     if te.lost_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
                         if !dialog.new_name.is_empty() && dialog.new_name != dialog.old_name {
@@ -1594,6 +1597,9 @@ impl PortalApp {
                     let te = ui.add(
                         egui::TextEdit::singleline(&mut dialog.name)
                             .desired_width(260.0)
+                            .hint_text(egui::RichText::new(self.language.t("folder_name")).color(self.theme.hint_color()).italics())
+                            .text_color(self.theme.fg_primary)
+                            .font(egui::FontId::proportional(13.0))
                     );
                     if te.lost_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
                         if !dialog.name.is_empty() {
@@ -1685,6 +1691,9 @@ impl PortalApp {
                     let te = ui.add(
                         egui::TextEdit::singleline(&mut dialog.name)
                             .desired_width(260.0)
+                            .hint_text(egui::RichText::new(self.language.t("file_name")).color(self.theme.hint_color()).italics())
+                            .text_color(self.theme.fg_primary)
+                            .font(egui::FontId::proportional(13.0))
                     );
                     if te.lost_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
                         if !dialog.name.is_empty() {
@@ -2241,6 +2250,8 @@ impl PortalApp {
                                     egui::TextEdit::singleline(&mut dialog.save_as_name)
                                         .desired_width(ui.available_width())
                                         .font(egui::FontId::monospace(12.0))
+                                        .hint_text(egui::RichText::new(self.language.t("file_name")).color(self.theme.hint_color()).italics())
+                                        .text_color(self.theme.fg_primary)
                                 );
                             });
                         });
@@ -2273,6 +2284,8 @@ impl PortalApp {
                                             .font(egui::FontId::monospace(self.font_size))
                                             .code_editor()
                                             .lock_focus(true)
+                                            .hint_text(egui::RichText::new(self.language.t("file_content")).color(self.theme.hint_color()).italics())
+                                            .text_color(self.theme.fg_primary)
                                     );
                                     let _ = response; // response unused, just for focus
                                 });

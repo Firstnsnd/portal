@@ -806,6 +806,7 @@ impl PortalApp {
                                 .hint_text(egui::RichText::new("My Server").color(theme.hint_color()).italics())
                                 .desired_width(f32::INFINITY)
                                 .text_color(theme.fg_primary)
+                                .font(egui::FontId::proportional(13.0))
                         );
 
                         ui.add_space(SPACE_XS);
@@ -816,6 +817,7 @@ impl PortalApp {
                                 .hint_text(egui::RichText::new("192.168.1.1").color(theme.hint_color()).italics())
                                 .desired_width(f32::INFINITY)
                                 .text_color(theme.fg_primary)
+                                .font(egui::FontId::proportional(13.0))
                         );
 
                         ui.add_space(SPACE_XS);
@@ -827,6 +829,8 @@ impl PortalApp {
                                     egui::TextEdit::singleline(&mut self.add_host_dialog.port)
                                         .desired_width(70.0)
                                         .text_color(theme.fg_primary)
+                                        .hint_text(egui::RichText::new("22").color(theme.hint_color()).italics())
+                                        .font(egui::FontId::proportional(13.0))
                                 );
                             });
                             ui.add_space(SPACE_SM);
@@ -837,6 +841,7 @@ impl PortalApp {
                                         .hint_text(egui::RichText::new("Production").color(theme.hint_color()).italics())
                                         .desired_width(f32::INFINITY)
                                         .text_color(theme.fg_primary)
+                                        .font(egui::FontId::proportional(13.0))
                                 );
                             });
                         });
@@ -850,6 +855,7 @@ impl PortalApp {
                                     .hint_text(egui::RichText::new("web, database, production").color(theme.hint_color()).italics())
                                     .desired_width(f32::INFINITY)
                                     .text_color(theme.fg_primary)
+                                    .font(egui::FontId::proportional(13.0))
                             );
                         });
 
@@ -868,6 +874,7 @@ impl PortalApp {
                                 .hint_text(egui::RichText::new("root").color(theme.hint_color()).italics())
                                 .desired_width(f32::INFINITY)
                                 .text_color(theme.fg_primary)
+                                .font(egui::FontId::proportional(13.0))
                         );
                         ui.add_space(SPACE_SM);
 
@@ -947,6 +954,7 @@ impl PortalApp {
                                                 .hint_text(egui::RichText::new("Enter password").color(theme.hint_color()).italics())
                                                 .desired_width(f32::INFINITY)
                                                 .text_color(theme.fg_primary)
+                                                .font(egui::FontId::proportional(13.0))
                                         );
                                     }
                                     AuthMethodChoice::Key => {
@@ -977,6 +985,7 @@ impl PortalApp {
                                                         .hint_text(egui::RichText::new("~/.ssh/id_rsa").color(theme.hint_color()).italics())
                                                         .desired_width(f32::INFINITY)
                                                         .text_color(theme.fg_primary)
+                                                        .font(egui::FontId::proportional(13.0))
                                                 );
                                             }
                                             KeySourceChoice::ImportContent => {
@@ -985,7 +994,7 @@ impl PortalApp {
                                                     egui::TextEdit::multiline(&mut self.add_host_dialog.key_content)
                                                         .id(egui::Id::new("import_private_key"))
                                                         .hint_text(egui::RichText::new("-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----").color(theme.hint_color()).italics())
-                                                        .font(egui::TextStyle::Monospace)
+                                                        .font(egui::FontId::monospace(12.0))
                                                         .desired_width(f32::INFINITY)
                                                         .desired_rows(6)
                                                         .frame(true)
@@ -1005,6 +1014,7 @@ impl PortalApp {
                                                 .hint_text(egui::RichText::new("Leave empty if none").color(theme.hint_color()).italics())
                                                 .desired_width(f32::INFINITY)
                                                 .text_color(theme.fg_primary)
+                                                .font(egui::FontId::proportional(13.0))
                                         );
                                     }
                                 }
@@ -1019,7 +1029,7 @@ impl PortalApp {
                             egui::TextEdit::multiline(&mut self.add_host_dialog.startup_commands)
                                 .desired_rows(3)
                                 .desired_width(f32::INFINITY)
-                                .font(egui::TextStyle::Monospace)
+                                .font(egui::FontId::monospace(12.0))
                                 .hint_text(egui::RichText::new(format!("{}\nexport PATH=/usr/local/bin:$PATH\nsource ~/.profile", lang.t("startup_commands_hint"))).color(theme.hint_color()).italics())
                                 .text_color(theme.fg_primary)
                         );
@@ -1120,7 +1130,8 @@ impl PortalApp {
                                     egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_local_host)
                                         .desired_width(100.0)
                                         .text_color(theme.fg_primary)
-                                        .font(egui::TextStyle::Small)
+                                        .font(egui::FontId::proportional(12.0))
+                                        .hint_text(egui::RichText::new("localhost").color(theme.hint_color()).italics())
                                 );
                             });
                             ui.add_space(SPACE_XS);
@@ -1130,7 +1141,8 @@ impl PortalApp {
                                     egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_local_port)
                                         .desired_width(50.0)
                                         .text_color(theme.fg_primary)
-                                        .font(egui::TextStyle::Small)
+                                        .font(egui::FontId::proportional(12.0))
+                                        .hint_text(egui::RichText::new("8080").color(theme.hint_color()).italics())
                                 );
                             });
                         });
@@ -1142,7 +1154,8 @@ impl PortalApp {
                                     egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_remote_host)
                                         .desired_width(100.0)
                                         .text_color(theme.fg_primary)
-                                        .font(egui::TextStyle::Small)
+                                        .font(egui::FontId::proportional(12.0))
+                                        .hint_text(egui::RichText::new("localhost").color(theme.hint_color()).italics())
                                 );
                             });
                             ui.add_space(SPACE_XS);
@@ -1152,7 +1165,8 @@ impl PortalApp {
                                     egui::TextEdit::singleline(&mut self.add_host_dialog.new_forward_remote_port)
                                         .desired_width(50.0)
                                         .text_color(theme.fg_primary)
-                                        .font(egui::TextStyle::Small)
+                                        .font(egui::FontId::proportional(12.0))
+                                        .hint_text(egui::RichText::new("3000").color(theme.hint_color()).italics())
                                 );
                             });
                         });
