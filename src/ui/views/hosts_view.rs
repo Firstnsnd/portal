@@ -263,17 +263,32 @@ impl PortalApp {
                         let secs_ago = now.saturating_sub(record.timestamp);
                         let time_text = format_time_ago(secs_ago, &self.language);
                         let visible_right = ui.clip_rect().max.x;
+
+                        // Layout time and connect button on the same line, vertically centered in row (row_h = 44, center = 22)
+                        let time_galley = ui.painter().layout_no_wrap(
+                            time_text.clone(),
+                            egui::FontId::proportional(10.0),
+                            self.theme.fg_dim,
+                        );
+                        let time_width = time_galley.size().x;
+
+                        // Time text (right aligned, vertically centered at y + 22)
+                        let time_x = visible_right - 24.0;
                         ui.painter().text(
-                            egui::pos2(visible_right - 24.0, rect.min.y + 14.0),
+                            egui::pos2(time_x, rect.min.y + 22.0),
                             egui::Align2::RIGHT_CENTER,
                             &time_text,
                             egui::FontId::proportional(10.0),
                             self.theme.fg_dim,
                         );
+
+                        // Connect button (left of time text, only on hover, vertically centered)
                         if hovered {
+                            let btn_width = 56.0;
+                            let btn_x = time_x - time_width - 8.0; // 8px padding between time and button
                             let btn_rect = egui::Rect::from_center_size(
-                                egui::pos2(visible_right - 40.0, rect.min.y + 30.0),
-                                egui::vec2(56.0, 20.0),
+                                egui::pos2(btn_x - btn_width / 2.0, rect.min.y + 22.0),
+                                egui::vec2(btn_width, 20.0),
                             );
                             let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
                             let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));

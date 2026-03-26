@@ -268,18 +268,13 @@ impl PortalApp {
                     });
             });
 
-        // ── Credential create/edit drawer (right SidePanel) ──
-        if self.credential_dialog.open {
-            self.show_credential_drawer(ctx);
-        }
-
         // ── Delete confirmation dialog ──
         if self.keychain_confirm_delete.is_some() {
             self.show_keychain_delete_dialog(ctx);
         }
     }
 
-    fn show_credential_drawer(&mut self, ctx: &egui::Context) {
+    pub fn show_credential_drawer(&mut self, ctx: &egui::Context) {
         let theme = self.theme.clone();
         let lang = self.language;
         let drawer_width = ctx.screen_rect().width().min(DRAWER_WIDTH).max(280.0);

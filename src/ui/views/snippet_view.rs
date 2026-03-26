@@ -3,7 +3,6 @@
 //! Command snippet management page with shadcn-style design.
 
 use eframe::egui;
-use egui::Widget;
 use uuid::Uuid;
 
 use crate::app::PortalApp;
@@ -15,8 +14,6 @@ impl PortalApp {
     pub fn show_snippets_page(&mut self, ctx: &egui::Context, _ui: &mut egui::Ui) {
         // Collect deferred actions
         let mut snippet_to_delete: Option<String> = None;
-        let mut snippet_to_save: Option<Snippet> = None;
-        let mut snippet_to_create: Option<Snippet> = None;
 
         // Top navigation bar (matching terminal tab bar style)
         egui::TopBottomPanel::top("snippets_nav_bar")
@@ -59,28 +56,24 @@ impl PortalApp {
                 egui::ScrollArea::vertical()
                     .id_salt("snippets_page_scroll")
                     .show(ui, |ui| {
-                        ui.add_space(12.0);
+                        ui.add_space(SPACE_MD);
 
-                        // Filter bar (right-aligned with margin)
+                        // Filter bar (in content area, right-aligned with margin)
                         ui.horizontal(|ui| {
-                            // Match ComboBox closed-state background
+                            // Match ComboBox closed-state background to New Host TextEdit input
                             let input_bg = ui.visuals().extreme_bg_color;
                             let border = self.theme.input_border;
                             ui.style_mut().visuals.widgets.inactive.bg_fill = input_bg;
-                            ui.style_mut().visuals.widgets.inactive.bg_stroke =
-                                egui::Stroke::new(1.0, border);
+                            ui.style_mut().visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, border);
                             ui.style_mut().visuals.widgets.hovered.bg_fill = input_bg;
-                            ui.style_mut().visuals.widgets.hovered.bg_stroke =
-                                egui::Stroke::new(1.0, self.theme.focus_ring);
+                            ui.style_mut().visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, self.theme.focus_ring);
                             ui.style_mut().visuals.widgets.active.bg_fill = input_bg;
-                            ui.style_mut().visuals.widgets.active.bg_stroke =
-                                egui::Stroke::new(1.0, self.theme.accent);
+                            ui.style_mut().visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, self.theme.accent);
                             ui.style_mut().visuals.widgets.open.bg_fill = input_bg;
-                            ui.style_mut().visuals.widgets.open.bg_stroke =
-                                egui::Stroke::new(1.0, self.theme.accent);
+                            ui.style_mut().visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, self.theme.accent);
 
                             // Add left space to push content to the right
-                            ui.add_space(ui.available_width() - 160.0);
+                            ui.add_space(ui.available_width() - 110.0); // Single filter, match hosts tag filter position
 
                             // Group filter dropdown
                             let all_groups = self.collect_snippet_groups();
@@ -91,51 +84,44 @@ impl PortalApp {
                             };
 
                             egui::ComboBox::from_id_salt("snippet_group_filter")
-                                .selected_text(
-                                    egui::RichText::new(&group_label)
-                                        .color(self.theme.accent)
-                                        .size(12.0)
-                                )
-                                .width(120.0)
+                                .selected_text(egui::RichText::new(group_label).color(self.theme.accent).size(FONT_MD))
+                                .width(90.0)
                                 .show_ui(ui, |ui| {
                                     widgets::style_dropdown(ui, &self.theme);
 
                                     // All option
-                                    if egui::Button::new(
+                                    if ui.add(egui::Button::new(
                                         egui::RichText::new(self.language.t("snippet_default_group"))
                                             .color(if self.snippet_view_state.group_filter.is_empty() { self.theme.accent } else { self.theme.fg_primary })
-                                            .size(12.0)
-                                    ).frame(false).ui(ui).clicked() {
+                                            .size(FONT_MD)
+                                    ).frame(false)).clicked() {
                                         self.snippet_view_state.group_filter.clear();
                                         ui.close_menu();
                                     }
 
                                     for group in &all_groups {
-                                        if egui::Button::new(
+                                        if ui.add(egui::Button::new(
                                             egui::RichText::new(group)
                                                 .color(if self.snippet_view_state.group_filter == *group { self.theme.accent } else { self.theme.fg_primary })
-                                                .size(12.0)
-                                        ).frame(false).ui(ui).clicked() {
+                                                .size(FONT_MD)
+                                        ).frame(false)).clicked() {
                                             self.snippet_view_state.group_filter = group.clone();
                                             ui.close_menu();
                                         }
                                     }
                                 });
 
-                            ui.add_space(8.0);
+                            ui.add_space(SPACE_SM);
 
                             // Clear button
                             if !self.snippet_view_state.group_filter.is_empty() {
-                                if ui.add(widgets::text_button(
-                                    self.language.t("clear_history"),
-                                    self.theme.accent
-                                )).clicked() {
+                                if ui.add(widgets::text_button(self.language.t("clear_history"), self.theme.accent)).clicked() {
                                     self.snippet_view_state.group_filter.clear();
                                 }
                             }
                         });
 
-                        ui.add_space(12.0);
+                        ui.add_space(SPACE_MD);
 
                         // ── Empty state ──
                         let filtered_snippets = self.filter_snippets();
@@ -276,11 +262,6 @@ impl PortalApp {
                     });
             });
 
-        // ── Show drawer for add/edit snippet ──
-        if self.snippet_view_state.open {
-            self.show_add_snippet_drawer(ctx, &mut snippet_to_create, &mut snippet_to_save);
-        }
-
         // ── Delete confirmation dialog ──
         if let Some(delete_id) = &self.snippet_view_state.confirm_delete.clone() {
             let snippet_name = self.snippets.iter()
@@ -346,21 +327,6 @@ impl PortalApp {
         }
 
         // ── Apply deferred actions ──
-        if let Some(snippet) = snippet_to_create {
-            self.snippets.push(snippet);
-            config::save_snippets(&self.snippets);
-        }
-
-        if let Some(updated) = snippet_to_save {
-            if let Some(s) = self.snippets.iter_mut().find(|s| s.id == updated.id) {
-                s.name = updated.name;
-                s.command = updated.command;
-                s.group = updated.group;
-            }
-            config::save_snippets(&self.snippets);
-            self.snippet_view_state.editing = None;
-        }
-
         if let Some(id) = snippet_to_delete {
             self.snippets.retain(|s| s.id != id);
             config::save_snippets(&self.snippets);

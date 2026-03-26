@@ -679,9 +679,32 @@ impl eframe::App for PortalApp {
             (None, String::new(), String::new(), String::new())
         };
 
-        // ── Add/Edit Host Drawer (right panel, Hosts view only, before CentralPanel) ──
+        // ── Drawers (right panels, before CentralPanel for proper clip_rect) ──
         if self.current_view == AppView::Hosts && self.add_host_dialog.open {
             self.show_add_host_drawer(ctx);
+        }
+        if self.current_view == AppView::Keychain && self.credential_dialog.open {
+            self.show_credential_drawer(ctx);
+        }
+        if self.current_view == AppView::Snippets && self.snippet_view_state.open {
+            // Need to create deferred action variables for snippet drawer
+            let mut snippet_to_create: Option<crate::config::Snippet> = None;
+            let mut snippet_to_save: Option<crate::config::Snippet> = None;
+            self.show_add_snippet_drawer(ctx, &mut snippet_to_create, &mut snippet_to_save);
+            // Apply deferred actions
+            if let Some(snippet) = snippet_to_create {
+                self.snippets.push(snippet);
+                crate::config::save_snippets(&self.snippets);
+            }
+            if let Some(updated) = snippet_to_save {
+                if let Some(s) = self.snippets.iter_mut().find(|s| s.id == updated.id) {
+                    s.name = updated.name;
+                    s.command = updated.command;
+                    s.group = updated.group;
+                }
+                crate::config::save_snippets(&self.snippets);
+                self.snippet_view_state.editing = None;
+            }
         }
 
         // ── Delete Confirmation Dialog ──────────────────
