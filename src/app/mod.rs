@@ -142,6 +142,7 @@ impl PortalApp {
             layout: crate::ui::pane::PaneNode::Terminal(0),
             focused_session: 0,
             broadcast_enabled: false,
+            snippet_drawer_open: false,
         };
 
         let connection_history = crate::config::load_history();

@@ -289,6 +289,7 @@ impl eframe::App for PortalApp {
                                         layout: PaneNode::Terminal(0),
                                         focused_session: 0,
                                         broadcast_enabled: false,
+                                        snippet_drawer_open: false,
                                     };
                                     dw.tabs.push(new_tab);
                                     dw.active_tab = dw.tabs.len() - 1;
@@ -625,10 +626,11 @@ impl eframe::App for PortalApp {
             if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && i.modifiers.shift) {
                 self.split_focused_pane(SplitDirection::Vertical);
             }
-            // Cmd+Shift+S → open snippet quick selector
+            // Cmd+Shift+S → toggle snippet drawer for current tab
             if ctx.input(|i| i.key_pressed(egui::Key::S) && i.modifiers.command && i.modifiers.shift) {
-                self.snippet_view_state.quick_selector_open = true;
-                self.snippet_view_state.selected_snippet_index = if !self.snippets.is_empty() { Some(0) } else { None };
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    tab.snippet_drawer_open = !tab.snippet_drawer_open;
+                }
             }
         }
 
@@ -889,7 +891,9 @@ impl eframe::App for PortalApp {
                     ctx.data_mut(|d| d.insert_temp(more_menu_id, show_more_menu));
 
                     match action {
-                        TabBarAction::ActivateTab(i) => { self.active_tab = i; }
+                        TabBarAction::ActivateTab(i) => {
+                            self.active_tab = i;
+                        }
                         TabBarAction::CloseTab(i) => {
                             if self.tabs.len() > 1 {
                                 self.tabs.remove(i);
@@ -946,8 +950,9 @@ impl eframe::App for PortalApp {
                             ctx.data_mut(|d| d.insert_temp(more_menu_id, false));
                         }
                         TabBarAction::OpenSnippets => {
-                            self.snippet_view_state.quick_selector_open = true;
-                            self.snippet_view_state.selected_snippet_index = if !self.snippets.is_empty() { Some(0) } else { None };
+                            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                                tab.snippet_drawer_open = true;
+                            }
                             ctx.data_mut(|d| d.insert_temp(more_menu_id, false));
                         }
                         TabBarAction::None => {}
@@ -1120,7 +1125,10 @@ impl eframe::App for PortalApp {
             });
 
         // ── Snippet run drawer (shown from terminal view only) ─────────────────────
-        if self.snippet_view_state.quick_selector_open && self.current_view == AppView::Terminal {
+        let snippet_drawer_open = self.tabs.get(self.active_tab)
+            .map(|tab| tab.snippet_drawer_open)
+            .unwrap_or(false);
+        if snippet_drawer_open && self.current_view == AppView::Terminal {
             self.show_snippet_run_drawer(ctx);
         }
     }

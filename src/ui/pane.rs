@@ -203,6 +203,8 @@ pub struct Tab {
     pub layout: PaneNode,
     pub focused_session: usize,
     pub broadcast_enabled: bool,
+    /// Whether the snippet drawer is open for this tab
+    pub snippet_drawer_open: bool,
 }
 
 /// Per-tab animation state for smooth reordering

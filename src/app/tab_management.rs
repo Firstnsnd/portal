@@ -17,6 +17,7 @@ impl PortalApp {
             layout: PaneNode::Terminal(0),
             focused_session: 0,
             broadcast_enabled: false,
+            snippet_drawer_open: false,
         };
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
@@ -49,6 +50,7 @@ impl PortalApp {
             layout: PaneNode::Terminal(0),
             focused_session: 0,
             broadcast_enabled: false,
+            snippet_drawer_open: false,
         };
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;

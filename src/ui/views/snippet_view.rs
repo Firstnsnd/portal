@@ -510,8 +510,9 @@ impl PortalApp {
                                 egui::Button::new(egui::RichText::new("\u{2715}").color(theme.fg_dim).size(FONT_MD))
                                     .frame(false)
                             ).clicked() {
-                                self.snippet_view_state.quick_selector_open = false;
-                                self.snippet_view_state.selected_snippet_index = None;
+                                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                                    tab.snippet_drawer_open = false;
+                                }
                             }
                         });
                     });
