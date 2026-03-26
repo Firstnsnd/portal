@@ -144,7 +144,12 @@ pub fn render_terminal_session(
     if close_btn_clicked {
         action = Some(PaneAction::ClosePane);
     } else if response.clicked() || response.drag_started() {
-        action = Some(PaneAction::Focus);
+        // Auto-reconnect disconnected SSH sessions when clicked
+        if session.needs_reconnect() {
+            action = Some(PaneAction::Reconnect);
+        } else {
+            action = Some(PaneAction::Focus);
+        }
     }
     let is_focused = session_id == focused_session_id;
     if is_focused {

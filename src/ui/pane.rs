@@ -192,6 +192,8 @@ pub enum PaneAction {
     ToggleBroadcast,
     /// Remove old SSH host key from known_hosts
     RemoveHostKey,
+    /// Reconnect a disconnected SSH session
+    Reconnect,
 }
 
 /// A workspace tab: one or more split panes sharing a single tab entry.

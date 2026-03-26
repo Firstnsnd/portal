@@ -541,6 +541,10 @@ impl eframe::App for PortalApp {
                                                 dw.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
                                             }
                                         }
+                                        PaneAction::Reconnect => {
+                                            // Reconnect disconnected SSH session
+                                            dw.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
+                                        }
                                     }
                                 }
                             }
@@ -1080,6 +1084,10 @@ impl eframe::App for PortalApp {
                                         let _ = crate::ssh::remove_known_hosts_key(&host.host, host.port);
                                         self.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
                                     }
+                                }
+                                PaneAction::Reconnect => {
+                                    // Reconnect disconnected SSH session
+                                    self.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
                                 }
                             }
                         }
