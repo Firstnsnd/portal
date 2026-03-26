@@ -239,46 +239,35 @@ impl PortalApp {
                                 let visible_right = ui.clip_rect().max.x;
                                 let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
 
-                                // Action buttons (only on hover)
+                                // Edit button (matching hosts_view style)
                                 if hovered {
-                                    // Edit button only (run via Cmd+Shift+S in terminal)
-                                    let edit_rect = egui::Rect::from_center_size(
-                                        egui::pos2(visible_right - 40.0, rect.center().y),
-                                        egui::vec2(52.0, 24.0),
+                                    let btn_rect = egui::Rect::from_center_size(
+                                        egui::pos2(visible_right - 40.0, rect.min.y + 26.0),
+                                        egui::vec2(56.0, 22.0),
                                     );
-                                    let edit_hovered = pointer_pos.map_or(false, |p| edit_rect.contains(p));
-                                    ui.painter().rect(
-                                        edit_rect,
-                                        RADIUS_SM,
-                                        if edit_hovered {
-                                            self.theme.hover_bg
-                                        } else {
-                                            self.theme.bg_elevated
-                                        },
-                                        egui::Stroke::new(1.0, self.theme.border),
-                                    );
+                                    let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
+                                    let btn_bg = if over_btn { self.theme.accent } else { self.theme.bg_elevated };
+                                    let btn_text_color = if over_btn { self.theme.bg_primary } else { self.theme.accent };
+                                    ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, self.theme.accent));
                                     ui.painter().text(
-                                        edit_rect.center(),
+                                        btn_rect.center(),
                                         egui::Align2::CENTER_CENTER,
                                         self.language.t("edit_file"),
-                                        egui::FontId::proportional(FONT_XS),
-                                        self.theme.fg_dim,
+                                        egui::FontId::proportional(11.0),
+                                        btn_text_color,
                                     );
 
-                                    // Handle clicks
-                                    if let Some(pos) = pointer_pos {
-                                        if resp.clicked() && edit_rect.contains(pos) {
-                                            self.snippet_view_state.open_edit(
-                                                snippet.id.clone(),
-                                                &snippet.name,
-                                                &snippet.command,
-                                                &snippet.group
-                                            );
-                                        }
+                                    // Handle edit clicks
+                                    if over_btn && resp.clicked() {
+                                        self.snippet_view_state.open_edit(
+                                            snippet.id.clone(),
+                                            &snippet.name,
+                                            &snippet.command,
+                                            &snippet.group
+                                        );
                                     }
+                                    ui.allocate_exact_size(egui::vec2(56.0, 22.0), egui::Sense::hover());
                                 }
-
-                                ui.add_space(4.0);
                             }
                             ui.add_space(12.0);
                         }

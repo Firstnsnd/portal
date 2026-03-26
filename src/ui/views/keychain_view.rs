@@ -180,26 +180,27 @@ impl PortalApp {
                                 let visible_right = ui.clip_rect().max.x;
                                 let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
 
-                                // Edit button
-                                let edit_rect = egui::Rect::from_center_size(
-                                    egui::pos2(visible_right - 40.0, rect.center().y),
-                                    egui::vec2(50.0, 22.0),
+                                // Edit button (matching hosts_view style)
+                                let btn_rect = egui::Rect::from_center_size(
+                                    egui::pos2(visible_right - 40.0, rect.min.y + 26.0),
+                                    egui::vec2(56.0, 22.0),
                                 );
-                                let edit_hovered = pointer_pos.map_or(false, |p| edit_rect.contains(p));
-                                let edit_bg = if edit_hovered { self.theme.hover_bg } else { egui::Color32::TRANSPARENT };
-                                ui.painter().rect(edit_rect, RADIUS_SM, edit_bg, egui::Stroke::new(1.0, self.theme.border));
+                                let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
+                                let btn_bg = if over_btn { self.theme.accent } else { self.theme.bg_elevated };
+                                let btn_text_color = if over_btn { self.theme.bg_primary } else { self.theme.accent };
+                                ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, self.theme.accent));
                                 ui.painter().text(
-                                    edit_rect.center(),
+                                    btn_rect.center(),
                                     egui::Align2::CENTER_CENTER,
                                     self.language.t("edit_file"),
-                                    egui::FontId::proportional(FONT_XS),
-                                    self.theme.fg_dim,
+                                    egui::FontId::proportional(11.0),
+                                    btn_text_color,
                                 );
                                 // Handle edit click
-                                if edit_hovered && resp.clicked() {
+                                if over_btn && resp.clicked() {
                                     self.credential_dialog.open_edit(cred);
                                 }
-                                ui.allocate_exact_size(egui::vec2(50.0, 22.0), egui::Sense::hover());
+                                ui.allocate_exact_size(egui::vec2(56.0, 22.0), egui::Sense::hover());
                             }
 
                             // Badges (visible when not hovering for cleaner look)
