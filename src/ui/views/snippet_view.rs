@@ -510,7 +510,8 @@ impl PortalApp {
                                 egui::Button::new(egui::RichText::new("\u{2715}").color(theme.fg_dim).size(FONT_MD))
                                     .frame(false)
                             ).clicked() {
-                                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                                let active_tab = self.windows[0].active_tab;
+                                if let Some(tab) = self.windows[0].tabs.get_mut(active_tab) {
                                     tab.snippet_drawer_open = false;
                                 }
                             }
@@ -595,7 +596,8 @@ impl PortalApp {
                                         // Handle click - execute immediately
                                         if resp.clicked() {
                                             // Execute on current tab's sessions
-                                            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                                            let active_tab_idx = self.windows[0].active_tab;
+                                            if let Some(tab) = self.windows[0].tabs.get_mut(active_tab_idx) {
                                                 if tab.broadcast_enabled {
                                                     // Broadcast mode: send to all sessions
                                                     for session in &mut tab.sessions {

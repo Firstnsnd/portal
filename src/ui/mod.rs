@@ -53,8 +53,7 @@ pub mod formatting;
 // Re-export all public types for convenient access via `use ui::*`
 pub use theme::{ThemeColors, ThemePreset};
 pub use i18n::Language;
-pub use types::{SessionBackend, TerminalSession, AppView, BroadcastState};
-pub use pane::{SplitDirection, PaneNode, PaneAction, Tab, DetachedWindow, TabDragState};
+pub use types::{SessionBackend, AppView, BroadcastState};
+pub use pane::{AppWindow, TabDragState};
 pub use terminal::render_pane_tree;
-pub use widgets::nav_button;
 pub use tokens::STATUS_BAR_HEIGHT;

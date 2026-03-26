@@ -24,45 +24,12 @@ pub enum TabBarAction {
     None,
 }
 
-/// Render the main tab bar
-pub fn tab_bar(
-    ui: &mut egui::Ui,
-    ctx: &egui::Context,
-    tabs: &[Tab],
-    active_tab: usize,
-    tab_drag: &mut TabDragState,
-    theme: &ThemeColors,
-    language: &Language,
-    show_more_menu: &mut bool,
-) -> TabBarAction {
-    let buttons_width = 60.0;
-    let available_width = ui.available_width();
-
-    ui.horizontal(|ui| {
-        ui.add_space(4.0);
-        let full_tab_bar_rect = ui.max_rect();
-        let tab_area_width = (available_width - buttons_width).max(100.0);
-
-        let scroll_response = egui::ScrollArea::horizontal()
-            .id_salt("tab_scroll")
-            .auto_shrink([false, false])
-            .max_width(tab_area_width)
-            .scroll_bar_visibility(egui::containers::scroll_area::ScrollBarVisibility::AlwaysHidden)
-            .show(ui, |ui| {
-                render_tabs_inner(ui, ctx, tabs, active_tab, tab_drag, theme, language, full_tab_bar_rect, false)
-            });
-
-        let scroll_result = scroll_response.inner;
-        if scroll_result != TabBarAction::None {
-            return scroll_result;
-        }
-
-        render_more_menu(ui, ctx, tabs, active_tab, theme, language, show_more_menu, egui::Id::new("tab_bar_more_menu"))
-    }).inner
-}
-
-/// Render detached window tab bar
-pub fn detached_tab_bar(
+/// Render tab bar (unified for all windows)
+///
+/// # Arguments
+/// * `window_index` - Window index for unique ID generation (0 = main window)
+/// * `show_more_menu` - State for the more menu popup
+pub fn render_tab_bar(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     tabs: &[Tab],
@@ -77,12 +44,15 @@ pub fn detached_tab_bar(
         ui.add_space(4.0);
         let full_tab_bar_rect = ui.max_rect();
 
+        let scroll_id = egui::Id::new("tab_scroll").with(window_index);
+        let more_menu_id = egui::Id::new("tab_bar_more_menu").with(window_index);
+
         let scroll_response = egui::ScrollArea::horizontal()
-            .id_salt(egui::Id::new("detached_tab_scroll").with(window_index))
+            .id_salt(scroll_id)
             .auto_shrink([false, false])
             .scroll_bar_visibility(egui::containers::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .show(ui, |ui| {
-                render_tabs_inner(ui, ctx, tabs, active_tab, tab_drag, theme, language, full_tab_bar_rect, true)
+                render_tabs_inner(ui, ctx, tabs, active_tab, tab_drag, theme, language, full_tab_bar_rect, window_index)
             });
 
         let scroll_result = scroll_response.inner;
@@ -90,11 +60,11 @@ pub fn detached_tab_bar(
             return scroll_result;
         }
 
-        render_more_menu(ui, ctx, tabs, active_tab, theme, language, show_more_menu, egui::Id::new("dw_tab_bar_more_menu").with(window_index))
+        render_more_menu(ui, ctx, tabs, active_tab, theme, language, show_more_menu, more_menu_id)
     }).inner
 }
 
-/// Inner function to render tabs (shared between main and detached)
+/// Inner function to render tabs (shared between all windows)
 fn render_tabs_inner(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -104,7 +74,7 @@ fn render_tabs_inner(
     theme: &ThemeColors,
     language: &Language,
     full_tab_bar_rect: egui::Rect,
-    is_detached: bool,
+    window_index: usize,
 ) -> TabBarAction {
     let mut result = TabBarAction::None;
 
@@ -236,11 +206,7 @@ fn render_tabs_inner(
             }
 
             // Handle interaction
-            let drag_id = if is_detached {
-                egui::Id::new(("detached_tab_drag", i))
-            } else {
-                egui::Id::new(("tab_drag", i))
-            };
+            let drag_id = egui::Id::new(("tab_drag", window_index, i));
             let sense_resp = ui.interact(tab_rect, drag_id, egui::Sense::click_and_drag());
 
             if sense_resp.clicked() {
@@ -250,7 +216,8 @@ fn render_tabs_inner(
                     tab_to_close = Some(i);
                 } else {
                     tab_to_activate = Some(i);
-                    if !is_detached && tab.sessions
+                    // Auto-reconnect only for main window (window_index == 0)
+                    if window_index == 0 && tab.sessions
                         .get(tab.focused_session)
                         .map(|s| s.needs_reconnect())
                         .unwrap_or(false)
@@ -375,8 +342,14 @@ fn render_tabs_inner(
                             result = TabBarAction::ReorderTab { src, dst, insert_before: tab_drag.insert_before };
                         }
                     }
-                } else if !full_tab_bar_rect.contains(ctx.input(|i| i.pointer.hover_pos()).unwrap_or_default()) {
-                    if src < tabs.len() {
+                } else {
+                    // No target tab - check if dropped outside tab bar
+                    let hover_pos = ctx.input(|i| i.pointer.hover_pos());
+                    let dropped_outside = match hover_pos {
+                        None => true,  // Mouse left the window → detach
+                        Some(pos) => !full_tab_bar_rect.contains(pos),
+                    };
+                    if dropped_outside && src < tabs.len() {
                         result = TabBarAction::DetachTab(src);
                     }
                 }

@@ -5,6 +5,7 @@
 #![allow(unexpected_cfgs)]
 
 mod tab_management;
+mod window_content;
 
 use crate::config::{HostEntry, Credential, ConnectionRecord, ShortcutAction, Snippet};
 use crate::sftp::{LocalBrowser, SftpBrowser};
@@ -17,7 +18,7 @@ use crate::ui::types::{
     sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog,
         SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog},
 };
-use crate::ui::pane::{Tab, DetachedWindow, TabDragState};
+use crate::ui::pane::{Tab, AppWindow, TabDragState};
 use crate::ui::input::ShortcutResolver;
 use crate::ui::{ThemeColors, ThemePreset, Language, fonts};
 use std::path::PathBuf;
@@ -27,20 +28,18 @@ use objc::{msg_send, sel, sel_impl};
 
 /// The main application structure for Portal terminal emulator
 pub struct PortalApp {
-    pub tabs: Vec<Tab>,
-    pub active_tab: usize,
-    pub current_view: AppView,
+    // Unified window management - all windows are equal
+    pub windows: Vec<AppWindow>,
+    pub next_viewport_id: u32,
+    // Shared data (used by all windows)
     pub hosts: Vec<HostEntry>,
     pub hosts_file: PathBuf,
     pub credentials: Vec<Credential>,
     pub credentials_file: PathBuf,
-    pub next_id: usize,
     pub add_host_dialog: AddHostDialog,
     pub host_filter: HostFilter,
     pub host_to_delete: Option<usize>,
     pub confirm_delete_host: Option<usize>,
-    pub ime_composing: bool,
-    pub ime_preedit: String,
     pub runtime: tokio::runtime::Runtime,
     // SFTP browser
     pub sftp_browser_left: Option<SftpBrowser>,  // Left panel SFTP connection
@@ -61,16 +60,9 @@ pub struct PortalApp {
     pub sftp_remote_refresh_start: Option<std::time::Instant>,
     pub sftp_left_remote_refresh_start: Option<std::time::Instant>,
     pub sftp_active_panel_is_local: bool,
-    // Tab drag state
-    pub tab_drag: TabDragState,
     // Status bar pickers
     pub selected_shell: String,
     pub selected_encoding: String,
-    // Detached tab windows
-    pub detached_windows: Vec<DetachedWindow>,
-    pub next_viewport_id: u32,
-    // Main window hidden (still running for detached windows)
-    pub main_window_hidden: bool,
     // Broadcast state
     #[allow(dead_code)]
     pub broadcast_state: crate::ui::types::BroadcastState,
@@ -145,6 +137,21 @@ impl PortalApp {
             snippet_drawer_open: false,
         };
 
+        // Create the first (main) window
+        let first_window = AppWindow {
+            viewport_id: egui::ViewportId::ROOT,
+            tabs: vec![first_tab],
+            active_tab: 0,
+            current_view: AppView::Terminal,
+            title: "Portal".to_string(),
+            close_requested: false,
+            ime_composing: false,
+            ime_preedit: String::new(),
+            next_id: 1,
+            tab_drag: TabDragState::default(),
+            broadcast_state: crate::ui::types::BroadcastState::default(),
+        };
+
         let connection_history = crate::config::load_history();
         let snippets = crate::config::load_snippets();
 
@@ -159,20 +166,16 @@ impl PortalApp {
         crate::config::save_hosts(&hosts_file, &hosts);
 
         Self {
-            tabs: vec![first_tab],
-            active_tab: 0,
-            current_view: AppView::Terminal,
+            windows: vec![first_window],
+            next_viewport_id: 1,
             hosts,
             hosts_file,
             credentials,
             credentials_file,
-            next_id: 1,
             add_host_dialog: AddHostDialog::default(),
             host_filter: HostFilter::default(),
             host_to_delete: None,
             confirm_delete_host: None,
-            ime_composing: false,
-            ime_preedit: String::new(),
             runtime,
             sftp_browser_left: None,
             sftp_browser: None,
@@ -192,13 +195,8 @@ impl PortalApp {
             sftp_remote_refresh_start: None,
             sftp_left_remote_refresh_start: None,
             sftp_active_panel_is_local: true,  // Track which panel has focus
-            tab_drag: TabDragState::default(),
-
             selected_shell,
             selected_encoding: "UTF-8".to_string(),
-            detached_windows: Vec::new(),
-            next_viewport_id: 0,
-            main_window_hidden: false,
             broadcast_state: crate::ui::types::BroadcastState::default(),
             keychain_confirm_delete: None,
             credential_dialog: CredentialDialog::default(),
@@ -223,15 +221,7 @@ impl PortalApp {
     /// Clean up all terminal sessions on exit to prevent PTY leaks
     /// This is critical because PTY devices are limited system resources
     pub fn cleanup_sessions(&mut self) {
-        // Clean up main window tabs
-        for tab in &mut self.tabs {
-            for session in &mut tab.sessions {
-                session.session = None;
-            }
-        }
-
-        // Clean up detached windows
-        for window in &mut self.detached_windows {
+        for window in &mut self.windows {
             for tab in &mut window.tabs {
                 for session in &mut tab.sessions {
                     session.session = None;

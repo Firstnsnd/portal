@@ -300,8 +300,9 @@ impl TabDragState {
     }
 }
 
-/// A tab that has been detached into its own OS window (full UI)
-pub struct DetachedWindow {
+/// A window containing one or more tabs
+/// All windows are equal - there's no distinction between "main" and "detached"
+pub struct AppWindow {
     pub viewport_id: egui::ViewportId,
     pub tabs: Vec<Tab>,
     pub active_tab: usize,

@@ -7,23 +7,9 @@ use crate::ssh::test_connection;
 use crate::ui::types::dialogs::{AuthMethodChoice, TestConnState, KeySourceChoice, CredentialMode};
 use crate::ui::i18n::format_time_ago;
 use crate::ui::tokens::*;
-use crate::ui::views::nav_panel;
 use crate::ui::widgets;
 
 impl PortalApp {
-    /// Navigation strip on the left (always visible)
-    pub fn show_nav_panel(&mut self, ctx: &egui::Context) {
-        if let Some(clicked_view) = nav_panel::show_nav_panel(
-            ctx,
-            self.current_view,
-            &self.theme,
-            &self.language,
-            None,
-        ) {
-            self.current_view = clicked_view;
-        }
-    }
-
     /// Full hosts page content (used by both main and detached windows)
     pub fn show_hosts_page(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.add_space(0.0);

@@ -16,7 +16,7 @@ pub use crate::ui::pane::{
     PaneAction,
     Tab,
     TabDragState,
-    DetachedWindow,
+    AppWindow,
 };
 
 // Note: TabAnimation is used internally by TabDragState but is not

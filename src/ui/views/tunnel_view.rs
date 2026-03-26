@@ -64,7 +64,7 @@ impl PortalApp {
                         let mut active_states: HashMap<(usize, usize), crate::ssh::port_forward::ForwardState> =
                             HashMap::new();
 
-                        for tab in &self.tabs {
+                        for tab in &self.windows[0].tabs {
                             for session in &tab.sessions {
                                 if let Some(SessionBackend::Ssh(ssh_session)) = &session.session {
                                     if let Some(host_entry) = &session.ssh_host {
@@ -631,7 +631,7 @@ impl PortalApp {
     fn start_tunnel(&mut self, host_idx: usize, tunnel_idx: usize, ctx: &egui::Context) {
         if let Some(host) = self.hosts.get(host_idx) {
             if let Some(tunnel) = host.port_forwards.get(tunnel_idx) {
-                for tab in &mut self.tabs {
+                for tab in &mut self.windows[0].tabs {
                     for session in &mut tab.sessions {
                         if let Some(SessionBackend::Ssh(ssh_session)) = &session.session {
                             if let Some(host_entry) = &session.ssh_host {
@@ -651,7 +651,7 @@ impl PortalApp {
     fn stop_tunnel(&mut self, host_idx: usize, tunnel_idx: usize) {
         if let Some(host) = self.hosts.get(host_idx) {
             if let Some(tunnel) = host.port_forwards.get(tunnel_idx) {
-                for tab in &mut self.tabs {
+                for tab in &mut self.windows[0].tabs {
                     for session in &mut tab.sessions {
                         if let Some(SessionBackend::Ssh(ssh_session)) = &session.session {
                             if let Some(host_entry) = &session.ssh_host {
