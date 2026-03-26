@@ -126,16 +126,8 @@ impl PortalApp {
                             );
                             let hovered = resp.hovered();
 
-                            // Background hover effect
+                            // Background hover effect (only visual change, no layout shift)
                             if hovered {
-                                ui.painter().rect_filled(
-                                    egui::Rect::from_min_max(
-                                        egui::pos2(rect.min.x, rect.max.y - 1.0),
-                                        rect.max,
-                                    ),
-                                    0.0,
-                                    self.theme.hover_shadow,
-                                );
                                 ui.painter().rect_filled(rect, 0.0, self.theme.hover_bg);
                             }
 
@@ -166,91 +158,60 @@ impl PortalApp {
                                 self.theme.fg_dim,
                             );
 
-                            // Right-aligned: edit button + badges (hover only)
-                            if hovered {
-                                let visible_right = ui.clip_rect().max.x;
-                                let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
+                            // Right-aligned badges (always visible, no hover change)
+                            let visible_right = ui.clip_rect().max.x;
+                            let mut badge_x = visible_right;
 
-                                // Edit button (matching hosts_view style)
-                                let btn_rect = egui::Rect::from_center_size(
-                                    egui::pos2(visible_right - 40.0, rect.min.y + 26.0),
-                                    egui::vec2(56.0, 22.0),
-                                );
-                                let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
-                                let btn_bg = if over_btn { self.theme.accent } else { self.theme.bg_elevated };
-                                let btn_text_color = if over_btn { self.theme.bg_primary } else { self.theme.accent };
-                                ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, self.theme.accent));
-                                ui.painter().text(
-                                    btn_rect.center(),
-                                    egui::Align2::CENTER_CENTER,
-                                    self.language.t("edit_file"),
-                                    egui::FontId::proportional(11.0),
-                                    btn_text_color,
-                                );
-                                // Handle edit click
-                                if over_btn && resp.clicked() {
-                                    self.credential_dialog.open_edit(cred);
-                                }
-                                ui.allocate_exact_size(egui::vec2(56.0, 22.0), egui::Sense::hover());
-                            }
+                            // Type badge
+                            let type_text = self.language.t(type_key).to_string();
+                            let type_galley = ui.painter().layout_no_wrap(
+                                type_text,
+                                egui::FontId::proportional(FONT_XS),
+                                self.theme.fg_dim,
+                            );
+                            let type_w = type_galley.size().x + SPACE_LG;
+                            let type_h = 18.0;
+                            badge_x -= type_w + SPACE_SM;
+                            let type_rect = egui::Rect::from_center_size(
+                                egui::pos2(badge_x + type_w / 2.0, rect.center().y),
+                                egui::vec2(type_w, type_h),
+                            );
+                            ui.painter().rect(
+                                type_rect,
+                                RADIUS_SM,
+                                egui::Color32::TRANSPARENT,
+                                egui::Stroke::new(1.0, self.theme.border),
+                            );
+                            ui.painter().galley(
+                                egui::pos2(type_rect.center().x - type_galley.size().x / 2.0, type_rect.center().y - type_galley.size().y / 2.0),
+                                type_galley,
+                                self.theme.fg_dim,
+                            );
 
-                            // Badges (visible when not hovering for cleaner look)
-                            if !hovered {
-                                let visible_right = ui.clip_rect().max.x;
-                                let mut badge_x = visible_right;
-
-                                // Type badge
-                                let type_text = self.language.t(type_key).to_string();
-                                let type_galley = ui.painter().layout_no_wrap(
-                                    type_text,
+                            // Binding count badge
+                            if binding_count > 0 {
+                                let badge_text = format!("{} {}", binding_count, self.language.t("hosts_bound"));
+                                let badge_galley = ui.painter().layout_no_wrap(
+                                    badge_text,
                                     egui::FontId::proportional(FONT_XS),
-                                    self.theme.fg_dim,
+                                    self.theme.accent,
                                 );
-                                let type_w = type_galley.size().x + SPACE_LG;
-                                let type_h = 18.0;
-                                badge_x -= type_w + SPACE_SM;
-                                let type_rect = egui::Rect::from_center_size(
-                                    egui::pos2(badge_x + type_w / 2.0, rect.center().y),
-                                    egui::vec2(type_w, type_h),
+                                let badge_w = badge_galley.size().x + SPACE_MD;
+                                badge_x -= badge_w + SPACE_SM;
+                                let badge_rect = egui::Rect::from_center_size(
+                                    egui::pos2(badge_x + badge_w / 2.0, rect.center().y),
+                                    egui::vec2(badge_w, type_h),
                                 );
-                                ui.painter().rect(
-                                    type_rect,
-                                    RADIUS_SM,
-                                    egui::Color32::TRANSPARENT,
-                                    egui::Stroke::new(1.0, self.theme.border),
-                                );
+                                ui.painter().rect_filled(badge_rect, RADIUS_SM, self.theme.badge_bg);
                                 ui.painter().galley(
-                                    egui::pos2(type_rect.center().x - type_galley.size().x / 2.0, type_rect.center().y - type_galley.size().y / 2.0),
-                                    type_galley,
-                                    self.theme.fg_dim,
+                                    egui::pos2(badge_rect.center().x - badge_galley.size().x / 2.0, badge_rect.center().y - badge_galley.size().y / 2.0),
+                                    badge_galley,
+                                    self.theme.accent,
                                 );
-
-                                // Binding count badge
-                                if binding_count > 0 {
-                                    let badge_text = format!("{} {}", binding_count, self.language.t("hosts_bound"));
-                                    let badge_galley = ui.painter().layout_no_wrap(
-                                        badge_text,
-                                        egui::FontId::proportional(FONT_XS),
-                                        self.theme.accent,
-                                    );
-                                    let badge_w = badge_galley.size().x + SPACE_MD;
-                                    badge_x -= badge_w + SPACE_SM;
-                                    let badge_rect = egui::Rect::from_center_size(
-                                        egui::pos2(badge_x + badge_w / 2.0, rect.center().y),
-                                        egui::vec2(badge_w, type_h),
-                                    );
-                                    ui.painter().rect_filled(badge_rect, RADIUS_SM, self.theme.badge_bg);
-                                    ui.painter().galley(
-                                        egui::pos2(badge_rect.center().x - badge_galley.size().x / 2.0, badge_rect.center().y - badge_galley.size().y / 2.0),
-                                        badge_galley,
-                                        self.theme.accent,
-                                    );
-                                }
                             }
 
-                            // Handle click interactions
-                            if resp.clicked() && !hovered {
-                                // Only open edit on non-hovered row click (prevent double-trigger)
+                            // Handle click to open edit dialog
+                            if resp.clicked() {
                                 self.credential_dialog.open_edit(cred);
                             }
                         }
