@@ -316,3 +316,108 @@ pub struct DetachedWindow {
     #[allow(dead_code)]
     pub broadcast_state: BroadcastState,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to create a minimal Tab for testing
+    fn create_test_tab(title: &str) -> Tab {
+        Tab {
+            title: title.to_string(),
+            sessions: vec![],
+            layout: PaneNode::Terminal(0),
+            focused_session: 0,
+            broadcast_enabled: false,
+            snippet_drawer_open: false,
+        }
+    }
+
+    #[test]
+    fn test_tab_default_snippet_drawer_closed() {
+        let tab = create_test_tab("Test Tab");
+        assert!(!tab.snippet_drawer_open, "New tabs should have snippet drawer closed by default");
+    }
+
+    #[test]
+    fn test_snippet_drawer_state_per_tab() {
+        // Create two tabs
+        let mut tab_a = create_test_tab("Tab A");
+        let mut tab_b = create_test_tab("Tab B");
+
+        // Open snippet drawer on Tab A only
+        tab_a.snippet_drawer_open = true;
+        assert!(tab_a.snippet_drawer_open, "Tab A should have snippet drawer open");
+        assert!(!tab_b.snippet_drawer_open, "Tab B should remain closed");
+
+        // Close Tab A's drawer
+        tab_a.snippet_drawer_open = false;
+        assert!(!tab_a.snippet_drawer_open, "Tab A should now be closed");
+
+        // Open Tab B's drawer
+        tab_b.snippet_drawer_open = true;
+        assert!(tab_b.snippet_drawer_open, "Tab B should have snippet drawer open");
+        assert!(!tab_a.snippet_drawer_open, "Tab A should remain closed");
+    }
+
+    #[test]
+    fn test_snippet_drawer_state_preserved_on_tab_switch() {
+        // Simulate multiple tabs with independent drawer states
+        let mut tabs = vec![
+            create_test_tab("Tab 1"),
+            create_test_tab("Tab 2"),
+            create_test_tab("Tab 3"),
+        ];
+
+        // Open drawer on tabs 0 and 2, leave tab 1 closed
+        tabs[0].snippet_drawer_open = true;
+        tabs[2].snippet_drawer_open = true;
+
+        // Simulate switching tabs and verifying states are preserved
+        let active_tab = 0;
+        assert!(tabs[active_tab].snippet_drawer_open, "Tab 0 should have drawer open");
+
+        let active_tab = 1;
+        assert!(!tabs[active_tab].snippet_drawer_open, "Tab 1 should have drawer closed");
+
+        let active_tab = 2;
+        assert!(tabs[active_tab].snippet_drawer_open, "Tab 2 should have drawer open");
+
+        // Switch back to tab 0
+        let active_tab = 0;
+        assert!(tabs[active_tab].snippet_drawer_open, "Tab 0 drawer should still be open after switching");
+    }
+
+    #[test]
+    fn test_multiple_tabs_independent_state() {
+        // Create a vector of tabs
+        let mut tabs: Vec<Tab> = (0..5).map(|i| {
+            let mut tab = create_test_tab(&format!("Tab {}", i));
+            // Alternate drawer states
+            tab.snippet_drawer_open = i % 2 == 0;
+            tab
+        }).collect();
+
+        // Verify each tab maintains its independent state
+        for (i, tab) in tabs.iter().enumerate() {
+            let expected_open = i % 2 == 0;
+            assert_eq!(
+                tab.snippet_drawer_open,
+                expected_open,
+                "Tab {} should have drawer {}",
+                i,
+                if expected_open { "open" } else { "closed" }
+            );
+        }
+
+        // Modify one tab's state
+        tabs[2].snippet_drawer_open = false;
+
+        // Verify other tabs are unaffected
+        assert!(tabs[0].snippet_drawer_open, "Tab 0 should be unaffected");
+        assert!(!tabs[1].snippet_drawer_open, "Tab 1 should be unaffected");
+        assert!(!tabs[2].snippet_drawer_open, "Tab 2 should now be closed");
+        assert!(!tabs[3].snippet_drawer_open, "Tab 3 should be unaffected (was closed originally)");
+        assert!(tabs[4].snippet_drawer_open, "Tab 4 should be unaffected");
+    }
+}
