@@ -19,12 +19,11 @@ impl PortalApp {
         egui::TopBottomPanel::top("snippets_nav_bar")
             .frame(egui::Frame {
                 fill: self.theme.bg_secondary,
-                inner_margin: egui::Margin::symmetric(8.0, 4.0),
+                inner_margin: egui::Margin::symmetric(8.0, 8.0),
                 stroke: egui::Stroke::NONE,
                 ..Default::default()
             })
             .show(ctx, |ui| {
-                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     // Left side: Snippets title
                     ui.label(egui::RichText::new(self.language.t("snippets"))

@@ -398,8 +398,6 @@ impl AddTunnelDialog {
 pub enum KeychainDeleteRequest {
     /// Delete a credential by id, with list of affected host names
     ById { credential_id: String, affected_hosts: Vec<String> },
-    /// Delete all credentials
-    All,
 }
 
 /// Snippet view state for Command Snippets feature

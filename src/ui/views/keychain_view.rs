@@ -22,7 +22,7 @@ impl PortalApp {
         egui::TopBottomPanel::top("keychain_nav_bar")
             .frame(egui::Frame {
                 fill: self.theme.bg_secondary,
-                inner_margin: egui::Margin::symmetric(8.0, 4.0),
+                inner_margin: egui::Margin::symmetric(8.0, 8.0),
                 stroke: egui::Stroke::NONE,
                 ..Default::default()
             })
@@ -36,15 +36,6 @@ impl PortalApp {
 
                     // Right side: New Credential button
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Delete All button (only show if there are credentials)
-                        if !self.credentials.is_empty() {
-                            ui.add_space(SPACE_MD);
-                            if ui.add(
-                                widgets::text_button(self.language.t("delete_all"), self.theme.red)
-                            ).clicked() {
-                                self.keychain_confirm_delete = Some(KeychainDeleteRequest::All);
-                            }
-                        }
                         if ui.add(
                             widgets::text_button(self.language.t("new_credential"), self.theme.accent)
                         ).clicked() {
@@ -573,7 +564,6 @@ impl PortalApp {
         let lang = self.language;
 
         let confirm_msg = match self.keychain_confirm_delete.as_ref().unwrap() {
-            KeychainDeleteRequest::All => lang.t("delete_all_confirm").to_string(),
             KeychainDeleteRequest::ById { credential_id, affected_hosts } => {
                 let cred_name = self.credentials.iter()
                     .find(|c| c.id == *credential_id)
@@ -642,18 +632,6 @@ impl PortalApp {
     fn execute_keychain_delete(&mut self) {
         let request = self.keychain_confirm_delete.take();
         match request {
-            Some(KeychainDeleteRequest::All) => {
-                for cred in &self.credentials {
-                    config::delete_credential_secrets(&cred.id, &cred.name);
-                }
-                // Clear credential_id references on hosts
-                for host in &mut self.hosts {
-                    host.credential_id = None;
-                }
-                self.credentials.clear();
-                self.save_credentials();
-                self.save_hosts();
-            }
             Some(KeychainDeleteRequest::ById { credential_id, .. }) => {
                 if let Some(cred) = self.credentials.iter().find(|c| c.id == credential_id) {
                     config::delete_credential_secrets(&cred.id, &cred.name);

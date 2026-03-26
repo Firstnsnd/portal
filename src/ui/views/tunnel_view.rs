@@ -18,12 +18,11 @@ impl PortalApp {
         egui::TopBottomPanel::top("tunnels_nav_bar")
             .frame(egui::Frame {
                 fill: theme.bg_secondary,
-                inner_margin: egui::Margin::symmetric(8.0, 4.0),
+                inner_margin: egui::Margin::symmetric(8.0, 8.0),
                 stroke: egui::Stroke::NONE,
                 ..Default::default()
             })
             .show(ctx, |ui| {
-                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(lang.t("tunnels"))
