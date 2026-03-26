@@ -106,14 +106,24 @@ impl TerminalGrid {
 
     /// Resize the grid to new dimensions.
     ///
-    /// Uses reflow logic when column count changes (not in alt screen).
+    /// Uses reflow logic when column count changes to ensure historical
+    /// output in scrollback is re-wrapped at the new width. The main grid
+    /// is only reflown when not in alt screen mode (alt screen content
+    /// is position-sensitive and should not be reflowed).
     pub fn resize(&mut self, cols: usize, rows: usize) {
         if cols == self.cols && rows == self.rows {
             return;
         }
-        if cols != self.cols && self.alt_screen.is_none() {
-            self.resize_reflow(cols, rows);
+        if cols != self.cols {
+            // Column change: reflow scrollback (always) and grid (only if not alt screen)
+            if self.alt_screen.is_none() {
+                self.resize_reflow(cols, rows);
+            } else {
+                self.resize_reflow_scrollback_only(cols);
+                self.resize_screen(cols, rows);
+            }
         } else {
+            // Row-only change: simple resize is sufficient
             self.resize_screen(cols, rows);
         }
     }
@@ -648,6 +658,9 @@ impl TerminalGrid {
             // Most recent new_rows content goes to grid, rest to scrollback
             let rows_for_grid = new_rows;
 
+            // Calculate all wrapped flags for grid content first
+            let all_grid_wrapped = calc_wrapped_flags(&grid_row_counts);
+
             // Pop rows for the visible grid (from the back, so we get the most recent content)
             self.cells = Vec::new();
             self.line_wrapped = Vec::new();
@@ -658,7 +671,12 @@ impl TerminalGrid {
             }
             // Reverse since we popped from the back
             self.cells.reverse();
-            self.line_wrapped.reverse();
+
+            // Take the last rows_for_grid wrapped flags (most recent content)
+            let grid_wrapped_start = all_grid_wrapped.len().saturating_sub(rows_for_grid);
+            for flag in all_grid_wrapped.iter().skip(grid_wrapped_start) {
+                self.line_wrapped.push(*flag);
+            }
 
             // Fill remaining rows with empty cells if needed
             while self.cells.len() < new_rows {
@@ -676,9 +694,10 @@ impl TerminalGrid {
             let mut scrollback_wrapped = calc_wrapped_flags(&scrollback_row_counts);
             // Add wrapped flags for overflow grid content (first rows that didn't fit)
             let mut grid_row_idx = 0;
+            let overflow_count = grid_rows.saturating_sub(rows_for_grid);
             for &count in &grid_row_counts {
                 for i in 0..count {
-                    if grid_row_idx < grid_rows - rows_for_grid {
+                    if grid_row_idx < overflow_count {
                         scrollback_wrapped.push_back(i < count.saturating_sub(1));
                     }
                     grid_row_idx += 1;
@@ -727,6 +746,84 @@ impl TerminalGrid {
                 self.cursor_col = 0;
             }
         }
+
+        // Recalculate scrollback memory usage
+        self.current_scrollback_bytes = self.scrollback.iter()
+            .map(|row| Self::row_memory_usage(row))
+            .sum();
+
+        // Trim scrollback if needed (after reflow we might exceed limit)
+        while self.current_scrollback_bytes > self.max_scrollback_bytes {
+            if let Some(oldest) = self.scrollback.pop_front() {
+                let oldest_bytes = Self::row_memory_usage(&oldest);
+                self.current_scrollback_bytes -= oldest_bytes;
+            }
+            self.scrollback_wrapped.pop_front();
+        }
+    }
+
+    /// Reflow only the scrollback buffer at a new column width.
+    ///
+    /// This is used when in alt screen mode: the main grid should not be
+    /// reflown (alt screen content is position-sensitive), but scrollback
+    /// should still be reflowed to match the current pane width.
+    fn resize_reflow_scrollback_only(&mut self, new_cols: usize) {
+        let old_cols = self.cols;
+        if old_cols == new_cols {
+            return;
+        }
+
+        // Collect logical lines from scrollback
+        let mut scrollback_logical_lines: Vec<Vec<TerminalCell>> = Vec::new();
+        let mut current_line: Vec<TerminalCell> = Vec::new();
+
+        for row_idx in 0..self.scrollback.len() {
+            let row = &self.scrollback[row_idx];
+            let was_wrapped = self.scrollback_wrapped.get(row_idx).copied().unwrap_or(false);
+            current_line.extend(row.iter().cloned());
+            if !was_wrapped {
+                scrollback_logical_lines.push(std::mem::take(&mut current_line));
+            }
+        }
+        // Add any remaining line from scrollback
+        if !current_line.is_empty() {
+            scrollback_logical_lines.push(std::mem::take(&mut current_line));
+        }
+
+        // Re-wrap scrollback logical lines at new column width
+        let mut new_scrollback: VecDeque<Vec<TerminalCell>> = VecDeque::new();
+        let mut new_scrollback_wrapped: VecDeque<bool> = VecDeque::new();
+
+        for logical_line in &scrollback_logical_lines {
+            let line_len = logical_line.iter().rposition(|c| c.c != ' ' && c.c != '\0')
+                .map(|p| p + 1).unwrap_or(0);
+
+            if line_len == 0 {
+                continue;
+            }
+
+            // Split logical line into chunks of new_cols
+            let chunks = logical_line[..line_len].chunks(new_cols).collect::<Vec<_>>();
+            let chunk_count = chunks.len();
+
+            for (i, chunk) in chunks.iter().enumerate() {
+                let mut row = vec![TerminalCell::default(); new_cols];
+                for (j, cell) in chunk.iter().enumerate() {
+                    if j < new_cols {
+                        row[j] = cell.clone();
+                    }
+                }
+                new_scrollback.push_back(row);
+                // Mark as wrapped if not the last chunk
+                new_scrollback_wrapped.push_back(i < chunk_count.saturating_sub(1));
+            }
+        }
+
+        self.scrollback = new_scrollback;
+        self.scrollback_wrapped = new_scrollback_wrapped;
+
+        // Update self.cols to match new width (will be updated again by resize_screen)
+        self.cols = new_cols;
 
         // Recalculate scrollback memory usage
         self.current_scrollback_bytes = self.scrollback.iter()

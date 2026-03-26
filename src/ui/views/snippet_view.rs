@@ -3,7 +3,6 @@
 //! Command snippet management page with shadcn-style design.
 
 use eframe::egui;
-use egui::Widget;
 use uuid::Uuid;
 
 use crate::app::PortalApp;
@@ -15,19 +14,16 @@ impl PortalApp {
     pub fn show_snippets_page(&mut self, ctx: &egui::Context, _ui: &mut egui::Ui) {
         // Collect deferred actions
         let mut snippet_to_delete: Option<String> = None;
-        let mut snippet_to_save: Option<Snippet> = None;
-        let mut snippet_to_create: Option<Snippet> = None;
 
         // Top navigation bar (matching terminal tab bar style)
         egui::TopBottomPanel::top("snippets_nav_bar")
             .frame(egui::Frame {
                 fill: self.theme.bg_secondary,
-                inner_margin: egui::Margin::symmetric(8.0, 4.0),
+                inner_margin: egui::Margin::symmetric(8.0, 8.0),
                 stroke: egui::Stroke::NONE,
                 ..Default::default()
             })
             .show(ctx, |ui| {
-                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     // Left side: Snippets title
                     ui.label(egui::RichText::new(self.language.t("snippets"))
@@ -59,28 +55,24 @@ impl PortalApp {
                 egui::ScrollArea::vertical()
                     .id_salt("snippets_page_scroll")
                     .show(ui, |ui| {
-                        ui.add_space(12.0);
+                        ui.add_space(SPACE_MD);
 
-                        // Filter bar (right-aligned with margin)
+                        // Filter bar (in content area, right-aligned with margin)
                         ui.horizontal(|ui| {
-                            // Match ComboBox closed-state background
+                            // Match ComboBox closed-state background to New Host TextEdit input
                             let input_bg = ui.visuals().extreme_bg_color;
                             let border = self.theme.input_border;
                             ui.style_mut().visuals.widgets.inactive.bg_fill = input_bg;
-                            ui.style_mut().visuals.widgets.inactive.bg_stroke =
-                                egui::Stroke::new(1.0, border);
+                            ui.style_mut().visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, border);
                             ui.style_mut().visuals.widgets.hovered.bg_fill = input_bg;
-                            ui.style_mut().visuals.widgets.hovered.bg_stroke =
-                                egui::Stroke::new(1.0, self.theme.focus_ring);
+                            ui.style_mut().visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, self.theme.focus_ring);
                             ui.style_mut().visuals.widgets.active.bg_fill = input_bg;
-                            ui.style_mut().visuals.widgets.active.bg_stroke =
-                                egui::Stroke::new(1.0, self.theme.accent);
+                            ui.style_mut().visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, self.theme.accent);
                             ui.style_mut().visuals.widgets.open.bg_fill = input_bg;
-                            ui.style_mut().visuals.widgets.open.bg_stroke =
-                                egui::Stroke::new(1.0, self.theme.accent);
+                            ui.style_mut().visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, self.theme.accent);
 
                             // Add left space to push content to the right
-                            ui.add_space(ui.available_width() - 160.0);
+                            ui.add_space(ui.available_width() - 110.0); // Single filter, match hosts tag filter position
 
                             // Group filter dropdown
                             let all_groups = self.collect_snippet_groups();
@@ -91,51 +83,44 @@ impl PortalApp {
                             };
 
                             egui::ComboBox::from_id_salt("snippet_group_filter")
-                                .selected_text(
-                                    egui::RichText::new(&group_label)
-                                        .color(self.theme.accent)
-                                        .size(12.0)
-                                )
-                                .width(120.0)
+                                .selected_text(egui::RichText::new(group_label).color(self.theme.accent).size(FONT_MD))
+                                .width(90.0)
                                 .show_ui(ui, |ui| {
                                     widgets::style_dropdown(ui, &self.theme);
 
                                     // All option
-                                    if egui::Button::new(
+                                    if ui.add(egui::Button::new(
                                         egui::RichText::new(self.language.t("snippet_default_group"))
                                             .color(if self.snippet_view_state.group_filter.is_empty() { self.theme.accent } else { self.theme.fg_primary })
-                                            .size(12.0)
-                                    ).frame(false).ui(ui).clicked() {
+                                            .size(FONT_MD)
+                                    ).frame(false)).clicked() {
                                         self.snippet_view_state.group_filter.clear();
                                         ui.close_menu();
                                     }
 
                                     for group in &all_groups {
-                                        if egui::Button::new(
+                                        if ui.add(egui::Button::new(
                                             egui::RichText::new(group)
                                                 .color(if self.snippet_view_state.group_filter == *group { self.theme.accent } else { self.theme.fg_primary })
-                                                .size(12.0)
-                                        ).frame(false).ui(ui).clicked() {
+                                                .size(FONT_MD)
+                                        ).frame(false)).clicked() {
                                             self.snippet_view_state.group_filter = group.clone();
                                             ui.close_menu();
                                         }
                                     }
                                 });
 
-                            ui.add_space(8.0);
+                            ui.add_space(SPACE_SM);
 
                             // Clear button
                             if !self.snippet_view_state.group_filter.is_empty() {
-                                if ui.add(widgets::text_button(
-                                    self.language.t("clear_history"),
-                                    self.theme.accent
-                                )).clicked() {
+                                if ui.add(widgets::text_button(self.language.t("clear_history"), self.theme.accent)).clicked() {
                                     self.snippet_view_state.group_filter.clear();
                                 }
                             }
                         });
 
-                        ui.add_space(12.0);
+                        ui.add_space(SPACE_MD);
 
                         // ── Empty state ──
                         let filtered_snippets = self.filter_snippets();
@@ -239,46 +224,35 @@ impl PortalApp {
                                 let visible_right = ui.clip_rect().max.x;
                                 let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
 
-                                // Action buttons (only on hover)
+                                // Edit button (matching hosts_view style)
                                 if hovered {
-                                    // Edit button only (run via Cmd+Shift+S in terminal)
-                                    let edit_rect = egui::Rect::from_center_size(
-                                        egui::pos2(visible_right - 40.0, rect.center().y),
-                                        egui::vec2(52.0, 24.0),
+                                    let btn_rect = egui::Rect::from_center_size(
+                                        egui::pos2(visible_right - 40.0, rect.min.y + 26.0),
+                                        egui::vec2(56.0, 22.0),
                                     );
-                                    let edit_hovered = pointer_pos.map_or(false, |p| edit_rect.contains(p));
-                                    ui.painter().rect(
-                                        edit_rect,
-                                        RADIUS_SM,
-                                        if edit_hovered {
-                                            self.theme.hover_bg
-                                        } else {
-                                            self.theme.bg_elevated
-                                        },
-                                        egui::Stroke::new(1.0, self.theme.border),
-                                    );
+                                    let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
+                                    let btn_bg = if over_btn { self.theme.accent } else { self.theme.bg_elevated };
+                                    let btn_text_color = if over_btn { self.theme.bg_primary } else { self.theme.accent };
+                                    ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, self.theme.accent));
                                     ui.painter().text(
-                                        edit_rect.center(),
+                                        btn_rect.center(),
                                         egui::Align2::CENTER_CENTER,
                                         self.language.t("edit_file"),
-                                        egui::FontId::proportional(FONT_XS),
-                                        self.theme.fg_dim,
+                                        egui::FontId::proportional(11.0),
+                                        btn_text_color,
                                     );
 
-                                    // Handle clicks
-                                    if let Some(pos) = pointer_pos {
-                                        if resp.clicked() && edit_rect.contains(pos) {
-                                            self.snippet_view_state.open_edit(
-                                                snippet.id.clone(),
-                                                &snippet.name,
-                                                &snippet.command,
-                                                &snippet.group
-                                            );
-                                        }
+                                    // Handle edit clicks
+                                    if over_btn && resp.clicked() {
+                                        self.snippet_view_state.open_edit(
+                                            snippet.id.clone(),
+                                            &snippet.name,
+                                            &snippet.command,
+                                            &snippet.group
+                                        );
                                     }
+                                    ui.allocate_exact_size(egui::vec2(56.0, 22.0), egui::Sense::hover());
                                 }
-
-                                ui.add_space(4.0);
                             }
                             ui.add_space(12.0);
                         }
@@ -286,11 +260,6 @@ impl PortalApp {
                         ui.add_space(40.0);
                     });
             });
-
-        // ── Show drawer for add/edit snippet ──
-        if self.snippet_view_state.open {
-            self.show_add_snippet_drawer(ctx, &mut snippet_to_create, &mut snippet_to_save);
-        }
 
         // ── Delete confirmation dialog ──
         if let Some(delete_id) = &self.snippet_view_state.confirm_delete.clone() {
@@ -357,21 +326,6 @@ impl PortalApp {
         }
 
         // ── Apply deferred actions ──
-        if let Some(snippet) = snippet_to_create {
-            self.snippets.push(snippet);
-            config::save_snippets(&self.snippets);
-        }
-
-        if let Some(updated) = snippet_to_save {
-            if let Some(s) = self.snippets.iter_mut().find(|s| s.id == updated.id) {
-                s.name = updated.name;
-                s.command = updated.command;
-                s.group = updated.group;
-            }
-            config::save_snippets(&self.snippets);
-            self.snippet_view_state.editing = None;
-        }
-
         if let Some(id) = snippet_to_delete {
             self.snippets.retain(|s| s.id != id);
             config::save_snippets(&self.snippets);

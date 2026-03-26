@@ -13,7 +13,6 @@ use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, split_rect};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
 use crate::ui::input::{key_to_ctrl_byte, key_to_char, ShortcutResolver};
-use super::selection::find_word_boundaries;
 
 
 // ---------------------------------------------------------------------------
@@ -407,7 +406,6 @@ pub fn render_terminal_session(
         }
 
         let mut ime_committed = false;
-        let has_ime_events = events.iter().any(|e| matches!(e, egui::Event::Ime(_)));
 
         // Pre-collect all characters from Text events to detect duplicates with Key events
         // On macOS, typing a character generates both Text and Key events
@@ -751,14 +749,23 @@ pub fn render_terminal_session(
         }
         if let Some(pos) = double_click_pos {
             let (grid_row, grid_col) = pixel_to_cell(pos);
-            let local_row = if grid_row < scrollback_len {
-                grid_row
+            // Get the actual cells for this row (from scrollback or grid)
+            let cells = if grid_row < scrollback_len {
+                grid.get_scrollback_row(grid_row)
             } else {
-                grid_row.saturating_sub(scrollback_len)
+                let local_row = grid_row.saturating_sub(scrollback_len);
+                if local_row < grid.rows {
+                    Some(&grid.cells[local_row])
+                } else {
+                    None
+                }
             };
-            let (word_start, word_end) = find_word_boundaries(&grid, local_row, grid_col);
-            session.selection.start = (grid_row, word_start);
-            session.selection.end = (grid_row, word_end);
+
+            if let Some(row_cells) = cells {
+                let (word_start, word_end) = super::selection::find_word_boundaries_in_row(row_cells, grid.cols, grid_col);
+                session.selection.start = (grid_row, word_start);
+                session.selection.end = (grid_row, word_end);
+            }
         }
 
         // ── Text rendering ───────────────────────────────────────────────────
