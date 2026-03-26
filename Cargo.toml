@@ -1,6 +1,6 @@
 [package]
 name = "portal"
-version = "0.11.10"
+version = "0.11.11"
 edition = "2021"
 description = "A modern terminal emulator with GUI"
 
