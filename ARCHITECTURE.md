@@ -262,9 +262,53 @@ render_window_content()
 | Keychain | keyring |
 | 序列化 | serde, serde_json |
 
+## 状态分层
+
+### PortalApp (全局共用数据)
+
+跨所有窗口共享的数据：
+
+| 字段 | 说明 |
+|------|------|
+| `hosts: Vec<HostEntry>` | SSH 主机配置列表 |
+| `credentials: Vec<Credential>` | 凭据配置 |
+| `snippets: Vec<Snippet>` | 命令片段 |
+| `theme`, `language`, `font_size` | 全局外观设置 |
+| `connection_history` | 连接历史记录 |
+| `runtime: tokio::Runtime` | 异步运行时 (单例) |
+| `add_host_dialog` | 添加主机对话框 |
+| `credential_dialog` | 凭据对话框 |
+| `add_tunnel_dialog` | 添加隧道对话框 |
+
+### AppWindow (每窗口独立状态)
+
+每个窗口独立的状态，支持多窗口并行操作：
+
+| 字段 | 说明 |
+|------|------|
+| `current_view: AppView` | 当前活动视图 |
+| `tabs: Vec<Tab>` | 标签页列表 |
+| `active_tab: usize` | 当前活动标签 |
+| `sftp_browser_left/right` | SFTP 远程浏览器 |
+| `local_browser_left/right` | 本地文件浏览器 |
+| `sftp_*_dialog` | SFTP 相关对话框 |
+| `ime_composing`, `ime_preedit` | 输入法状态 |
+| `tab_drag: TabDragState` | Tab 拖拽状态 |
+
+### Tab (每标签独立状态)
+
+| 字段 | 说明 |
+|------|------|
+| `sessions: Vec<TerminalSession>` | 终端会话列表 |
+| `layout: PaneNode` | 分屏布局树 |
+| `focused_session: usize` | 焦点会话 |
+| `broadcast_enabled: bool` | 广播模式 |
+| `snippet_drawer_open: bool` | 片段抽屉 |
+
 ## 架构原则
 
-1. **状态隔离**: 每个窗口有独立的 SFTP 连接和状态
-2. **统一渲染**: 所有窗口使用同一渲染路径
-3. **异步优先**: 网络/文件操作全部异步
+1. **状态隔离**: 每个窗口有独立的 SFTP 连接、视图状态
+2. **统一渲染**: 所有窗口使用同一渲染路径 `render_window_content()`
+3. **异步优先**: 网络/文件操作全部异步 (tokio)
 4. **安全存储**: 敏感凭据存入系统 Keychain
+5. **数据共享**: 主机配置、凭据、设置在所有窗口间共享
