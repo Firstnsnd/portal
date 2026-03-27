@@ -11,6 +11,7 @@ mod terminal;
 mod ui;
 
 use app::PortalApp;
+use sftp::LocalBrowser;
 use std::time::Duration;
 
 use ui::*;
@@ -138,6 +139,25 @@ impl eframe::App for PortalApp {
                         next_id,
                         tab_drag: TabDragState::default(),
                         broadcast_state: BroadcastState::default(),
+                        // SFTP state (new window starts with fresh SFTP state)
+                        sftp_browser_left: None,
+                        sftp_browser: None,
+                        local_browser_left: LocalBrowser::new(),
+                        local_browser_right: LocalBrowser::new(),
+                        left_panel_is_local: true,
+                        right_panel_is_local: false,
+                        sftp_context_menu: None,
+                        sftp_rename_dialog: None,
+                        sftp_new_folder_dialog: None,
+                        sftp_new_file_dialog: None,
+                        sftp_confirm_delete: None,
+                        sftp_editor_dialog: None,
+                        sftp_error_dialog: None,
+                        sftp_local_left_refresh_start: None,
+                        sftp_local_right_refresh_start: None,
+                        sftp_remote_refresh_start: None,
+                        sftp_left_remote_refresh_start: None,
+                        sftp_active_panel_is_local: true,
                     });
                 }
             }
@@ -233,77 +253,82 @@ impl eframe::App for PortalApp {
             }
         }
 
-        // ── Poll SFTP browser ──────────────────────────────────────────────
-        if let Some(ref mut browser) = self.sftp_browser {
-            let had_transfer = browser.transfer.is_some();
-            let was_download = browser.transfer.as_ref().map_or(false, |t| !t.is_upload);
-            browser.poll();
-            // Auto-refresh local browser after download completes
-            if had_transfer && browser.transfer.is_none() && was_download {
-                self.local_browser_right.refresh();
-            }
-            // Handle async file read results for the editor
-            if let Some((path, data)) = browser.pending_file_content.take() {
-                if let Some(ref mut dialog) = self.sftp_editor_dialog {
-                    if dialog.loading && dialog.panel == ui::types::SftpPanel::RightRemote {
-                        match String::from_utf8(data) {
-                            Ok(text) => {
-                                dialog.content = text.clone();
-                                dialog.original_content = text;
-                                dialog.loading = false;
-                                dialog.file_path = path;
-                            }
-                            Err(_) => {
-                                dialog.error = "Not valid UTF-8".to_string();
-                                dialog.loading = false;
-                            }
-                        }
-                    }
-                }
-            }
-            if let Some((_path, size)) = browser.pending_file_too_large.take() {
-                if let Some(ref mut dialog) = self.sftp_editor_dialog {
-                    if dialog.loading && dialog.panel == ui::types::SftpPanel::RightRemote {
-                        dialog.loading = false;
-                        dialog.error = format!("File too large ({} bytes)", size);
-                    }
-                }
-            }
-        }
+        // ── Poll SFTP browsers (per-window) ──────────────────────────────────────────────
+        for window_idx in 0..self.windows.len() {
+            let window = &mut self.windows[window_idx];
 
-        // ── Poll left SFTP browser ──────────────────────────────────────────
-        if let Some(ref mut browser) = self.sftp_browser_left {
-            let had_transfer = browser.transfer.is_some();
-            let was_download = browser.transfer.as_ref().map_or(false, |t| !t.is_upload);
-            browser.poll();
-            // Auto-refresh local browser after download completes
-            if had_transfer && browser.transfer.is_none() && was_download {
-                self.local_browser_left.refresh();
-            }
-            // Handle async file read results for the editor
-            if let Some((path, data)) = browser.pending_file_content.take() {
-                if let Some(ref mut dialog) = self.sftp_editor_dialog {
-                    if dialog.loading && dialog.panel == ui::types::SftpPanel::LeftRemote {
-                        match String::from_utf8(data) {
-                            Ok(text) => {
-                                dialog.content = text.clone();
-                                dialog.original_content = text;
-                                dialog.loading = false;
-                                dialog.file_path = path;
-                            }
-                            Err(_) => {
-                                dialog.error = "Not valid UTF-8".to_string();
-                                dialog.loading = false;
+            // Poll right panel SFTP browser
+            if let Some(ref mut browser) = window.sftp_browser {
+                let had_transfer = browser.transfer.is_some();
+                let was_download = browser.transfer.as_ref().map_or(false, |t| !t.is_upload);
+                browser.poll();
+                // Auto-refresh local browser after download completes
+                if had_transfer && browser.transfer.is_none() && was_download {
+                    window.local_browser_right.refresh();
+                }
+                // Handle async file read results for the editor
+                if let Some((path, data)) = browser.pending_file_content.take() {
+                    if let Some(ref mut dialog) = window.sftp_editor_dialog {
+                        if dialog.loading && dialog.panel == ui::types::SftpPanel::RightRemote {
+                            match String::from_utf8(data) {
+                                Ok(text) => {
+                                    dialog.content = text.clone();
+                                    dialog.original_content = text;
+                                    dialog.loading = false;
+                                    dialog.file_path = path;
+                                }
+                                Err(_) => {
+                                    dialog.error = "Not valid UTF-8".to_string();
+                                    dialog.loading = false;
+                                }
                             }
                         }
                     }
                 }
+                if let Some((_path, size)) = browser.pending_file_too_large.take() {
+                    if let Some(ref mut dialog) = window.sftp_editor_dialog {
+                        if dialog.loading && dialog.panel == ui::types::SftpPanel::RightRemote {
+                            dialog.loading = false;
+                            dialog.error = format!("File too large ({} bytes)", size);
+                        }
+                    }
+                }
             }
-            if let Some((_path, size)) = browser.pending_file_too_large.take() {
-                if let Some(ref mut dialog) = self.sftp_editor_dialog {
-                    if dialog.loading && dialog.panel == ui::types::SftpPanel::LeftRemote {
-                        dialog.loading = false;
-                        dialog.error = format!("File too large ({} bytes)", size);
+
+            // Poll left panel SFTP browser
+            if let Some(ref mut browser) = window.sftp_browser_left {
+                let had_transfer = browser.transfer.is_some();
+                let was_download = browser.transfer.as_ref().map_or(false, |t| !t.is_upload);
+                browser.poll();
+                // Auto-refresh local browser after download completes
+                if had_transfer && browser.transfer.is_none() && was_download {
+                    window.local_browser_left.refresh();
+                }
+                // Handle async file read results for the editor
+                if let Some((path, data)) = browser.pending_file_content.take() {
+                    if let Some(ref mut dialog) = window.sftp_editor_dialog {
+                        if dialog.loading && dialog.panel == ui::types::SftpPanel::LeftRemote {
+                            match String::from_utf8(data) {
+                                Ok(text) => {
+                                    dialog.content = text.clone();
+                                    dialog.original_content = text;
+                                    dialog.loading = false;
+                                    dialog.file_path = path;
+                                }
+                                Err(_) => {
+                                    dialog.error = "Not valid UTF-8".to_string();
+                                    dialog.loading = false;
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some((_path, size)) = browser.pending_file_too_large.take() {
+                    if let Some(ref mut dialog) = window.sftp_editor_dialog {
+                        if dialog.loading && dialog.panel == ui::types::SftpPanel::LeftRemote {
+                            dialog.loading = false;
+                            dialog.error = format!("File too large ({} bytes)", size);
+                        }
                     }
                 }
             }

@@ -166,7 +166,7 @@ impl PortalApp {
                         self.show_hosts_page(ctx, ui);
                     }
                     AppView::Sftp => {
-                        self.show_sftp_view(ui);
+                        self.show_sftp_view(ui, window_idx);
                     }
                     AppView::Keychain => {
                         self.show_keychain_view(ctx, ui);

@@ -8,15 +8,13 @@ mod tab_management;
 mod window_content;
 
 use crate::config::{HostEntry, Credential, ConnectionRecord, ShortcutAction, Snippet};
-use crate::sftp::{LocalBrowser, SftpBrowser};
+use crate::sftp::LocalBrowser;
 use crate::ui::types::{
     dialogs::{
         HostFilter, CredentialDialog, AddHostDialog, AddTunnelDialog,
         AppView, KeychainDeleteRequest, SnippetViewState,
     },
     session::TerminalSession,
-    sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog,
-        SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog},
 };
 use crate::ui::pane::{Tab, AppWindow, TabDragState};
 use crate::ui::input::ShortcutResolver;
@@ -41,25 +39,6 @@ pub struct PortalApp {
     pub host_to_delete: Option<usize>,
     pub confirm_delete_host: Option<usize>,
     pub runtime: tokio::runtime::Runtime,
-    // SFTP browser
-    pub sftp_browser_left: Option<SftpBrowser>,  // Left panel SFTP connection
-    pub sftp_browser: Option<SftpBrowser>,       // Right panel SFTP connection
-    pub local_browser_left: LocalBrowser,        // Left panel local browser
-    pub local_browser_right: LocalBrowser,       // Right panel local browser
-    pub left_panel_is_local: bool,               // true = local, false = remote (left panel)
-    pub right_panel_is_local: bool,              // true = local, false = remote (right panel)
-    pub sftp_context_menu: Option<SftpContextMenu>,
-    pub sftp_rename_dialog: Option<SftpRenameDialog>,
-    pub sftp_new_folder_dialog: Option<SftpNewFolderDialog>,
-    pub sftp_new_file_dialog: Option<SftpNewFileDialog>,
-    pub sftp_confirm_delete: Option<SftpConfirmDelete>,
-    pub sftp_editor_dialog: Option<SftpEditorDialog>,
-    pub sftp_error_dialog: Option<SftpErrorDialog>,
-    pub sftp_local_left_refresh_start: Option<std::time::Instant>,
-    pub sftp_local_right_refresh_start: Option<std::time::Instant>,
-    pub sftp_remote_refresh_start: Option<std::time::Instant>,
-    pub sftp_left_remote_refresh_start: Option<std::time::Instant>,
-    pub sftp_active_panel_is_local: bool,
     // Status bar pickers
     pub selected_shell: String,
     pub selected_encoding: String,
@@ -150,6 +129,25 @@ impl PortalApp {
             next_id: 1,
             tab_drag: TabDragState::default(),
             broadcast_state: crate::ui::types::BroadcastState::default(),
+            // SFTP state
+            sftp_browser_left: None,
+            sftp_browser: None,
+            local_browser_left: LocalBrowser::new(),
+            local_browser_right: LocalBrowser::new(),
+            left_panel_is_local: true,
+            right_panel_is_local: false,
+            sftp_context_menu: None,
+            sftp_rename_dialog: None,
+            sftp_new_folder_dialog: None,
+            sftp_new_file_dialog: None,
+            sftp_confirm_delete: None,
+            sftp_editor_dialog: None,
+            sftp_error_dialog: None,
+            sftp_local_left_refresh_start: None,
+            sftp_local_right_refresh_start: None,
+            sftp_remote_refresh_start: None,
+            sftp_left_remote_refresh_start: None,
+            sftp_active_panel_is_local: true,
         };
 
         let connection_history = crate::config::load_history();
@@ -177,24 +175,6 @@ impl PortalApp {
             host_to_delete: None,
             confirm_delete_host: None,
             runtime,
-            sftp_browser_left: None,
-            sftp_browser: None,
-            local_browser_left: LocalBrowser::new(),
-            local_browser_right: LocalBrowser::new(),
-            left_panel_is_local: true,
-            right_panel_is_local: false,
-            sftp_context_menu: None,
-            sftp_rename_dialog: None,
-            sftp_new_folder_dialog: None,
-            sftp_new_file_dialog: None,
-            sftp_confirm_delete: None,
-            sftp_editor_dialog: None,
-            sftp_error_dialog: None,
-            sftp_local_left_refresh_start: None,
-            sftp_local_right_refresh_start: None,
-            sftp_remote_refresh_start: None,
-            sftp_left_remote_refresh_start: None,
-            sftp_active_panel_is_local: true,  // Track which panel has focus
             selected_shell,
             selected_encoding: "UTF-8".to_string(),
             broadcast_state: crate::ui::types::BroadcastState::default(),

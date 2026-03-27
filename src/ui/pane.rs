@@ -73,7 +73,12 @@
 
 use eframe::egui;
 
-use crate::ui::types::{session::TerminalSession, dialogs::{AppView, BroadcastState}};
+use crate::sftp::{LocalBrowser, SftpBrowser};
+use crate::ui::types::{
+    session::TerminalSession,
+    dialogs::{AppView, BroadcastState},
+    sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog},
+};
 
 /// Split direction for pane layout
 #[derive(Clone, Copy, PartialEq)]
@@ -316,6 +321,26 @@ pub struct AppWindow {
     pub tab_drag: TabDragState,
     #[allow(dead_code)]
     pub broadcast_state: BroadcastState,
+
+    // SFTP state (per-window, independent connections)
+    pub sftp_browser_left: Option<SftpBrowser>,   // Left panel SFTP connection
+    pub sftp_browser: Option<SftpBrowser>,        // Right panel SFTP connection
+    pub local_browser_left: LocalBrowser,         // Left panel local browser
+    pub local_browser_right: LocalBrowser,         // Right panel local browser
+    pub left_panel_is_local: bool,                // true = local, false = remote (left panel)
+    pub right_panel_is_local: bool,               // true = local, false = remote (right panel)
+    pub sftp_context_menu: Option<SftpContextMenu>,
+    pub sftp_rename_dialog: Option<SftpRenameDialog>,
+    pub sftp_new_folder_dialog: Option<SftpNewFolderDialog>,
+    pub sftp_new_file_dialog: Option<SftpNewFileDialog>,
+    pub sftp_confirm_delete: Option<SftpConfirmDelete>,
+    pub sftp_editor_dialog: Option<SftpEditorDialog>,
+    pub sftp_error_dialog: Option<SftpErrorDialog>,
+    pub sftp_local_left_refresh_start: Option<std::time::Instant>,
+    pub sftp_local_right_refresh_start: Option<std::time::Instant>,
+    pub sftp_remote_refresh_start: Option<std::time::Instant>,
+    pub sftp_left_remote_refresh_start: Option<std::time::Instant>,
+    pub sftp_active_panel_is_local: bool,
 }
 
 #[cfg(test)]

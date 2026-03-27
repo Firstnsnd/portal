@@ -13,7 +13,7 @@ use crate::ui::views::sftp::render_transfer_progress;
 
 impl PortalApp {
     /// Render the SFTP view: left = local browser (always), right = host list or remote browser.
-    pub fn show_sftp_view(&mut self, ui: &mut egui::Ui) {
+    pub fn show_sftp_view(&mut self, ui: &mut egui::Ui, window_idx: usize) {
         // Configure text cursor for smoother appearance
         ui.ctx().style_mut(|style| {
             style.visuals.text_cursor.stroke = egui::Stroke::new(2.0, self.theme.fg_primary);
@@ -69,14 +69,15 @@ impl PortalApp {
         let mut local_right_move_to_dir: Option<MoveToDirRequest> = None;
         let mut remote_move_to_dir: Option<MoveToDirRequest> = None;
         let mut left_remote_move_to_dir: Option<MoveToDirRequest> = None;
+        let mut remote_refresh_request = false;
 
         // Detect panel focus from mouse clicks
         if ui.ctx().input(|i| i.pointer.any_pressed()) {
             if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
                 if left_panel_rect.contains(pos) {
-                    self.sftp_active_panel_is_local = true;
+                    self.windows[window_idx].sftp_active_panel_is_local = true;
                 } else if right_panel_rect.contains(pos) {
-                    self.sftp_active_panel_is_local = false;
+                    self.windows[window_idx].sftp_active_panel_is_local = false;
                 }
             }
         }
@@ -86,7 +87,7 @@ impl PortalApp {
         let mut left_disconnect_request = false;
         let mut left_toggle_hidden_files = false;
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(left_panel_rect), |ui| {
-            if self.left_panel_is_local {
+            if self.windows[window_idx].left_panel_is_local {
                 // ── LEFT PANEL: Local ──
                 // Path bar with breadcrumbs
                 egui::Frame {
@@ -111,7 +112,7 @@ impl PortalApp {
                         ui.label(egui::RichText::new(self.language.t("local")).color(self.theme.fg_dim).size(13.0).strong());
                         ui.add_space(4.0);
                         // Breadcrumb path
-                        render_breadcrumbs(ui, &self.local_browser_left.current_path, &mut local_left_navigate_to, true, &self.theme);
+                        render_breadcrumbs(ui, &self.windows[window_idx].local_browser_left.current_path, &mut local_left_navigate_to, true, &self.theme);
                         // Refresh + switch to remote button (right-aligned)
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             // Switch to remote button
@@ -122,19 +123,19 @@ impl PortalApp {
                                 .on_hover_text(self.language.t("switch_to_remote"))
                                 .clicked()
                             {
-                                self.left_panel_is_local = false;
+                                self.windows[window_idx].left_panel_is_local = false;
                             }
                             ui.add_space(8.0);
                             // Show/Hide hidden files toggle
-                            let toggle_text = if self.local_browser_left.show_hidden_files {
+                            let toggle_text = if self.windows[window_idx].local_browser_left.show_hidden_files {
                                 self.language.t("hide_hidden_files")
                             } else {
                                 self.language.t("show_hidden_files")
                             };
                             if ui
                                 .add(egui::Button::new(
-                                    egui::RichText::new(if self.local_browser_left.show_hidden_files { "\u{1F440}" } else { "\u{1F441}" })
-                                        .color(if self.local_browser_left.show_hidden_files { self.theme.accent } else { self.theme.fg_dim })
+                                    egui::RichText::new(if self.windows[window_idx].local_browser_left.show_hidden_files { "\u{1F440}" } else { "\u{1F441}" })
+                                        .color(if self.windows[window_idx].local_browser_left.show_hidden_files { self.theme.accent } else { self.theme.fg_dim })
                                         .size(13.0)
                                 ).frame(false))
                                 .on_hover_text(toggle_text)
@@ -143,49 +144,54 @@ impl PortalApp {
                                 local_left_toggle_hidden = true;
                             }
                             ui.add_space(8.0);
-                            let is_refreshing = self.sftp_local_left_refresh_start
+                            let is_refreshing = self.windows[window_idx].sftp_local_left_refresh_start
                                 .map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(300));
                             if is_refreshing {
                                 ui.spinner();
                                 ui.ctx().request_repaint();
                             } else {
-                                self.sftp_local_left_refresh_start = None;
+                                self.windows[window_idx].sftp_local_left_refresh_start = None;
                                 if ui
                                     .add(egui::Button::new(
                                         egui::RichText::new("\u{21BB}").color(self.theme.accent).size(13.0),
                                     ).frame(false))
                                     .clicked()
                                 {
-                                    self.sftp_local_left_refresh_start = Some(std::time::Instant::now());
-                                    self.local_browser_left.refresh();
+                                    self.windows[window_idx].sftp_local_left_refresh_start = Some(std::time::Instant::now());
+                                    self.windows[window_idx].local_browser_left.refresh();
                                 }
                             }
                         });
                     });
                 });
 
-                let filtered_entries = self.local_browser_left.filtered_entries();
+                let filtered_entries = self.windows[window_idx].local_browser_left.filtered_entries();
                 render_file_panel(
                     ui,
                     &filtered_entries,
-                    &self.local_browser_left.selection,
+                    &self.windows[window_idx].local_browser_left.selection,
                     &mut local_left_navigate_to,
                     &mut local_left_selection_action,
                     true,
-                    &self.local_browser_left.current_path,
+                    &self.windows[window_idx].local_browser_left.current_path,
                     &self.theme,
                     &mut local_left_ctx_menu_req,
                     &mut local_left_open_file_req,
                     &mut local_left_delete_request,
-                    self.sftp_active_panel_is_local,
+                    self.windows[window_idx].sftp_active_panel_is_local,
                     &self.language,
                     "local_left_scroll",
-                    self.sftp_editor_dialog.is_some(),
+                    self.windows[window_idx].sftp_editor_dialog.is_some(),
                     &mut local_left_move_to_dir,
                 );
             } else {
                 // ── LEFT PANEL: Remote (independent connection) ──
-                match self.sftp_browser_left.as_mut() {
+                // Extract window state values before borrowing sftp_browser_left
+                let sftp_left_remote_refresh_start = self.windows[window_idx].sftp_left_remote_refresh_start;
+                let sftp_active_panel_is_local = self.windows[window_idx].sftp_active_panel_is_local;
+                let sftp_editor_dialog_is_some = self.windows[window_idx].sftp_editor_dialog.is_some();
+
+                match self.windows[window_idx].sftp_browser_left.as_mut() {
                     None => {
                         // ── No connection: show host list ──
                         egui::Frame {
@@ -237,12 +243,12 @@ impl PortalApp {
                             ui.painter().text(
                                 egui::pos2(rect.min.x + 38.0, rect.center().y + 8.0),
                                 egui::Align2::LEFT_CENTER,
-                                &format!("/{}", self.local_browser_left.current_path.split('/').last().unwrap_or("")),
+                                &format!("/{}", self.windows[window_idx].local_browser_left.current_path.split('/').last().unwrap_or("")),
                                 egui::FontId::proportional(10.0),
                                 self.theme.fg_dim,
                             );
                             if resp.clicked() {
-                                self.left_panel_is_local = true;
+                                self.windows[window_idx].left_panel_is_local = true;
                             }
 
                             ui.add_space(4.0);
@@ -335,10 +341,10 @@ impl PortalApp {
                                         egui::Button::new(egui::RichText::new(self.language.t("cancel")).color(self.theme.red).size(13.0))
                                             .frame(false)
                                     ).clicked() {
-                                        if let Some(ref b) = self.sftp_browser_left {
+                                        if let Some(ref b) = self.windows[window_idx].sftp_browser_left {
                                             b.cancel_connect();
                                         }
-                                        self.sftp_browser_left = None;
+                                        self.windows[window_idx].sftp_browser_left = None;
                                     }
                                 });
                             }
@@ -366,11 +372,16 @@ impl PortalApp {
                                         egui::Button::new(egui::RichText::new(self.language.t("back")).color(self.theme.accent).size(13.0))
                                             .frame(false)
                                     ).clicked() {
-                                        self.sftp_browser_left = None;
+                                        self.windows[window_idx].sftp_browser_left = None;
                                     }
                                 });
                             }
                             SftpConnectionState::Connected => {
+                                // Use pre-extracted refresh state
+                                let is_refreshing = sftp_left_remote_refresh_start
+                                    .map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(300));
+                                let mut left_remote_refresh_request = false;
+
                                 // Path bar with breadcrumbs + disconnect
                                 egui::Frame {
                                     fill: self.theme.bg_secondary,
@@ -426,25 +437,32 @@ impl PortalApp {
                                                 left_toggle_hidden_files = true;
                                             }
                                             ui.add_space(8.0);
-                                            let is_refreshing = self.sftp_left_remote_refresh_start
-                                                .map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(300));
                                             if is_refreshing {
                                                 ui.spinner();
                                             } else {
-                                                self.sftp_left_remote_refresh_start = None;
                                                 if ui
                                                     .add(egui::Button::new(
                                                         egui::RichText::new("\u{21BB}").color(self.theme.accent).size(13.0),
                                                     ).frame(false))
                                                     .clicked()
                                                 {
-                                                    self.sftp_left_remote_refresh_start = Some(std::time::Instant::now());
-                                                    browser.refresh();
+                                                    left_remote_refresh_request = true;
                                                 }
                                             }
                                         });
                                     });
                                 });
+
+                                // Handle refresh request - use deferred update to avoid borrow conflicts
+                                let mut new_refresh_start: Option<std::time::Instant> = sftp_left_remote_refresh_start;
+                                if left_remote_refresh_request {
+                                    new_refresh_start = Some(std::time::Instant::now());
+                                    browser.refresh();
+                                } else if !is_refreshing {
+                                    new_refresh_start = None;
+                                }
+                                // Store the refresh start value for deferred update
+                                let _refresh_start_to_set = new_refresh_start;
 
                                 let selection = browser.selection.clone();
                                 let current_path = browser.current_path.clone();
@@ -461,16 +479,16 @@ impl PortalApp {
                                     &mut left_remote_ctx_menu_req,
                                     &mut left_remote_open_file_req,
                                     &mut left_remote_delete_request,
-                                    self.sftp_active_panel_is_local,
+                                    sftp_active_panel_is_local,
                                     &self.language,
                                     "left_remote_scroll",
-                                    self.sftp_editor_dialog.is_some(),
+                                    sftp_editor_dialog_is_some,
                                     &mut left_remote_move_to_dir,
                                 );
+                                // Deferred update will happen after the match
                             }
                             SftpConnectionState::Disconnected => {
-                                // Immediately clean up disconnected browser and return to host list
-                                self.sftp_browser_left = None;
+                                // Mark for cleanup - will be handled after the match
                             }
                         }
                     }
@@ -480,22 +498,22 @@ impl PortalApp {
 
         // ── Handle left panel disconnect request ──
         if left_disconnect_request {
-            self.sftp_browser_left = None;
+            self.windows[window_idx].sftp_browser_left = None;
         }
         // ── Handle left panel toggle hidden files request ──
         if left_toggle_hidden_files {
-            if let Some(ref mut b) = self.sftp_browser_left.as_mut() {
+            if let Some(ref mut b) = self.windows[window_idx].sftp_browser_left.as_mut() {
                 b.toggle_hidden_files();
             }
         }
         // ── Handle left local panel toggle hidden files request ──
         if local_left_toggle_hidden {
-            self.local_browser_left.toggle_hidden_files();
+            self.windows[window_idx].local_browser_left.toggle_hidden_files();
         }
 
         // ── RIGHT PANEL: Local or Remote ──
         let is_connected = matches!(
-            self.sftp_browser.as_ref().map(|b| &b.state),
+            self.windows[window_idx].sftp_browser.as_ref().map(|b| &b.state),
             Some(SftpConnectionState::Connected)
         );
         let mut connect_host: Option<usize> = None;
@@ -503,7 +521,7 @@ impl PortalApp {
         let mut right_toggle_hidden_files = false;
 
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(right_panel_rect), |ui| {
-            if self.right_panel_is_local {
+            if self.windows[window_idx].right_panel_is_local {
                 // ── RIGHT PANEL: Local ──
                 // Path bar with breadcrumbs
                 egui::Frame {
@@ -528,7 +546,7 @@ impl PortalApp {
                         ui.label(egui::RichText::new(self.language.t("local")).color(self.theme.fg_dim).size(13.0).strong());
                         ui.add_space(4.0);
                         // Breadcrumb path
-                        render_breadcrumbs(ui, &self.local_browser_right.current_path, &mut local_right_navigate_to, true, &self.theme);
+                        render_breadcrumbs(ui, &self.windows[window_idx].local_browser_right.current_path, &mut local_right_navigate_to, true, &self.theme);
                         // Refresh + switch to remote button (right-aligned)
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             // Switch to remote button
@@ -539,19 +557,19 @@ impl PortalApp {
                                 .on_hover_text(self.language.t("switch_to_remote"))
                                 .clicked()
                             {
-                                self.right_panel_is_local = false;
+                                self.windows[window_idx].right_panel_is_local = false;
                             }
                             ui.add_space(8.0);
                             // Show/Hide hidden files toggle
-                            let toggle_text = if self.local_browser_right.show_hidden_files {
+                            let toggle_text = if self.windows[window_idx].local_browser_right.show_hidden_files {
                                 self.language.t("hide_hidden_files")
                             } else {
                                 self.language.t("show_hidden_files")
                             };
                             if ui
                                 .add(egui::Button::new(
-                                    egui::RichText::new(if self.local_browser_right.show_hidden_files { "\u{1F440}" } else { "\u{1F441}" })
-                                        .color(if self.local_browser_right.show_hidden_files { self.theme.accent } else { self.theme.fg_dim })
+                                    egui::RichText::new(if self.windows[window_idx].local_browser_right.show_hidden_files { "\u{1F440}" } else { "\u{1F441}" })
+                                        .color(if self.windows[window_idx].local_browser_right.show_hidden_files { self.theme.accent } else { self.theme.fg_dim })
                                         .size(13.0)
                                 ).frame(false))
                                 .on_hover_text(toggle_text)
@@ -560,49 +578,54 @@ impl PortalApp {
                                 local_right_toggle_hidden = true;
                             }
                             ui.add_space(8.0);
-                            let is_refreshing = self.sftp_local_right_refresh_start
+                            let is_refreshing = self.windows[window_idx].sftp_local_right_refresh_start
                                 .map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(300));
                             if is_refreshing {
                                 ui.spinner();
                                 ui.ctx().request_repaint();
                             } else {
-                                self.sftp_local_right_refresh_start = None;
+                                self.windows[window_idx].sftp_local_right_refresh_start = None;
                                 if ui
                                     .add(egui::Button::new(
                                         egui::RichText::new("\u{21BB}").color(self.theme.accent).size(13.0),
                                     ).frame(false))
                                     .clicked()
                                 {
-                                    self.sftp_local_right_refresh_start = Some(std::time::Instant::now());
-                                    self.local_browser_right.refresh();
+                                    self.windows[window_idx].sftp_local_right_refresh_start = Some(std::time::Instant::now());
+                                    self.windows[window_idx].local_browser_right.refresh();
                                 }
                             }
                         });
                     });
                 });
 
-                let filtered_entries = self.local_browser_right.filtered_entries();
+                let filtered_entries = self.windows[window_idx].local_browser_right.filtered_entries();
                 render_file_panel(
                     ui,
                     &filtered_entries,
-                    &self.local_browser_right.selection,
+                    &self.windows[window_idx].local_browser_right.selection,
                     &mut local_right_navigate_to,
                     &mut local_right_selection_action,
                     true,
-                    &self.local_browser_right.current_path,
+                    &self.windows[window_idx].local_browser_right.current_path,
                     &self.theme,
                     &mut local_right_ctx_menu_req,
                     &mut local_right_open_file_req,
                     &mut local_right_delete_request,
-                    !self.sftp_active_panel_is_local,
+                    !self.windows[window_idx].sftp_active_panel_is_local,
                     &self.language,
                     "local_right_scroll",
-                    self.sftp_editor_dialog.is_some(),
+                    self.windows[window_idx].sftp_editor_dialog.is_some(),
                     &mut local_right_move_to_dir,
                 );
             } else {
                 // ── RIGHT PANEL: Remote (host list or remote browser) ──
-                match self.sftp_browser.as_mut() {
+                // Extract window state values before borrowing sftp_browser
+                let sftp_remote_refresh_start = self.windows[window_idx].sftp_remote_refresh_start;
+                let sftp_active_panel_is_local = self.windows[window_idx].sftp_active_panel_is_local;
+                let sftp_editor_dialog_is_some = self.windows[window_idx].sftp_editor_dialog.is_some();
+
+                match self.windows[window_idx].sftp_browser.as_mut() {
                     None => {
                         // ── No connection: show host list ──
                         egui::Frame {
@@ -654,12 +677,12 @@ impl PortalApp {
                         ui.painter().text(
                             egui::pos2(rect.min.x + 38.0, rect.center().y + 8.0),
                             egui::Align2::LEFT_CENTER,
-                            &format!("/{}", self.local_browser_right.current_path.split('/').last().unwrap_or("")),
+                            &format!("/{}", self.windows[window_idx].local_browser_right.current_path.split('/').last().unwrap_or("")),
                             egui::FontId::proportional(10.0),
                             self.theme.fg_dim,
                         );
                         if resp.clicked() {
-                            self.right_panel_is_local = true;
+                            self.windows[window_idx].right_panel_is_local = true;
                         }
 
                         ui.add_space(4.0);
@@ -752,10 +775,10 @@ impl PortalApp {
                                     egui::Button::new(egui::RichText::new(self.language.t("cancel")).color(self.theme.red).size(13.0))
                                         .frame(false)
                                 ).clicked() {
-                                    if let Some(ref b) = self.sftp_browser {
+                                    if let Some(ref b) = self.windows[window_idx].sftp_browser {
                                         b.cancel_connect();
                                     }
-                                    self.sftp_browser = None;
+                                    self.windows[window_idx].sftp_browser = None;
                                 }
                             });
                         }
@@ -783,7 +806,7 @@ impl PortalApp {
                                     egui::Button::new(egui::RichText::new(self.language.t("back")).color(self.theme.accent).size(13.0))
                                         .frame(false)
                                 ).clicked() {
-                                    self.sftp_browser = None;
+                                    self.windows[window_idx].sftp_browser = None;
                                 }
                             });
                         }
@@ -843,27 +866,30 @@ impl PortalApp {
                                             right_toggle_hidden_files = true;
                                         }
                                         ui.add_space(8.0);
-                                        let is_refreshing = self.sftp_remote_refresh_start
+                                        let is_refreshing = sftp_remote_refresh_start
                                             .map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(300));
                                         if is_refreshing {
                                             ui.spinner();
                                             ui.ctx().request_repaint();
                                         } else {
-                                            self.sftp_remote_refresh_start = None;
                                             if ui
                                                 .add(egui::Button::new(
                                                     egui::RichText::new("\u{21BB}").color(self.theme.accent).size(13.0),
                                                 ).frame(false))
                                                 .clicked()
                                             {
-                                                self.sftp_remote_refresh_start = Some(std::time::Instant::now());
-                                                let path = browser.current_path.clone();
-                                                browser.navigate(&path);
+                                                remote_refresh_request = true;
                                             }
                                         }
                                     });
                                 });
                             });
+
+                            // Handle refresh request after the UI closure
+                            if remote_refresh_request {
+                                let path = browser.current_path.clone();
+                                browser.navigate(&path);
+                            }
 
                             let selection = browser.selection.clone();
                             let current_path = browser.current_path.clone();
@@ -880,10 +906,10 @@ impl PortalApp {
                                 &mut remote_ctx_menu_req,
                                 &mut remote_open_file_req,
                                 &mut remote_delete_request,
-                                !self.sftp_active_panel_is_local,
+                                !sftp_active_panel_is_local,
                                 &self.language,
                                 "right_remote_scroll",
-                                self.sftp_editor_dialog.is_some(),
+                                sftp_editor_dialog_is_some,
                                 &mut remote_move_to_dir,
                             );
                         }
@@ -898,17 +924,17 @@ impl PortalApp {
 
         // ── Handle right panel disconnect request ──
         if right_disconnect_request {
-            self.sftp_browser = None;
+            self.windows[window_idx].sftp_browser = None;
         }
         // ── Handle right panel toggle hidden files request ──
         if right_toggle_hidden_files {
-            if let Some(ref mut b) = self.sftp_browser.as_mut() {
+            if let Some(ref mut b) = self.windows[window_idx].sftp_browser.as_mut() {
                 b.toggle_hidden_files();
             }
         }
         // ── Handle right local panel toggle hidden files request ──
         if local_right_toggle_hidden {
-            self.local_browser_right.toggle_hidden_files();
+            self.windows[window_idx].local_browser_right.toggle_hidden_files();
         }
 
         // Reserve the full area
@@ -919,7 +945,7 @@ impl PortalApp {
             let host = &self.hosts[idx];
             let username = crate::ui::types::TerminalSession::get_effective_username(&host.username);
             let auth = crate::config::resolve_auth(host, &self.credentials);
-            self.sftp_browser_left = Some(crate::sftp::SftpBrowser::connect(
+            self.windows[window_idx].sftp_browser_left = Some(crate::sftp::SftpBrowser::connect(
                 &self.runtime,
                 host.host.clone(),
                 host.port,
@@ -934,7 +960,7 @@ impl PortalApp {
             let host = &self.hosts[idx];
             let username = crate::ui::types::TerminalSession::get_effective_username(&host.username);
             let auth = crate::config::resolve_auth(host, &self.credentials);
-            self.sftp_browser = Some(crate::sftp::SftpBrowser::connect(
+            self.windows[window_idx].sftp_browser = Some(crate::sftp::SftpBrowser::connect(
                 &self.runtime,
                 host.host.clone(),
                 host.port,
@@ -947,21 +973,21 @@ impl PortalApp {
         // ── Apply deferred local panel actions ──
         if let Some(name) = local_left_navigate_to {
             if name == ".." {
-                self.local_browser_left.navigate_up();
+                self.windows[window_idx].local_browser_left.navigate_up();
             } else if name.starts_with('/') {
-                self.local_browser_left.navigate(&name);
+                self.windows[window_idx].local_browser_left.navigate(&name);
             } else {
                 let path = format!(
                     "{}/{}",
-                    self.local_browser_left.current_path.trim_end_matches('/'),
+                    self.windows[window_idx].local_browser_left.current_path.trim_end_matches('/'),
                     name
                 );
-                self.local_browser_left.navigate(&path);
+                self.windows[window_idx].local_browser_left.navigate(&path);
             }
         }
         if let Some(action) = local_left_selection_action {
-            let count = self.local_browser_left.filtered_entries().len();
-            apply_selection_action(&mut self.local_browser_left.selection, action, count);
+            let count = self.windows[window_idx].local_browser_left.filtered_entries().len();
+            apply_selection_action(&mut self.windows[window_idx].local_browser_left.selection, action, count);
         }
 
         // ── Apply deferred left panel remote actions (only when connected) ──
@@ -969,29 +995,29 @@ impl PortalApp {
         // ── Apply deferred right panel local actions ──
         if let Some(name) = local_right_navigate_to {
             if name == ".." {
-                self.local_browser_right.navigate_up();
+                self.windows[window_idx].local_browser_right.navigate_up();
             } else if name.starts_with('/') {
-                self.local_browser_right.navigate(&name);
+                self.windows[window_idx].local_browser_right.navigate(&name);
             } else {
                 let path = format!(
                     "{}/{}",
-                    self.local_browser_right.current_path.trim_end_matches('/'),
+                    self.windows[window_idx].local_browser_right.current_path.trim_end_matches('/'),
                     name
                 );
-                self.local_browser_right.navigate(&path);
+                self.windows[window_idx].local_browser_right.navigate(&path);
             }
         }
         if let Some(action) = local_right_selection_action {
-            let count = self.local_browser_right.filtered_entries().len();
-            apply_selection_action(&mut self.local_browser_right.selection, action, count);
+            let count = self.windows[window_idx].local_browser_right.filtered_entries().len();
+            apply_selection_action(&mut self.windows[window_idx].local_browser_right.selection, action, count);
         }
         let left_is_connected = matches!(
-            self.sftp_browser_left.as_ref().map(|b| &b.state),
+            self.windows[window_idx].sftp_browser_left.as_ref().map(|b| &b.state),
             Some(SftpConnectionState::Connected)
         );
         if left_is_connected {
             if let Some(name) = left_remote_navigate_to {
-                let browser = self.sftp_browser_left.as_ref().unwrap();
+                let browser = self.windows[window_idx].sftp_browser_left.as_ref().unwrap();
                 if name == ".." {
                     browser.navigate_up();
                 } else if name.starts_with('/') {
@@ -1006,15 +1032,15 @@ impl PortalApp {
                 }
             }
             if let Some(action) = left_remote_selection_action {
-                let count = self.sftp_browser_left.as_ref().unwrap().entries.len();
-                apply_selection_action(&mut self.sftp_browser_left.as_mut().unwrap().selection, action, count);
+                let count = self.windows[window_idx].sftp_browser_left.as_ref().unwrap().entries.len();
+                apply_selection_action(&mut self.windows[window_idx].sftp_browser_left.as_mut().unwrap().selection, action, count);
             }
         }
 
         // ── Apply deferred remote panel actions (only when connected) ──
         if is_connected {
             if let Some(name) = remote_navigate_to {
-                let browser = self.sftp_browser.as_ref().unwrap();
+                let browser = self.windows[window_idx].sftp_browser.as_ref().unwrap();
                 if name == ".." {
                     browser.navigate_up();
                 } else if name.starts_with('/') {
@@ -1029,8 +1055,8 @@ impl PortalApp {
                 }
             }
             if let Some(action) = remote_selection_action {
-                let count = self.sftp_browser.as_ref().unwrap().entries.len();
-                apply_selection_action(&mut self.sftp_browser.as_mut().unwrap().selection, action, count);
+                let count = self.windows[window_idx].sftp_browser.as_ref().unwrap().entries.len();
+                apply_selection_action(&mut self.windows[window_idx].sftp_browser.as_mut().unwrap().selection, action, count);
             }
         }
 
@@ -1081,12 +1107,12 @@ impl PortalApp {
                 if let Some(payload) = egui::DragAndDrop::take_payload::<DragPayload>(&ctx) {
                     if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                         // Only handle drops to remote browser when connected
-                        if let Some(browser) = self.sftp_browser.as_ref() {
+                        if let Some(browser) = self.windows[window_idx].sftp_browser.as_ref() {
                             for entry in &payload.entries {
                                 if left_panel_rect.contains(pos) && !payload.is_local {
                                     let local_dest = format!(
                                         "{}/{}",
-                                        self.local_browser_left.current_path.trim_end_matches('/'),
+                                        self.windows[window_idx].local_browser_left.current_path.trim_end_matches('/'),
                                         entry.entry_name,
                                     );
                                     if entry.is_dir {
@@ -1114,7 +1140,7 @@ impl PortalApp {
 
             // Transfer progress bar
             let mut should_cancel = false;
-            if let Some(ref browser) = self.sftp_browser.as_ref() {
+            if let Some(ref browser) = self.windows[window_idx].sftp_browser.as_ref() {
                 if let Some(ref progress) = browser.transfer {
                     should_cancel = render_transfer_progress(
                         ui,
@@ -1126,7 +1152,7 @@ impl PortalApp {
                 }
             }
             if should_cancel {
-                if let Some(ref mut b) = self.sftp_browser.as_mut() {
+                if let Some(ref mut b) = self.windows[window_idx].sftp_browser.as_mut() {
                     b.cancel_transfer();
                 }
             }
@@ -1134,25 +1160,25 @@ impl PortalApp {
 
         // ── Handle delete key requests ──
         if local_left_delete_request {
-            let filtered = self.local_browser_left.filtered_entries();
-            let names: Vec<String> = self.local_browser_left.selection.selected.iter()
+            let filtered = self.windows[window_idx].local_browser_left.filtered_entries();
+            let names: Vec<String> = self.windows[window_idx].local_browser_left.selection.selected.iter()
                 .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                 .collect();
             if !names.is_empty() {
-                self.sftp_confirm_delete = Some(SftpConfirmDelete {
+                self.windows[window_idx].sftp_confirm_delete = Some(SftpConfirmDelete {
                     panel: SftpPanel::LeftLocal,
                     names,
                 });
             }
         }
         if remote_delete_request {
-            if let Some(ref browser) = self.sftp_browser {
+            if let Some(ref browser) = self.windows[window_idx].sftp_browser {
                 let filtered = browser.filtered_entries();
                 let names: Vec<String> = browser.selection.selected.iter()
                     .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                     .collect();
                 if !names.is_empty() {
-                    self.sftp_confirm_delete = Some(SftpConfirmDelete {
+                    self.windows[window_idx].sftp_confirm_delete = Some(SftpConfirmDelete {
                         panel: SftpPanel::RightRemote,
                         names,
                     });
@@ -1160,13 +1186,13 @@ impl PortalApp {
             }
         }
         if left_remote_delete_request {
-            if let Some(ref browser) = self.sftp_browser_left {
+            if let Some(ref browser) = self.windows[window_idx].sftp_browser_left {
                 let filtered = browser.filtered_entries();
                 let names: Vec<String> = browser.selection.selected.iter()
                     .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                     .collect();
                 if !names.is_empty() {
-                    self.sftp_confirm_delete = Some(SftpConfirmDelete {
+                    self.windows[window_idx].sftp_confirm_delete = Some(SftpConfirmDelete {
                         panel: SftpPanel::LeftRemote,
                         names,
                     });
@@ -1176,7 +1202,7 @@ impl PortalApp {
 
         // ── Handle drag-to-folder move requests ──
         if let Some(req) = local_left_move_to_dir {
-            let current_path = self.local_browser_left.current_path.clone();
+            let current_path = self.windows[window_idx].local_browser_left.current_path.clone();
             let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
             for entry in &req.source_entries {
                 let src = &entry.full_path;
@@ -1185,10 +1211,10 @@ impl PortalApp {
                     log::error!("Failed to move {} to {}: {}", src, dst, e);
                 }
             }
-            self.local_browser_left.refresh();
+            self.windows[window_idx].local_browser_left.refresh();
         }
         if let Some(req) = local_right_move_to_dir {
-            let current_path = self.local_browser_right.current_path.clone();
+            let current_path = self.windows[window_idx].local_browser_right.current_path.clone();
             let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
             for entry in &req.source_entries {
                 let src = &entry.full_path;
@@ -1197,10 +1223,10 @@ impl PortalApp {
                     log::error!("Failed to move {} to {}: {}", src, dst, e);
                 }
             }
-            self.local_browser_right.refresh();
+            self.windows[window_idx].local_browser_right.refresh();
         }
         if let Some(req) = remote_move_to_dir {
-            if let Some(ref browser) = self.sftp_browser {
+            if let Some(ref browser) = self.windows[window_idx].sftp_browser {
                 let current_path = browser.current_path.clone();
                 let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
                 for entry in &req.source_entries {
@@ -1210,7 +1236,7 @@ impl PortalApp {
             }
         }
         if let Some(req) = left_remote_move_to_dir {
-            if let Some(ref browser) = self.sftp_browser_left {
+            if let Some(ref browser) = self.windows[window_idx].sftp_browser_left {
                 let current_path = browser.current_path.clone();
                 let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
                 for entry in &req.source_entries {
@@ -1225,16 +1251,16 @@ impl PortalApp {
         if let Some((pos, entry_idx)) = local_left_ctx_menu_req {
             // If right-clicked on an entry not in selection, select it first
             if let Some(idx) = entry_idx {
-                if !self.local_browser_left.selection.is_selected(idx) {
-                    self.local_browser_left.selection.select_one(idx);
+                if !self.windows[window_idx].local_browser_left.selection.is_selected(idx) {
+                    self.windows[window_idx].local_browser_left.selection.select_one(idx);
                 }
             }
             let indices: Vec<usize> = if entry_idx.is_some() {
-                self.local_browser_left.selection.selected.iter().copied().collect()
+                self.windows[window_idx].local_browser_left.selection.selected.iter().copied().collect()
             } else {
                 vec![]
             };
-            let filtered = self.local_browser_left.filtered_entries();
+            let filtered = self.windows[window_idx].local_browser_left.filtered_entries();
             let names: Vec<String> = indices.iter()
                 .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                 .collect();
@@ -1244,7 +1270,7 @@ impl PortalApp {
             let any_dirs = indices.iter().any(|&i| {
                 filtered.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
             });
-            self.sftp_context_menu = Some(SftpContextMenu {
+            self.windows[window_idx].sftp_context_menu = Some(SftpContextMenu {
                 pos,
                 panel: SftpPanel::LeftLocal,
                 entry_indices: indices,
@@ -1256,16 +1282,16 @@ impl PortalApp {
         if let Some((pos, entry_idx)) = local_right_ctx_menu_req {
             // If right-clicked on an entry not in selection, select it first
             if let Some(idx) = entry_idx {
-                if !self.local_browser_right.selection.is_selected(idx) {
-                    self.local_browser_right.selection.select_one(idx);
+                if !self.windows[window_idx].local_browser_right.selection.is_selected(idx) {
+                    self.windows[window_idx].local_browser_right.selection.select_one(idx);
                 }
             }
             let indices: Vec<usize> = if entry_idx.is_some() {
-                self.local_browser_right.selection.selected.iter().copied().collect()
+                self.windows[window_idx].local_browser_right.selection.selected.iter().copied().collect()
             } else {
                 vec![]
             };
-            let filtered = self.local_browser_right.filtered_entries();
+            let filtered = self.windows[window_idx].local_browser_right.filtered_entries();
             let names: Vec<String> = indices.iter()
                 .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                 .collect();
@@ -1275,7 +1301,7 @@ impl PortalApp {
             let any_dirs = indices.iter().any(|&i| {
                 filtered.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
             });
-            self.sftp_context_menu = Some(SftpContextMenu {
+            self.windows[window_idx].sftp_context_menu = Some(SftpContextMenu {
                 pos,
                 panel: SftpPanel::RightLocal,
                 entry_indices: indices,
@@ -1285,7 +1311,7 @@ impl PortalApp {
             });
         }
         if let Some((pos, entry_idx)) = remote_ctx_menu_req {
-            if let Some(ref mut browser) = self.sftp_browser {
+            if let Some(ref mut browser) = self.windows[window_idx].sftp_browser {
                 if let Some(idx) = entry_idx {
                     if !browser.selection.is_selected(idx) {
                         browser.selection.select_one(idx);
@@ -1306,7 +1332,7 @@ impl PortalApp {
                 let any_dirs = indices.iter().any(|&i| {
                     filtered.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
                 });
-                self.sftp_context_menu = Some(SftpContextMenu {
+                self.windows[window_idx].sftp_context_menu = Some(SftpContextMenu {
                     pos,
                     panel: SftpPanel::RightRemote,
                     entry_indices: indices,
@@ -1317,7 +1343,7 @@ impl PortalApp {
             }
         }
         if let Some((pos, entry_idx)) = left_remote_ctx_menu_req {
-            if let Some(ref mut browser) = self.sftp_browser_left {
+            if let Some(ref mut browser) = self.windows[window_idx].sftp_browser_left {
                 if let Some(idx) = entry_idx {
                     if !browser.selection.is_selected(idx) {
                         browser.selection.select_one(idx);
@@ -1338,7 +1364,7 @@ impl PortalApp {
                 let any_dirs = indices.iter().any(|&i| {
                     filtered.get(i).map_or(false, |e| e.kind == SftpEntryKind::Directory)
                 });
-                self.sftp_context_menu = Some(SftpContextMenu {
+                self.windows[window_idx].sftp_context_menu = Some(SftpContextMenu {
                     pos,
                     panel: SftpPanel::LeftRemote,
                     entry_indices: indices,
@@ -1350,7 +1376,7 @@ impl PortalApp {
         }
 
         // ── Render context menu ──
-        if let Some(ref menu) = self.sftp_context_menu.as_ref().map(|m| {
+        if let Some(ref menu) = self.windows[window_idx].sftp_context_menu.as_ref().map(|m| {
             (m.pos, m.panel, m.entry_indices.clone(), m.entry_names.clone(), m.all_dirs, m.any_dirs)
         }) {
             let (pos, panel, entry_indices, entry_names, _all_dirs, any_dirs) = menu.clone();
@@ -1386,7 +1412,7 @@ impl PortalApp {
                                         egui::RichText::new(self.language.t("rename")).size(12.0).color(self.theme.fg_primary)
                                     ).frame(false)
                                 ).clicked() {
-                                    self.sftp_rename_dialog = Some(SftpRenameDialog {
+                                    self.windows[window_idx].sftp_rename_dialog = Some(SftpRenameDialog {
                                         panel,
                                         old_name: entry_names[0].clone(),
                                         new_name: entry_names[0].clone(),
@@ -1403,7 +1429,7 @@ impl PortalApp {
                                         egui::RichText::new(self.language.t("edit_file")).size(12.0).color(self.theme.fg_primary)
                                     ).frame(false)
                                 ).clicked() {
-                                    self.open_file_for_editing_with_panel(panel, &entry_names[0]);
+                                    self.open_file_for_editing_with_panel(window_idx, panel, &entry_names[0]);
                                     close_menu = true;
                                 }
                             }
@@ -1419,7 +1445,7 @@ impl PortalApp {
                                     egui::RichText::new(delete_label).size(12.0).color(self.theme.red)
                                 ).frame(false)
                             ).clicked() {
-                                self.sftp_confirm_delete = Some(SftpConfirmDelete {
+                                self.windows[window_idx].sftp_confirm_delete = Some(SftpConfirmDelete {
                                     panel,
                                     names: entry_names.clone(),
                                 });
@@ -1435,7 +1461,7 @@ impl PortalApp {
                                 egui::RichText::new(self.language.t("new_folder")).size(12.0).color(self.theme.fg_primary)
                             ).frame(false)
                         ).clicked() {
-                            self.sftp_new_folder_dialog = Some(SftpNewFolderDialog {
+                            self.windows[window_idx].sftp_new_folder_dialog = Some(SftpNewFolderDialog {
                                 panel,
                                 name: String::new(),
                                 error: String::new(),
@@ -1449,7 +1475,7 @@ impl PortalApp {
                                 egui::RichText::new(self.language.t("new_file")).size(12.0).color(self.theme.fg_primary)
                             ).frame(false)
                         ).clicked() {
-                            self.sftp_new_file_dialog = Some(SftpNewFileDialog {
+                            self.windows[window_idx].sftp_new_file_dialog = Some(SftpNewFileDialog {
                                 panel,
                                 name: String::new(),
                                 error: String::new(),
@@ -1462,12 +1488,12 @@ impl PortalApp {
             // Close menu if clicked outside (skip on the frame it was just opened
             // to avoid the opening right-click from immediately closing it)
             if close_menu {
-                self.sftp_context_menu = None;
+                self.windows[window_idx].sftp_context_menu = None;
             } else if !menu_just_opened && ui.ctx().input(|i| i.pointer.any_click()) {
                 let menu_rect = area_resp.response.rect;
                 if let Some(click_pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
                     if !menu_rect.contains(click_pos) {
-                        self.sftp_context_menu = None;
+                        self.windows[window_idx].sftp_context_menu = None;
                     }
                 }
             }
@@ -1476,7 +1502,7 @@ impl PortalApp {
         // ── Rename dialog ──
         let mut rename_action: Option<(SftpPanel, String, String)> = None;
         let mut close_rename = false;
-        if let Some(ref mut dialog) = self.sftp_rename_dialog {
+        if let Some(ref mut dialog) = self.windows[window_idx].sftp_rename_dialog {
             let mut open = true;
             egui::Window::new(self.language.t("rename"))
                 .open(&mut open)
@@ -1538,31 +1564,31 @@ impl PortalApp {
             }
         }
         if close_rename {
-            self.sftp_rename_dialog = None;
+            self.windows[window_idx].sftp_rename_dialog = None;
         }
         if let Some((panel, old_name, new_name)) = rename_action {
             match panel {
                 SftpPanel::LeftLocal => {
-                    if let Err(e) = self.local_browser_left.rename(&old_name, &new_name) {
+                    if let Err(e) = self.windows[window_idx].local_browser_left.rename(&old_name, &new_name) {
                         log::error!("Local rename error: {}", e);
                     }
                 }
                 SftpPanel::LeftRemote => {
-                    if let Some(ref browser) = self.sftp_browser_left {
+                    if let Some(ref browser) = self.windows[window_idx].sftp_browser_left {
                         let from = format!("{}/{}", browser.current_path.trim_end_matches('/'), old_name);
                         let to = format!("{}/{}", browser.current_path.trim_end_matches('/'), new_name);
                         browser.rename(&from, &to);
                     }
                 }
                 SftpPanel::RightRemote => {
-                    if let Some(ref browser) = self.sftp_browser {
+                    if let Some(ref browser) = self.windows[window_idx].sftp_browser {
                         let from = format!("{}/{}", browser.current_path.trim_end_matches('/'), old_name);
                         let to = format!("{}/{}", browser.current_path.trim_end_matches('/'), new_name);
                         browser.rename(&from, &to);
                     }
                 }
                 SftpPanel::RightLocal => {
-                    if let Err(e) = self.local_browser_right.rename(&old_name, &new_name) {
+                    if let Err(e) = self.windows[window_idx].local_browser_right.rename(&old_name, &new_name) {
                         log::error!("Local rename error: {}", e);
                     }
                 }
@@ -1572,7 +1598,7 @@ impl PortalApp {
         // ── New Folder dialog ──
         let mut create_dir_action: Option<(SftpPanel, String)> = None;
         let mut close_new_folder = false;
-        if let Some(ref mut dialog) = self.sftp_new_folder_dialog {
+        if let Some(ref mut dialog) = self.windows[window_idx].sftp_new_folder_dialog {
             let mut open = true;
             egui::Window::new(self.language.t("new_folder"))
                 .open(&mut open)
@@ -1634,29 +1660,29 @@ impl PortalApp {
             }
         }
         if close_new_folder {
-            self.sftp_new_folder_dialog = None;
+            self.windows[window_idx].sftp_new_folder_dialog = None;
         }
         if let Some((panel, name)) = create_dir_action {
             match panel {
                 SftpPanel::LeftLocal => {
-                    if let Err(e) = self.local_browser_left.create_dir(&name) {
+                    if let Err(e) = self.windows[window_idx].local_browser_left.create_dir(&name) {
                         log::error!("Local create dir error: {}", e);
                     }
                 }
                 SftpPanel::LeftRemote => {
-                    if let Some(ref browser) = self.sftp_browser_left {
+                    if let Some(ref browser) = self.windows[window_idx].sftp_browser_left {
                         let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                         browser.create_dir(&path);
                     }
                 }
                 SftpPanel::RightRemote => {
-                    if let Some(ref browser) = self.sftp_browser {
+                    if let Some(ref browser) = self.windows[window_idx].sftp_browser {
                         let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                         browser.create_dir(&path);
                     }
                 }
                 SftpPanel::RightLocal => {
-                    if let Err(e) = self.local_browser_right.create_dir(&name) {
+                    if let Err(e) = self.windows[window_idx].local_browser_right.create_dir(&name) {
                         log::error!("Local create dir error: {}", e);
                     }
                 }
@@ -1666,7 +1692,7 @@ impl PortalApp {
         // ── New File dialog ──
         let mut create_file_action: Option<(SftpPanel, String)> = None;
         let mut close_new_file = false;
-        if let Some(ref mut dialog) = self.sftp_new_file_dialog {
+        if let Some(ref mut dialog) = self.windows[window_idx].sftp_new_file_dialog {
             let mut open = true;
             egui::Window::new(self.language.t("new_file"))
                 .open(&mut open)
@@ -1728,33 +1754,33 @@ impl PortalApp {
             }
         }
         if close_new_file {
-            self.sftp_new_file_dialog = None;
+            self.windows[window_idx].sftp_new_file_dialog = None;
         }
         if let Some((panel, name)) = create_file_action {
             match panel {
                 SftpPanel::LeftLocal => {
-                    let path = format!("{}/{}", self.local_browser_left.current_path.trim_end_matches('/'), name);
+                    let path = format!("{}/{}", self.windows[window_idx].local_browser_left.current_path.trim_end_matches('/'), name);
                     match std::fs::write(&path, b"") {
-                        Ok(_) => self.local_browser_left.refresh(),
+                        Ok(_) => self.windows[window_idx].local_browser_left.refresh(),
                         Err(e) => log::error!("Local create file error: {}", e),
                     }
                 }
                 SftpPanel::LeftRemote => {
-                    if let Some(ref browser) = self.sftp_browser_left {
+                    if let Some(ref browser) = self.windows[window_idx].sftp_browser_left {
                         let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                         browser.write_file(&path, Vec::new());
                     }
                 }
                 SftpPanel::RightRemote => {
-                    if let Some(ref browser) = self.sftp_browser {
+                    if let Some(ref browser) = self.windows[window_idx].sftp_browser {
                         let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                         browser.write_file(&path, Vec::new());
                     }
                 }
                 SftpPanel::RightLocal => {
-                    let path = format!("{}/{}", self.local_browser_right.current_path.trim_end_matches('/'), name);
+                    let path = format!("{}/{}", self.windows[window_idx].local_browser_right.current_path.trim_end_matches('/'), name);
                     match std::fs::write(&path, b"") {
-                        Ok(_) => self.local_browser_right.refresh(),
+                        Ok(_) => self.windows[window_idx].local_browser_right.refresh(),
                         Err(e) => log::error!("Local create file error: {}", e),
                     }
                 }
@@ -1764,7 +1790,7 @@ impl PortalApp {
         // ── Delete confirmation dialog ──
         let mut delete_action: Option<(SftpPanel, Vec<String>)> = None;
         let mut close_delete = false;
-        if let Some(ref dialog) = self.sftp_confirm_delete {
+        if let Some(ref dialog) = self.windows[window_idx].sftp_confirm_delete {
             let names = dialog.names.clone();
             let panel = dialog.panel;
             let mut open = true;
@@ -1816,12 +1842,12 @@ impl PortalApp {
             }
         }
         if close_delete {
-            self.sftp_confirm_delete = None;
+            self.windows[window_idx].sftp_confirm_delete = None;
         }
 
         // ── Error dialog ──
         let mut close_error = false;
-        if let Some(ref dialog) = self.sftp_error_dialog {
+        if let Some(ref dialog) = self.windows[window_idx].sftp_error_dialog {
             let mut open = true;
             egui::Window::new(dialog.title.clone())
                 .open(&mut open)
@@ -1857,37 +1883,37 @@ impl PortalApp {
             }
         }
         if close_error {
-            self.sftp_error_dialog = None;
+            self.windows[window_idx].sftp_error_dialog = None;
         }
 
         if let Some((panel, names)) = delete_action {
             for name in &names {
                 match panel {
                     SftpPanel::LeftLocal => {
-                        if let Err(e) = self.local_browser_left.delete(name) {
+                        if let Err(e) = self.windows[window_idx].local_browser_left.delete(name) {
                             let error_msg = format!("删除失败：{}\n\n文件：{}", e, name);
-                            self.sftp_error_dialog = Some(SftpErrorDialog {
+                            self.windows[window_idx].sftp_error_dialog = Some(SftpErrorDialog {
                                 title: "删除文件失败".to_string(),
                                 message: error_msg,
                             });
                         }
                     }
                     SftpPanel::LeftRemote => {
-                        if let Some(ref browser) = self.sftp_browser_left {
+                        if let Some(ref browser) = self.windows[window_idx].sftp_browser_left {
                             let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                             browser.delete(&path);
                         }
                     }
                     SftpPanel::RightRemote => {
-                        if let Some(ref browser) = self.sftp_browser {
+                        if let Some(ref browser) = self.windows[window_idx].sftp_browser {
                             let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                             browser.delete(&path);
                         }
                     }
                     SftpPanel::RightLocal => {
-                        if let Err(e) = self.local_browser_right.delete(name) {
+                        if let Err(e) = self.windows[window_idx].local_browser_right.delete(name) {
                             let error_msg = format!("删除失败：{}\n\n文件：{}", e, name);
-                            self.sftp_error_dialog = Some(SftpErrorDialog {
+                            self.windows[window_idx].sftp_error_dialog = Some(SftpErrorDialog {
                                 title: "删除文件失败".to_string(),
                                 message: error_msg,
                             });
@@ -1899,53 +1925,53 @@ impl PortalApp {
 
         // ── Handle double-click open file requests ──
         if let Some(idx) = local_left_open_file_req {
-            let filtered = self.local_browser_left.filtered_entries();
+            let filtered = self.windows[window_idx].local_browser_left.filtered_entries();
             if let Some(entry) = filtered.get(idx) {
                 if entry.kind != SftpEntryKind::Directory {
-                    self.open_file_for_editing(true, &entry.name.clone());
+                    self.open_file_for_editing(window_idx, true, &entry.name.clone());
                 }
             }
         }
         if let Some(idx) = local_right_open_file_req {
-            let filtered = self.local_browser_right.filtered_entries();
+            let filtered = self.windows[window_idx].local_browser_right.filtered_entries();
             if let Some(entry) = filtered.get(idx) {
                 if entry.kind != SftpEntryKind::Directory {
-                    self.open_file_for_editing(true, &entry.name.clone());
+                    self.open_file_for_editing(window_idx, true, &entry.name.clone());
                 }
             }
         }
         if let Some(idx) = remote_open_file_req {
-            if let Some(ref browser) = self.sftp_browser {
+            if let Some(ref browser) = self.windows[window_idx].sftp_browser {
                 let filtered = browser.filtered_entries();
                 if let Some(entry) = filtered.get(idx) {
                     if entry.kind != SftpEntryKind::Directory {
-                        self.open_file_for_editing(false, &entry.name.clone());
+                        self.open_file_for_editing(window_idx, false, &entry.name.clone());
                     }
                 }
             }
         }
         if let Some(idx) = left_remote_open_file_req {
-            if let Some(ref browser) = self.sftp_browser_left {
+            if let Some(ref browser) = self.windows[window_idx].sftp_browser_left {
                 let filtered = browser.filtered_entries();
                 if let Some(entry) = filtered.get(idx) {
                     if entry.kind != SftpEntryKind::Directory {
-                        self.open_file_for_editing(false, &entry.name.clone());
+                        self.open_file_for_editing(window_idx, false, &entry.name.clone());
                     }
                 }
             }
         }
 
         // ── Editor dialog ──
-        self.show_editor_dialog(ui);
+        self.show_editor_dialog(ui, window_idx);
     }
 
     /// Open a file for editing in the built-in editor.
-    fn open_file_for_editing(&mut self, is_local: bool, file_name: &str) {
+    fn open_file_for_editing(&mut self, window_idx: usize, is_local: bool, file_name: &str) {
         if is_local {
-            let dir = self.local_browser_left.current_path.clone();
-            match self.local_browser_left.read_file(file_name) {
+            let dir = self.windows[window_idx].local_browser_left.current_path.clone();
+            match self.windows[window_idx].local_browser_left.read_file(file_name) {
                 Ok(content) => {
-                    self.sftp_editor_dialog = Some(SftpEditorDialog {
+                    self.windows[window_idx].sftp_editor_dialog = Some(SftpEditorDialog {
                         panel: SftpPanel::LeftLocal,
                         file_path: format!("{}/{}", dir.trim_end_matches('/'), file_name),
                         file_name: file_name.to_string(),
@@ -1959,7 +1985,7 @@ impl PortalApp {
                     });
                 }
                 Err(e) => {
-                    self.sftp_editor_dialog = Some(SftpEditorDialog {
+                    self.windows[window_idx].sftp_editor_dialog = Some(SftpEditorDialog {
                         panel: SftpPanel::LeftLocal,
                         file_path: format!("{}/{}", dir.trim_end_matches('/'), file_name),
                         file_name: file_name.to_string(),
@@ -1975,11 +2001,11 @@ impl PortalApp {
             }
         } else {
             // Default to right remote for backward compatibility
-            if let Some(ref browser) = self.sftp_browser {
+            if let Some(ref browser) = self.windows[window_idx].sftp_browser {
                 let dir = browser.current_path.clone();
                 let full_path = format!("{}/{}", dir.trim_end_matches('/'), file_name);
                 browser.read_file(&full_path);
-                self.sftp_editor_dialog = Some(SftpEditorDialog {
+                self.windows[window_idx].sftp_editor_dialog = Some(SftpEditorDialog {
                     panel: SftpPanel::RightRemote,
                     file_path: full_path,
                     file_name: file_name.to_string(),
@@ -1996,13 +2022,13 @@ impl PortalApp {
     }
 
     /// Open a file for editing in the built-in editor (with panel support).
-    fn open_file_for_editing_with_panel(&mut self, panel: SftpPanel, file_name: &str) {
+    fn open_file_for_editing_with_panel(&mut self, window_idx: usize, panel: SftpPanel, file_name: &str) {
         match panel {
             SftpPanel::LeftLocal => {
-                let dir = self.local_browser_left.current_path.clone();
-                match self.local_browser_left.read_file(file_name) {
+                let dir = self.windows[window_idx].local_browser_left.current_path.clone();
+                match self.windows[window_idx].local_browser_left.read_file(file_name) {
                     Ok(content) => {
-                        self.sftp_editor_dialog = Some(SftpEditorDialog {
+                        self.windows[window_idx].sftp_editor_dialog = Some(SftpEditorDialog {
                             panel: SftpPanel::LeftLocal,
                             file_path: format!("{}/{}", dir.trim_end_matches('/'), file_name),
                             file_name: file_name.to_string(),
@@ -2016,7 +2042,7 @@ impl PortalApp {
                         });
                     }
                     Err(e) => {
-                        self.sftp_editor_dialog = Some(SftpEditorDialog {
+                        self.windows[window_idx].sftp_editor_dialog = Some(SftpEditorDialog {
                             panel: SftpPanel::LeftLocal,
                             file_path: format!("{}/{}", dir.trim_end_matches('/'), file_name),
                             file_name: file_name.to_string(),
@@ -2032,11 +2058,11 @@ impl PortalApp {
                 }
             }
             SftpPanel::LeftRemote => {
-                if let Some(ref browser) = self.sftp_browser_left {
+                if let Some(ref browser) = self.windows[window_idx].sftp_browser_left {
                     let dir = browser.current_path.clone();
                     let full_path = format!("{}/{}", dir.trim_end_matches('/'), file_name);
                     browser.read_file(&full_path);
-                    self.sftp_editor_dialog = Some(SftpEditorDialog {
+                    self.windows[window_idx].sftp_editor_dialog = Some(SftpEditorDialog {
                         panel: SftpPanel::LeftRemote,
                         file_path: full_path,
                         file_name: file_name.to_string(),
@@ -2051,11 +2077,11 @@ impl PortalApp {
                 }
             }
             SftpPanel::RightRemote => {
-                if let Some(ref browser) = self.sftp_browser {
+                if let Some(ref browser) = self.windows[window_idx].sftp_browser {
                     let dir = browser.current_path.clone();
                     let full_path = format!("{}/{}", dir.trim_end_matches('/'), file_name);
                     browser.read_file(&full_path);
-                    self.sftp_editor_dialog = Some(SftpEditorDialog {
+                    self.windows[window_idx].sftp_editor_dialog = Some(SftpEditorDialog {
                         panel: SftpPanel::RightRemote,
                         file_path: full_path,
                         file_name: file_name.to_string(),
@@ -2070,10 +2096,10 @@ impl PortalApp {
                 }
             }
             SftpPanel::RightLocal => {
-                let dir = self.local_browser_right.current_path.clone();
-                match self.local_browser_right.read_file(file_name) {
+                let dir = self.windows[window_idx].local_browser_right.current_path.clone();
+                match self.windows[window_idx].local_browser_right.read_file(file_name) {
                     Ok(content) => {
-                        self.sftp_editor_dialog = Some(SftpEditorDialog {
+                        self.windows[window_idx].sftp_editor_dialog = Some(SftpEditorDialog {
                             panel: SftpPanel::RightLocal,
                             file_path: format!("{}/{}", dir.trim_end_matches('/'), file_name),
                             file_name: file_name.to_string(),
@@ -2087,7 +2113,7 @@ impl PortalApp {
                         });
                     }
                     Err(e) => {
-                        self.sftp_editor_dialog = Some(SftpEditorDialog {
+                        self.windows[window_idx].sftp_editor_dialog = Some(SftpEditorDialog {
                             panel: SftpPanel::RightLocal,
                             file_path: format!("{}/{}", dir.trim_end_matches('/'), file_name),
                             file_name: file_name.to_string(),
@@ -2106,11 +2132,11 @@ impl PortalApp {
     }
 
     /// Render the editor dialog window.
-    fn show_editor_dialog(&mut self, ui: &mut egui::Ui) {
+    fn show_editor_dialog(&mut self, ui: &mut egui::Ui, window_idx: usize) {
         let mut close_editor = false;
         let mut save_action: Option<(SftpPanel, String, String)> = None; // (panel, path, content)
 
-        if let Some(ref mut dialog) = self.sftp_editor_dialog {
+        if let Some(ref mut dialog) = self.windows[window_idx].sftp_editor_dialog {
             let has_unsaved = dialog.content != dialog.original_content;
 
             let mut open = true;
@@ -2365,19 +2391,19 @@ impl PortalApp {
                         .and_then(|n| n.to_str())
                         .unwrap_or("")
                         .to_string();
-                    match self.local_browser_left.write_file(&file_name, &content) {
+                    match self.windows[window_idx].local_browser_left.write_file(&file_name, &content) {
                         Ok(_) => {
                             close_editor = true;
                         }
                         Err(e) => {
-                            if let Some(ref mut dialog) = self.sftp_editor_dialog {
+                            if let Some(ref mut dialog) = self.windows[window_idx].sftp_editor_dialog {
                                 dialog.error = e;
                             }
                         }
                     }
                 }
                 SftpPanel::LeftRemote => {
-                    if let Some(ref browser) = self.sftp_browser_left {
+                    if let Some(ref browser) = self.windows[window_idx].sftp_browser_left {
                         browser.write_file(&path, content.as_bytes().to_vec());
                         // Refresh remote dir to show changes
                         let current = browser.current_path.clone();
@@ -2386,7 +2412,7 @@ impl PortalApp {
                     }
                 }
                 SftpPanel::RightRemote => {
-                    if let Some(ref browser) = self.sftp_browser {
+                    if let Some(ref browser) = self.windows[window_idx].sftp_browser {
                         browser.write_file(&path, content.as_bytes().to_vec());
                         // Refresh remote dir to show changes
                         let current = browser.current_path.clone();
@@ -2400,12 +2426,12 @@ impl PortalApp {
                         .and_then(|n| n.to_str())
                         .unwrap_or("")
                         .to_string();
-                    match self.local_browser_right.write_file(&file_name, &content) {
+                    match self.windows[window_idx].local_browser_right.write_file(&file_name, &content) {
                         Ok(_) => {
                             close_editor = true;
                         }
                         Err(e) => {
-                            if let Some(ref mut dialog) = self.sftp_editor_dialog {
+                            if let Some(ref mut dialog) = self.windows[window_idx].sftp_editor_dialog {
                                 dialog.error = e;
                             }
                         }
@@ -2415,7 +2441,7 @@ impl PortalApp {
         }
 
         if close_editor {
-            self.sftp_editor_dialog = None;
+            self.windows[window_idx].sftp_editor_dialog = None;
         }
     }
 }
