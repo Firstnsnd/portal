@@ -17,7 +17,7 @@ pub const FONT_SIZE_INPUT: f32 = 12.0;
 pub const FONT_SIZE_TITLE: f32 = 14.0;
 
 /// Spacing
-pub const SPACING_FIELD: f32 = 8.0;       // Between fields
+pub const SPACING_FIELD: f32 = 12.0;      // Between fields
 pub const SPACING_LABEL: f32 = 4.0;       // Between label and input
 pub const SPACING_SECTION: f32 = 0.0;     // Between sections (before footer)
 pub const SPACING_INLINE: f32 = 8.0;      // Between inline fields
@@ -29,7 +29,7 @@ pub const INPUT_PADDING_X: f32 = 8.0;
 pub const INPUT_PADDING_Y: f32 = 3.0;
 
 /// Form layout
-pub const FORM_LEFT_MARGIN: f32 = 6.0;   // Left margin for form content
+pub const FORM_LEFT_MARGIN: f32 = 12.0;   // Left margin for form content
 
 // ============================================================================
 // Basic Buttons

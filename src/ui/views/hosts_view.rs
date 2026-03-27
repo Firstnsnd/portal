@@ -77,7 +77,7 @@ pub fn render_hosts_view(
             egui::ScrollArea::vertical()
                 .id_salt("hosts_page_scroll")
                 .show(ui, |ui| {
-                    ui.add_space(SPACE_MD);
+                    ui.add_space(SPACE_SM);
 
                     // Filter bar
                     ui.horizontal(|ui| {
@@ -167,7 +167,7 @@ pub fn render_hosts_view(
                         }
                     });
 
-                    ui.add_space(SPACE_MD);
+                    ui.add_space(SPACE_SM);
 
                     // RECENT CONNECTIONS section
                     {
