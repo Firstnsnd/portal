@@ -700,26 +700,24 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             .size(widgets::FONT_SIZE_TITLE).strong().color(cx.theme.fg_primary));
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.spacing_mut().item_spacing.x = 2.0;
-                            if ui.add(
-                                egui::Button::new(egui::RichText::new("×").size(18.0).color(cx.theme.fg_dim))
-                                    .frame(false)
-                                    .rounding(4.0)
-                                    .min_size(egui::vec2(28.0, 28.0))
-                            ).clicked() {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            // Close button
+                            let close_resp = ui.add(egui::Label::new(
+                                egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim)
+                            ).sense(egui::Sense::click()));
+                            if close_resp.clicked() {
                                 window.add_host_dialog.reset();
                             }
+                            // Delete button (edit mode only)
                             if window.add_host_dialog.edit_index.is_some() {
-                                if ui.add(
-                                    egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
-                                        .frame(false)
-                                        .rounding(4.0)
-                                        .min_size(egui::vec2(28.0, 28.0))
-                                ).on_hover_text(cx.language.t("delete"))
-                                .clicked() {
+                                let del_resp = ui.add(egui::Label::new(
+                                    egui::RichText::new("\u{1F5D1}").size(FONT_BASE)
+                                ).sense(egui::Sense::click()));
+                                if del_resp.clicked() {
                                     window.confirm_delete_host = window.add_host_dialog.edit_index;
                                     window.add_host_dialog.open = false;
                                 }
+                                del_resp.on_hover_text(cx.language.t("delete"));
                             }
                         });
                     });
