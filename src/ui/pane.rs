@@ -76,7 +76,7 @@ use eframe::egui;
 use crate::sftp::{LocalBrowser, SftpBrowser};
 use crate::ui::types::{
     session::TerminalSession,
-    dialogs::{AppView, BroadcastState},
+    dialogs::{AppView, BroadcastState, AddHostDialog, CredentialDialog, SnippetViewState, HostFilter, AddTunnelDialog},
     sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog},
 };
 
@@ -341,6 +341,14 @@ pub struct AppWindow {
     pub sftp_remote_refresh_start: Option<std::time::Instant>,
     pub sftp_left_remote_refresh_start: Option<std::time::Instant>,
     pub sftp_active_panel_is_local: bool,
+
+    // Page-related dialog states (per-window)
+    pub add_host_dialog: AddHostDialog,
+    pub credential_dialog: CredentialDialog,
+    pub snippet_view_state: SnippetViewState,
+    pub host_filter: HostFilter,
+    pub confirm_delete_host: Option<usize>,
+    pub add_tunnel_dialog: AddTunnelDialog,
 }
 
 #[cfg(test)]

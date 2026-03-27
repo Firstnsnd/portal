@@ -16,6 +16,7 @@ use crate::ui::types::dialogs::AppView;
 use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, Tab};
 use crate::ui::types::session::TerminalSession;
 use crate::ui::types::BroadcastState;
+use crate::ui::pane_view::{WindowContext, ViewActions};
 
 use super::PortalApp;
 
@@ -121,31 +122,23 @@ impl PortalApp {
             self.render_status_bar(ctx, window_idx, is_detached);
         }
 
-        // ── Drawers (right panels, before CentralPanel) ──
-        let current_view = self.windows[window_idx].current_view;
-        if current_view == AppView::Hosts && self.add_host_dialog.open {
-            self.show_add_host_drawer(ctx);
-        }
-        if current_view == AppView::Keychain && self.credential_dialog.open {
-            self.show_credential_drawer(ctx);
-        }
-        if current_view == AppView::Snippets && self.snippet_view_state.open {
-            let mut snippet_to_create: Option<crate::config::Snippet> = None;
-            let mut snippet_to_save: Option<crate::config::Snippet> = None;
-            self.show_add_snippet_drawer(ctx, &mut snippet_to_create, &mut snippet_to_save);
-            if let Some(snippet) = snippet_to_create {
-                self.snippets.push(snippet);
-                crate::config::save_snippets(&self.snippets);
-            }
-            if let Some(updated) = snippet_to_save {
-                if let Some(s) = self.snippets.iter_mut().find(|s| s.id == updated.id) {
-                    s.name = updated.name;
-                    s.command = updated.command;
-                    s.group = updated.group;
-                }
-                crate::config::save_snippets(&self.snippets);
-                self.snippet_view_state.editing = None;
-            }
+        // ── Drawers (right panels) ──
+        // IMPORTANT: SidePanels must be created BEFORE CentralPanel
+        // because CentralPanel takes remaining space
+        {
+            let mut cx = WindowContext::new(
+                &mut self.hosts,
+                &mut self.credentials,
+                &mut self.snippets,
+                &mut self.connection_history,
+                &self.hosts_file,
+                &self.credentials_file,
+                &self.theme,
+                self.language,
+                &self.runtime,
+                self.font_size,
+            );
+            self.windows[window_idx].render_drawers(ctx, &mut cx);
         }
 
         // ── Central Panel ──
@@ -163,33 +156,102 @@ impl PortalApp {
                         self.render_terminal_content(ui, ctx, window_idx);
                     }
                     AppView::Hosts => {
-                        self.show_hosts_page(ctx, ui);
+                        // Use new per-window rendering with WindowContext
+                        let view_actions = {
+                            let mut cx = WindowContext::new(
+                                &mut self.hosts,
+                                &mut self.credentials,
+                                &mut self.snippets,
+                                &mut self.connection_history,
+                                &self.hosts_file,
+                                &self.credentials_file,
+                                &self.theme,
+                                self.language,
+                                &self.runtime,
+                                self.font_size,
+                            );
+                            self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
+                        };
+                        // Handle view actions
+                        self.handle_view_actions(view_actions, window_idx, ctx);
                     }
                     AppView::Sftp => {
-                        self.show_sftp_view(ui, window_idx);
+                        let view_actions = {
+                            let mut cx = WindowContext::new(
+                                &mut self.hosts,
+                                &mut self.credentials,
+                                &mut self.snippets,
+                                &mut self.connection_history,
+                                &self.hosts_file,
+                                &self.credentials_file,
+                                &self.theme,
+                                self.language,
+                                &self.runtime,
+                                self.font_size,
+                            );
+                            self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
+                        };
+                        self.handle_view_actions(view_actions, window_idx, ctx);
                     }
                     AppView::Keychain => {
-                        self.show_keychain_view(ctx, ui);
+                        let view_actions = {
+                            let mut cx = WindowContext::new(
+                                &mut self.hosts,
+                                &mut self.credentials,
+                                &mut self.snippets,
+                                &mut self.connection_history,
+                                &self.hosts_file,
+                                &self.credentials_file,
+                                &self.theme,
+                                self.language,
+                                &self.runtime,
+                                self.font_size,
+                            );
+                            self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
+                        };
+                        self.handle_view_actions(view_actions, window_idx, ctx);
                     }
                     AppView::Settings => {
                         self.show_settings_view(ctx, ui);
                     }
                     AppView::Snippets => {
-                        self.show_snippets_page(ctx, ui);
+                        let view_actions = {
+                            let mut cx = WindowContext::new(
+                                &mut self.hosts,
+                                &mut self.credentials,
+                                &mut self.snippets,
+                                &mut self.connection_history,
+                                &self.hosts_file,
+                                &self.credentials_file,
+                                &self.theme,
+                                self.language,
+                                &self.runtime,
+                                self.font_size,
+                            );
+                            self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
+                        };
+                        self.handle_view_actions(view_actions, window_idx, ctx);
                     }
                     AppView::Tunnels => {
-                        self.show_tunnels_page(ctx, ui);
+                        let view_actions = {
+                            let mut cx = WindowContext::new(
+                                &mut self.hosts,
+                                &mut self.credentials,
+                                &mut self.snippets,
+                                &mut self.connection_history,
+                                &self.hosts_file,
+                                &self.credentials_file,
+                                &self.theme,
+                                self.language,
+                                &self.runtime,
+                                self.font_size,
+                            );
+                            self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
+                        };
+                        self.handle_view_actions(view_actions, window_idx, ctx);
                     }
                 }
             });
-
-        // ── Snippet run drawer (terminal view only) ──
-        let snippet_drawer_open = self.windows[window_idx].tabs.get(self.windows[window_idx].active_tab)
-            .map(|tab| tab.snippet_drawer_open)
-            .unwrap_or(false);
-        if snippet_drawer_open && self.windows[window_idx].current_view == AppView::Terminal {
-            self.show_snippet_run_drawer(ctx);
-        }
 
         result
     }
@@ -273,9 +335,11 @@ impl PortalApp {
                 let window = &mut self.windows[window_idx];
                 let id = window.next_id;
                 window.next_id += 1;
+                let default_shell = std::env::var("SHELL")
+                    .unwrap_or_else(|_| "/bin/zsh".to_string());
                 let new_tab = Tab {
                     title: format!("Terminal {}", id),
-                    sessions: vec![TerminalSession::new_local(id, &self.selected_shell)],
+                    sessions: vec![TerminalSession::new_local(id, &default_shell)],
                     layout: PaneNode::Terminal(0),
                     focused_session: 0,
                     broadcast_enabled: false,
@@ -331,7 +395,6 @@ impl PortalApp {
             .and_then(|tab| tab.sessions.get(tab.focused_session))
             .map(|s| s.shell_name())
             .unwrap_or_else(|| "—".to_string());
-        let encoding_label = self.selected_encoding.clone();
 
         let uptime_label = window.tabs.get(window.active_tab)
             .and_then(|tab| tab.sessions.get(tab.focused_session))
@@ -392,14 +455,6 @@ impl PortalApp {
                     // Shell display
                     ui.label(egui::RichText::new(&shell_label)
                         .color(if is_local_session { self.theme.fg_primary } else { self.theme.fg_dim })
-                        .size(font_size));
-                    ui.add_space(12.0);
-                    ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
-                    ui.add_space(12.0);
-
-                    // Encoding display
-                    ui.label(egui::RichText::new(&encoding_label)
-                        .color(self.theme.fg_dim)
                         .size(font_size));
 
                     if !uptime_label.is_empty() {
@@ -486,9 +541,11 @@ impl PortalApp {
                         let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
                         TerminalSession::new_ssh(host, auth, &self.runtime, None)
                     } else {
+                        let default_shell = std::env::var("SHELL")
+                            .unwrap_or_else(|_| "/bin/zsh".to_string());
                         let id = window.next_id;
                         window.next_id += 1;
-                        TerminalSession::new_local(id, &self.selected_shell)
+                        TerminalSession::new_local(id, &default_shell)
                     };
                     let tab = &mut window.tabs[active];
                     tab.sessions.push(new_session);
@@ -509,9 +566,11 @@ impl PortalApp {
                         let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
                         TerminalSession::new_ssh(host, auth, &self.runtime, None)
                     } else {
+                        let default_shell = std::env::var("SHELL")
+                            .unwrap_or_else(|_| "/bin/zsh".to_string());
                         let id = window.next_id;
                         window.next_id += 1;
-                        TerminalSession::new_local(id, &self.selected_shell)
+                        TerminalSession::new_local(id, &default_shell)
                     };
                     let tab = &mut window.tabs[active];
                     tab.sessions.push(new_session);
@@ -563,6 +622,45 @@ impl PortalApp {
                     window.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
                 }
             }
+        }
+    }
+
+    /// Handle actions returned from view rendering
+    fn handle_view_actions(&mut self, actions: ViewActions, _window_idx: usize, _ctx: &egui::Context) {
+        if actions.add_local_tab {
+            self.add_tab_local();
+        }
+        if let Some(host) = actions.connect_ssh {
+            self.add_tab_ssh(&host);
+        }
+        if actions.clear_history {
+            self.connection_history.clear();
+            config::save_history(&[]);
+        }
+        if actions.save_hosts {
+            config::save_hosts(&self.hosts_file, &self.hosts);
+        }
+        if actions.save_credentials {
+            config::save_credentials(&self.credentials_file, &self.credentials);
+        }
+        if actions.save_snippets {
+            config::save_snippets(&self.snippets);
+        }
+        if let Some(idx) = actions.delete_host {
+            if idx < self.hosts.len() && !self.hosts[idx].is_local {
+                config::delete_host_credentials(&self.hosts[idx]);
+                self.hosts.remove(idx);
+                self.save_hosts();
+            }
+        }
+        if let Some(id) = &actions.delete_credential {
+            self.credentials.retain(|c| c.id != **id);
+            config::delete_credential_secrets(id, id.as_str());
+            config::save_credentials(&self.credentials_file, &self.credentials);
+        }
+        if let Some(id) = &actions.delete_snippet {
+            self.snippets.retain(|s| s.id != **id);
+            config::save_snippets(&self.snippets);
         }
     }
 }

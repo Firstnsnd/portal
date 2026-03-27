@@ -49,35 +49,74 @@ impl eframe::App for PortalApp {
             self.apply_fonts(ctx);
         }
 
-        // ── Main window close handling ──
-        // If the user closes the main window but other windows still exist,
-        // hide the main window instead of exiting. Exit only when all windows are gone.
+        // ── Window close handling ─────────────────────────────────────────────────────────────
+        // IMPORTANT: eframe/egui architecture limitation
+        //
+        // The first window (index 0) is the ROOT viewport created by eframe::run_native().
+        // - eframe's `update()` method is bound to the root viewport
+        // - When root viewport closes, eframe STOPS calling `update()`
+        // - Other windows (created via show_viewport_immediate) depend on `update()` for rendering
+        //
+        // Therefore, we CANNOT simply remove the first window when others exist:
+        // - No root viewport → no `update()` calls → child windows can't render → app exits
+        //
+        // Solution: Keep first window alive but HIDDEN when other windows exist.
+        // This is the standard approach for multi-window apps in eframe.
+        //
+        // Alternatives (not implemented):
+        // - Use native window APIs directly: complex, cross-platform issues
+        // - Switch to wry+tauri: more control but different architecture
+        //
+        let has_multiple_windows = self.windows.len() > 1;
+        let first_window = self.windows.first();
+        let first_window_hidden = first_window.map_or(false, |w| w.close_requested);
+
+        // Handle first window close request
         if ctx.input(|i| i.viewport().close_requested()) {
-            if self.windows.len() > 1 {
-                // Cancel the close and hide the main window
+            if has_multiple_windows {
+                // Cancel close, hide first window, keep it alive
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                if let Some(main_window) = self.windows.first_mut() {
-                    main_window.close_requested = true;  // Mark as hidden
+                if let Some(w) = &mut self.windows.first_mut() {
+                    w.close_requested = true;
                 }
             } else {
-                // Only one window - clean up and exit
+                // Last window - let it close
                 self.cleanup_sessions();
             }
         }
 
-        // ── Render non-main windows (using show_viewport_immediate) ─────────────────────────
-        let mut pending_detach: Vec<(usize, usize)> = Vec::new();
-        let num_windows = self.windows.len();
+        // Keep first window alive (but hidden) while other windows exist
+        if first_window_hidden && !self.windows.is_empty() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
 
-        // Render main window first to collect its pending_detach
-        if !self.windows.first().map_or(true, |w| w.close_requested) {
+        // ── Render windows ───────────────────────────────────────────────────────────────
+        let mut pending_detach: Vec<(usize, usize)> = Vec::new();
+
+        // Render first window content if visible
+        if !first_window_hidden {
+            if let Some(w) = self.windows.first() {
+                // Update title
+                let title = match w.current_view {
+                    AppView::Terminal => {
+                        w.tabs.get(w.active_tab).map(|t| t.title.clone()).unwrap_or_else(|| "Terminal".to_string())
+                    }
+                    AppView::Hosts => self.language.t("hosts").to_string(),
+                    AppView::Sftp => self.language.t("sftp").to_string(),
+                    AppView::Keychain => self.language.t("keychain").to_string(),
+                    AppView::Settings => self.language.t("settings").to_string(),
+                    AppView::Snippets => "Snippets".to_string(),
+                    AppView::Tunnels => "Tunnels".to_string(),
+                };
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+            }
             let result = self.render_window_content(ctx, 0, false);
             pending_detach.extend(result.pending_detach);
         }
 
-        // Then render non-main windows
-        for i in 1..num_windows {
+        // Render additional windows (using show_viewport_immediate)
+        for i in 1..self.windows.len() {
             let viewport_id = self.windows[i].viewport_id;
             let builder = egui::ViewportBuilder::default()
                 .with_title("Portal")
@@ -108,11 +147,28 @@ impl eframe::App for PortalApp {
             });
         }
 
-        // Remove closed windows (but keep at least one - the main window)
-        let main_window_closed = self.windows.first().map_or(false, |w| w.close_requested);
-        self.windows.retain(|w| !w.close_requested);
+        // Remove closed windows (except first window which is kept alive but hidden)
+        let mut child_windows_closed = false;
+        for i in (1..self.windows.len()).rev() {
+            if self.windows[i].close_requested {
+                self.windows.remove(i);
+                child_windows_closed = true;
+            }
+        }
 
-        // Process deferred tab detaches (all windows)
+        // If all child windows closed and first window is hidden, show it again
+        if child_windows_closed && self.windows.len() == 1 && self.windows[0].close_requested {
+            self.windows[0].close_requested = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        }
+
+        // If all windows are closed, exit app
+        if self.windows.is_empty() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+
+        // Process deferred tab detaches
         // Process in reverse order so indices stay valid
         for &(win_idx, tab_idx) in pending_detach.iter().rev() {
             if win_idx < self.windows.len() {
@@ -158,98 +214,15 @@ impl eframe::App for PortalApp {
                         sftp_remote_refresh_start: None,
                         sftp_left_remote_refresh_start: None,
                         sftp_active_panel_is_local: true,
+                        // Page-related dialogs (new window starts with fresh state)
+                        add_host_dialog: AddHostDialog::default(),
+                        credential_dialog: CredentialDialog::default(),
+                        snippet_view_state: SnippetViewState::default(),
+                        host_filter: HostFilter::default(),
+                        confirm_delete_host: None,
+                        add_tunnel_dialog: AddTunnelDialog::default(),
                     });
                 }
-            }
-        }
-
-        // If main window was closed and all other windows are closed, exit the app
-        if main_window_closed && self.windows.is_empty() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
-        }
-
-        // If main window was closed but other windows exist, skip rendering the rest
-        if main_window_closed {
-            return;
-        }
-
-        // ── Delete Confirmation Dialog ──────────────────
-        if let Some(idx) = self.confirm_delete_host {
-            let host_name = self.hosts.get(idx).map(|h| h.name.clone()).unwrap_or_default();
-            let mut open = true;
-            egui::Window::new(self.language.t("delete_host"))
-                .open(&mut open)
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .fixed_size([340.0, 0.0])
-                .title_bar(false)
-                .frame(egui::Frame {
-                    fill: self.theme.bg_secondary,
-                    rounding: egui::Rounding::same(8.0),
-                    inner_margin: egui::Margin::same(20.0),
-                    stroke: egui::Stroke::new(1.0, self.theme.border),
-                    shadow: egui::epaint::Shadow {
-                        offset: egui::vec2(0.0, 4.0),
-                        blur: 20.0,
-                        spread: 2.0,
-                        color: egui::Color32::from_black_alpha(80),
-                    },
-                    ..Default::default()
-                })
-                .show(ctx, |ui| {
-                    // Warning icon + title
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("\u{26A0}").size(18.0).color(self.theme.red));
-                        ui.add_space(4.0);
-                        ui.label(egui::RichText::new(self.language.t("delete_host")).size(15.0).color(self.theme.fg_primary).strong());
-                    });
-                    ui.add_space(10.0);
-
-                    ui.label(
-                        egui::RichText::new(self.language.tf("delete_confirm", &host_name))
-                            .color(self.theme.fg_primary).size(13.0)
-                    );
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(self.language.t("confirm_delete"))
-                            .color(self.theme.fg_dim).size(11.0)
-                    );
-                    ui.add_space(16.0);
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(
-                                egui::Button::new(egui::RichText::new(self.language.t("delete")).color(egui::Color32::WHITE).size(13.0))
-                                    .fill(self.theme.red)
-                                    .rounding(6.0)
-                                    .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
-                                self.host_to_delete = Some(idx);
-                                self.confirm_delete_host = None;
-                            }
-                            if ui.add(
-                                egui::Button::new(egui::RichText::new(self.language.t("cancel")).color(self.theme.fg_dim).size(13.0))
-                                    .fill(self.theme.bg_elevated)
-                                    .rounding(6.0)
-                                    .min_size(egui::vec2(70.0, 32.0))
-                            ).clicked() {
-                                self.confirm_delete_host = None;
-                            }
-                        });
-                    });
-                });
-            if !open {
-                self.confirm_delete_host = None;
-            }
-        }
-
-        // Handle deferred host deletion
-        if let Some(idx) = self.host_to_delete.take() {
-            if idx < self.hosts.len() && !self.hosts[idx].is_local {
-                config::delete_host_credentials(&self.hosts[idx]);
-                self.hosts.remove(idx);
-                self.save_hosts();
             }
         }
 

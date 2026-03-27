@@ -273,6 +273,7 @@ pub enum CredentialTypeChoice {
 }
 
 /// Credential create/edit dialog state
+#[derive(Clone)]
 pub struct CredentialDialog {
     pub open: bool,
     pub edit_id: Option<String>,

@@ -22,9 +22,11 @@ impl PortalApp {
 
         let id = window.next_id;
         window.next_id += 1;
+        let default_shell = std::env::var("SHELL")
+            .unwrap_or_else(|_| "/bin/zsh".to_string());
         let tab = Tab {
             title: format!("Terminal {}", id),
-            sessions: vec![TerminalSession::new_local(id, &self.selected_shell)],
+            sessions: vec![TerminalSession::new_local(id, &default_shell)],
             layout: PaneNode::Terminal(0),
             focused_session: 0,
             broadcast_enabled: false,
@@ -106,8 +108,9 @@ impl PortalApp {
             let jump = self.resolve_jump_host(host);
             TerminalSession::new_ssh(host, auth, &self.runtime, jump)
         } else {
-            let shell = self.selected_shell.clone();
-            TerminalSession::new_local(new_id, &shell)
+            let default_shell = std::env::var("SHELL")
+                .unwrap_or_else(|_| "/bin/zsh".to_string());
+            TerminalSession::new_local(new_id, &default_shell)
         };
 
         // Now mutate window

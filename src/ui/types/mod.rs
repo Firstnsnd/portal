@@ -11,7 +11,11 @@ pub mod layout;
 
 // Dialog types
 pub mod dialogs;
-pub use dialogs::{AppView, BroadcastState};
+pub use dialogs::{
+    AppView, BroadcastState,
+    AddHostDialog, CredentialDialog, SnippetViewState, HostFilter,
+    AddTunnelDialog, KeychainDeleteRequest,
+};
 
 // SFTP types
 pub mod sftp_types;

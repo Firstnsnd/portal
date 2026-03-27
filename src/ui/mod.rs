@@ -45,6 +45,7 @@ pub mod fonts;
 pub mod input;
 pub mod types;
 pub mod pane;
+pub mod pane_view;
 pub mod terminal;
 pub mod views;
 pub mod widgets;
@@ -53,7 +54,12 @@ pub mod formatting;
 // Re-export all public types for convenient access via `use ui::*`
 pub use theme::{ThemeColors, ThemePreset};
 pub use i18n::Language;
-pub use types::{SessionBackend, AppView, BroadcastState};
+pub use types::{
+    SessionBackend, AppView, BroadcastState,
+    AddHostDialog, CredentialDialog, SnippetViewState, HostFilter,
+    AddTunnelDialog, KeychainDeleteRequest,
+};
 pub use pane::{AppWindow, TabDragState};
+pub use pane_view::{WindowContext, ViewActions};
 pub use terminal::render_pane_tree;
 pub use tokens::STATUS_BAR_HEIGHT;
