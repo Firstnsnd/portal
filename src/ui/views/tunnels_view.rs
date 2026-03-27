@@ -224,7 +224,7 @@ pub fn render_tunnel_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mu
                         ui.label(egui::RichText::new(drawer_title)
                             .size(16.0).strong().color(cx.theme.fg_primary));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.spacing_mut().item_spacing.x = 2.0;
                             if ui.add(
                                 egui::Button::new(egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim))
                                     .frame(false)
