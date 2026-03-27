@@ -192,6 +192,51 @@ pub fn render_keychain_view(
                 });
         });
 
+    // Delete confirmation dialog
+    if let Some(delete_id) = &window.credential_dialog.confirm_delete.clone() {
+        let cred_name = cx.credentials.iter()
+            .find(|c| c.id == *delete_id)
+            .map(|c| c.name.clone())
+            .unwrap_or_default();
+        let mut open = true;
+        egui::Window::new("delete_credential")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .fixed_size([340.0, 0.0])
+            .title_bar(false)
+            .frame(widgets::dialog_frame(cx.theme))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("\u{26A0}").size(18.0).color(cx.theme.red));
+                    ui.add_space(SPACE_XS);
+                    ui.label(egui::RichText::new(cx.language.t("delete_credential")).size(15.0).color(cx.theme.fg_primary).strong());
+                });
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new(cx.language.tf("delete_confirm", &cred_name)).color(cx.theme.fg_primary).size(FONT_BASE));
+                ui.add_space(SPACE_XS);
+                ui.label(egui::RichText::new(cx.language.t("confirm_delete")).color(cx.theme.fg_dim).size(FONT_SM));
+                ui.add_space(SPACE_LG);
+
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(widgets::danger_button(cx.language.t("delete"), cx.theme)).clicked() {
+                            cx.credentials.retain(|c| c.id != *delete_id);
+                            window.credential_dialog.confirm_delete = None;
+                        }
+                        if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                            window.credential_dialog.confirm_delete = None;
+                        }
+                    });
+                });
+            });
+
+        if !open {
+            window.credential_dialog.confirm_delete = None;
+        }
+    }
+
     ViewActions::default()
 }
 
@@ -233,6 +278,18 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                             ).clicked() {
                                 window.credential_dialog.open = false;
                                 window.credential_dialog.edit_id = None;
+                            }
+                            if is_editing {
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
+                                        .frame(false)
+                                        .rounding(4.0)
+                                        .min_size(egui::vec2(28.0, 28.0))
+                                ).on_hover_text(cx.language.t("delete"))
+                                .clicked() {
+                                    window.credential_dialog.confirm_delete = window.credential_dialog.edit_id.clone();
+                                    window.credential_dialog.open = false;
+                                }
                             }
                         });
                     });

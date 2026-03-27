@@ -340,6 +340,18 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                                 window.snippet_view_state.open = false;
                                 window.snippet_view_state.editing = None;
                             }
+                            if is_editing {
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
+                                        .frame(false)
+                                        .rounding(4.0)
+                                        .min_size(egui::vec2(28.0, 28.0))
+                                ).on_hover_text(cx.language.t("delete"))
+                                .clicked() {
+                                    window.snippet_view_state.confirm_delete = window.snippet_view_state.editing.clone();
+                                    window.snippet_view_state.open = false;
+                                }
+                            }
                         });
                     });
                 });

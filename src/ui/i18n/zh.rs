@@ -183,6 +183,8 @@ pub fn t(key: &str) -> &'static str {
         "tunnel_remote_host_placeholder" => "localhost",
         "tunnel_remote_port_placeholder" => "3306",
         "add_tunnel" => "添加隧道",
+        "edit_tunnel" => "编辑隧道",
+        "delete_tunnel" => "删除隧道",
         "tunnel_ssh_host" => "SSH 主机",
         "ssh_tunnels" => "SSH 隧道",
         "tunnel_start" => "启动",

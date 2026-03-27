@@ -102,8 +102,6 @@ pub fn render_tunnels_view(
                             );
 
                             let hovered = resp.hovered();
-                            let is_confirming_delete =
-                                window.add_tunnel_dialog.confirm_delete == Some((*host_idx, tunnel_idx));
 
                             if hovered {
                                 ui.painter().rect_filled(
@@ -166,76 +164,9 @@ pub fn render_tunnels_view(
                                 cx.theme.fg_dim,
                             );
 
-                            if hovered {
-                                let visible_right = rect.max.x - SPACE_MD;
-                                let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
-
-                                if is_confirming_delete {
-                                    let cancel_rect = egui::Rect::from_center_size(
-                                        egui::pos2(visible_right - 50.0, rect.center().y),
-                                        egui::vec2(50.0, 22.0),
-                                    );
-                                    let delete_rect = egui::Rect::from_center_size(
-                                        egui::pos2(visible_right - 106.0, rect.center().y),
-                                        egui::vec2(50.0, 22.0),
-                                    );
-
-                                    ui.painter().rect(
-                                        cancel_rect, RADIUS_SM, cx.theme.bg_elevated,
-                                        egui::Stroke::new(1.0, cx.theme.border),
-                                    );
-                                    ui.painter().text(
-                                        cancel_rect.center(), egui::Align2::CENTER_CENTER,
-                                        cx.language.t("cancel"), egui::FontId::proportional(FONT_XS), cx.theme.fg_dim,
-                                    );
-
-                                    ui.painter().rect(
-                                        delete_rect, RADIUS_SM, cx.theme.red, egui::Stroke::NONE,
-                                    );
-                                    ui.painter().text(
-                                        delete_rect.center(), egui::Align2::CENTER_CENTER,
-                                        cx.language.t("delete"), egui::FontId::proportional(FONT_XS), cx.theme.bg_primary,
-                                    );
-
-                                    if let Some(pos) = pointer_pos {
-                                        if resp.clicked() {
-                                            if cancel_rect.contains(pos) {
-                                                window.add_tunnel_dialog.confirm_delete = None;
-                                            } else if delete_rect.contains(pos) {
-                                                // Delete tunnel
-                                                if let Some(host) = cx.hosts.get_mut(*host_idx) {
-                                                    host.port_forwards.remove(tunnel_idx);
-                                                }
-                                                window.add_tunnel_dialog.confirm_delete = None;
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // Delete button only (start/stop needs session access)
-                                    let del_rect = egui::Rect::from_center_size(
-                                        egui::pos2(visible_right - 34.0, rect.center().y),
-                                        egui::vec2(50.0, 24.0),
-                                    );
-
-                                    let over_del = pointer_pos.map_or(false, |p| del_rect.contains(p));
-                                    let del_bg = if over_del { cx.theme.red } else { cx.theme.bg_elevated };
-
-                                    ui.painter().rect(
-                                        del_rect, RADIUS_SM, del_bg,
-                                        egui::Stroke::new(1.0, if over_del { cx.theme.red } else { cx.theme.border }),
-                                    );
-                                    ui.painter().text(
-                                        del_rect.center(), egui::Align2::CENTER_CENTER,
-                                        cx.language.t("delete"), egui::FontId::proportional(FONT_XS),
-                                        if over_del { cx.theme.bg_elevated } else { cx.theme.red },
-                                    );
-
-                                    if let Some(pos) = pointer_pos {
-                                        if resp.clicked() && del_rect.contains(pos) {
-                                            window.add_tunnel_dialog.confirm_delete = Some((*host_idx, tunnel_idx));
-                                        }
-                                    }
-                                }
+                            // Click to open edit drawer
+                            if resp.clicked() {
+                                window.add_tunnel_dialog.open_edit(*host_idx, tunnel_idx, tunnel);
                             }
                         }
 
@@ -265,6 +196,13 @@ pub fn render_tunnel_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mu
         return;
     }
 
+    let is_editing = window.add_tunnel_dialog.edit_index.is_some();
+    let drawer_title = if is_editing {
+        cx.language.t("edit_tunnel")
+    } else {
+        cx.language.t("add_tunnel")
+    };
+
     egui::SidePanel::right("tunnel_drawer")
         .default_width(400.0)
         .frame(egui::Frame {
@@ -283,7 +221,7 @@ pub fn render_tunnel_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mu
                 })
                 .show_inside(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(cx.language.t("add_tunnel"))
+                        ui.label(egui::RichText::new(drawer_title)
                             .size(16.0).strong().color(cx.theme.fg_primary));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.add(
@@ -293,6 +231,19 @@ pub fn render_tunnel_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mu
                                     .min_size(egui::vec2(32.0, 32.0))
                             ).clicked() {
                                 window.add_tunnel_dialog.close_drawer();
+                                window.add_tunnel_dialog.edit_index = None;
+                            }
+                            if is_editing {
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
+                                        .frame(false)
+                                        .rounding(4.0)
+                                        .min_size(egui::vec2(28.0, 28.0))
+                                ).on_hover_text(cx.language.t("delete"))
+                                .clicked() {
+                                    window.add_tunnel_dialog.confirm_delete = window.add_tunnel_dialog.edit_index;
+                                    window.add_tunnel_dialog.open = false;
+                                }
                             }
                         });
                     });
@@ -409,7 +360,13 @@ pub fn render_tunnel_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mu
                             && !window.add_tunnel_dialog.remote_host.trim().is_empty()
                             && !window.add_tunnel_dialog.remote_port.trim().is_empty();
 
-                        if ui.add(widgets::primary_button(cx.language.t("add_tunnel"), cx.theme)).clicked() && can_save {
+                        let button_text = if is_editing {
+                            cx.language.t("save")
+                        } else {
+                            cx.language.t("add_tunnel")
+                        };
+
+                        if ui.add(widgets::primary_button(button_text, cx.theme)).clicked() && can_save {
                             if let Some(host_idx) = window.add_tunnel_dialog.selected_host_idx {
                                 if host_idx < cx.hosts.len() {
                                     let local_port = window.add_tunnel_dialog.local_port.trim().parse::<u16>();
@@ -423,7 +380,18 @@ pub fn render_tunnel_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mu
                                             remote_host: window.add_tunnel_dialog.remote_host.trim().to_string(),
                                             remote_port: rp,
                                         };
-                                        cx.hosts[host_idx].port_forwards.push(forward);
+
+                                        if let Some((edit_host_idx, edit_tunnel_idx)) = window.add_tunnel_dialog.edit_index {
+                                            // Edit mode: update existing tunnel
+                                            if edit_host_idx < cx.hosts.len() {
+                                                if let Some(existing) = cx.hosts[edit_host_idx].port_forwards.get_mut(edit_tunnel_idx) {
+                                                    *existing = forward;
+                                                }
+                                            }
+                                        } else {
+                                            // Add mode: create new tunnel
+                                            cx.hosts[host_idx].port_forwards.push(forward);
+                                        }
                                         window.add_tunnel_dialog.reset();
                                     } else {
                                         window.add_tunnel_dialog.error = "Invalid port numbers".to_string();
@@ -434,10 +402,61 @@ pub fn render_tunnel_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mu
                         ui.add_space(8.0);
                         if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
                             window.add_tunnel_dialog.close_drawer();
+                            window.add_tunnel_dialog.edit_index = None;
                         }
                     });
                 });
             ui.add_space(24.0);
         });
     });
+
+    // Delete confirmation dialog
+    if let Some((host_idx, tunnel_idx)) = window.add_tunnel_dialog.confirm_delete {
+        let tunnel_name = cx.hosts.get(host_idx)
+            .and_then(|h| h.port_forwards.get(tunnel_idx))
+            .map(|t| {
+                format!("{}:{}", t.local_host, t.local_port)
+            })
+            .unwrap_or_default();
+        let mut open = true;
+        egui::Window::new("delete_tunnel")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .fixed_size([340.0, 0.0])
+            .title_bar(false)
+            .frame(widgets::dialog_frame(cx.theme))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("\u{26A0}").size(18.0).color(cx.theme.red));
+                    ui.add_space(SPACE_XS);
+                    ui.label(egui::RichText::new(cx.language.t("delete_tunnel")).size(15.0).color(cx.theme.fg_primary).strong());
+                });
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new(cx.language.tf("delete_confirm", &tunnel_name)).color(cx.theme.fg_primary).size(FONT_BASE));
+                ui.add_space(SPACE_XS);
+                ui.label(egui::RichText::new(cx.language.t("confirm_delete")).color(cx.theme.fg_dim).size(FONT_SM));
+                ui.add_space(SPACE_LG);
+
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(widgets::danger_button(cx.language.t("delete"), cx.theme)).clicked() {
+                            if let Some(host) = cx.hosts.get_mut(host_idx) {
+                                host.port_forwards.remove(tunnel_idx);
+                            }
+                            window.add_tunnel_dialog.confirm_delete = None;
+                            window.add_tunnel_dialog.edit_index = None;
+                        }
+                        if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                            window.add_tunnel_dialog.confirm_delete = None;
+                        }
+                    });
+                });
+            });
+
+        if !open {
+            window.add_tunnel_dialog.confirm_delete = None;
+        }
+    }
 }

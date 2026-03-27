@@ -444,17 +444,12 @@ pub fn render_hosts_view(
 
                         let visible_right = ui.clip_rect().max.x;
                         let edit_btn_rect = egui::Rect::from_center_size(
-                            egui::pos2(visible_right - 85.0, rect.min.y + 26.0),
-                            egui::vec2(56.0, 22.0),
-                        );
-                        let delete_btn_rect = egui::Rect::from_center_size(
                             egui::pos2(visible_right - 40.0, rect.min.y + 26.0),
-                            egui::vec2(32.0, 22.0),
+                            egui::vec2(56.0, 22.0),
                         );
                         if hovered {
                             let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
                             let over_edit = pointer_pos.map_or(false, |p| edit_btn_rect.contains(p));
-                            let over_delete = pointer_pos.map_or(false, |p| delete_btn_rect.contains(p));
 
                             let edit_bg = if over_edit { cx.theme.accent } else { cx.theme.bg_elevated };
                             let edit_text = if over_edit { cx.theme.bg_primary } else { cx.theme.accent };
@@ -466,17 +461,6 @@ pub fn render_hosts_view(
                                 egui::FontId::proportional(11.0),
                                 edit_text,
                             );
-
-                            let delete_bg = if over_delete { cx.theme.red } else { cx.theme.bg_elevated };
-                            let delete_text = if over_delete { egui::Color32::WHITE } else { cx.theme.red };
-                            ui.painter().rect(delete_btn_rect, 4.0, delete_bg, egui::Stroke::new(1.0, cx.theme.red));
-                            ui.painter().text(
-                                delete_btn_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                "🗑",
-                                egui::FontId::proportional(11.0),
-                                delete_text,
-                            );
                         }
                         if resp.double_clicked() {
                             connect_ssh_host_idx = Some(i);
@@ -484,8 +468,6 @@ pub fn render_hosts_view(
                             let click_pos = ui.ctx().input(|i| i.pointer.interact_pos());
                             if click_pos.map_or(false, |p| edit_btn_rect.contains(p)) {
                                 edit_host_index = Some(i);
-                            } else if click_pos.map_or(false, |p| delete_btn_rect.contains(p)) {
-                                window.confirm_delete_host = Some(i);
                             }
                         }
                     }
@@ -560,17 +542,12 @@ pub fn render_hosts_view(
 
                             let visible_right = ui.clip_rect().max.x;
                             let edit_btn_rect = egui::Rect::from_center_size(
-                                egui::pos2(visible_right - 85.0, rect.min.y + 26.0),
-                                egui::vec2(56.0, 22.0),
-                            );
-                            let delete_btn_rect = egui::Rect::from_center_size(
                                 egui::pos2(visible_right - 40.0, rect.min.y + 26.0),
-                                egui::vec2(32.0, 22.0),
+                                egui::vec2(56.0, 22.0),
                             );
                             if hovered {
                                 let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
                                 let over_edit = pointer_pos.map_or(false, |p| edit_btn_rect.contains(p));
-                                let over_delete = pointer_pos.map_or(false, |p| delete_btn_rect.contains(p));
 
                                 let edit_bg = if over_edit { cx.theme.accent } else { cx.theme.bg_elevated };
                                 let edit_text = if over_edit { cx.theme.bg_primary } else { cx.theme.accent };
@@ -582,17 +559,6 @@ pub fn render_hosts_view(
                                     egui::FontId::proportional(11.0),
                                     edit_text,
                                 );
-
-                                let delete_bg = if over_delete { cx.theme.red } else { cx.theme.bg_elevated };
-                                let delete_text = if over_delete { egui::Color32::WHITE } else { cx.theme.red };
-                                ui.painter().rect(delete_btn_rect, 4.0, delete_bg, egui::Stroke::new(1.0, cx.theme.red));
-                                ui.painter().text(
-                                    delete_btn_rect.center(),
-                                    egui::Align2::CENTER_CENTER,
-                                    "🗑",
-                                    egui::FontId::proportional(11.0),
-                                    delete_text,
-                                );
                             }
                             if resp.double_clicked() {
                                 connect_ssh_host_idx = Some(i);
@@ -600,8 +566,6 @@ pub fn render_hosts_view(
                                 let click_pos = ui.ctx().input(|i| i.pointer.interact_pos());
                                 if click_pos.map_or(false, |p| edit_btn_rect.contains(p)) {
                                     edit_host_index = Some(i);
-                                } else if click_pos.map_or(false, |p| delete_btn_rect.contains(p)) {
-                                    window.confirm_delete_host = Some(i);
                                 }
                             }
                         }
@@ -736,16 +700,6 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             .size(widgets::FONT_SIZE_TITLE).strong().color(cx.theme.fg_primary));
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if window.add_host_dialog.edit_index.is_some() {
-                                if ui.add(
-                                    egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
-                                        .frame(false)
-                                ).on_hover_text(cx.language.t("delete"))
-                                .clicked() {
-                                    window.confirm_delete_host = window.add_host_dialog.edit_index;
-                                    window.add_host_dialog.open = false;
-                                }
-                            }
                             if ui.add(
                                 egui::Button::new(egui::RichText::new("×").size(18.0).color(cx.theme.fg_dim))
                                     .frame(false)
@@ -753,6 +707,18 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                     .min_size(egui::vec2(28.0, 28.0))
                             ).clicked() {
                                 window.add_host_dialog.reset();
+                            }
+                            if window.add_host_dialog.edit_index.is_some() {
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
+                                        .frame(false)
+                                        .rounding(4.0)
+                                        .min_size(egui::vec2(28.0, 28.0))
+                                ).on_hover_text(cx.language.t("delete"))
+                                .clicked() {
+                                    window.confirm_delete_host = window.add_host_dialog.edit_index;
+                                    window.add_host_dialog.open = false;
+                                }
                             }
                         });
                     });
