@@ -331,25 +331,25 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                             if is_editing { cx.language.t("edit_snippet") } else { cx.language.t("new_snippet") }
                         ).size(16.0).strong().color(cx.theme.fg_primary));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.spacing_mut().item_spacing.x = 2.0;
                             // Close button
-                            let close_resp = ui.add(egui::Label::new(
-                                egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim)
-                            ).sense(egui::Sense::click()));
-                            if close_resp.clicked() {
+                            if ui.add(
+                                egui::Button::new(egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim))
+                                    .frame(false)
+                            ).clicked() {
                                 window.snippet_view_state.open = false;
                                 window.snippet_view_state.editing = None;
                             }
                             // Delete button (edit mode only)
                             if is_editing {
-                                let del_resp = ui.add(egui::Label::new(
-                                    egui::RichText::new("\u{1F5D1}").size(FONT_BASE)
-                                ).sense(egui::Sense::click()));
-                                if del_resp.clicked() {
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
+                                        .frame(false)
+                                ).on_hover_text(cx.language.t("delete"))
+                                .clicked() {
                                     window.snippet_view_state.confirm_delete = window.snippet_view_state.editing.clone();
                                     window.snippet_view_state.open = false;
                                 }
-                                del_resp.on_hover_text(cx.language.t("delete"));
                             }
                         });
                     });
@@ -385,45 +385,47 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                                 &mut window.snippet_view_state.new_command,
                                 cx.language.t("command_hint"), 80.0, cx.theme);
 
-                            ui.add_space(widgets::SPACING_SECTION);
-
-                    // Footer buttons
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let can_save = !window.snippet_view_state.new_name.trim().is_empty();
-
-                        if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() && can_save {
-                            let group = if window.snippet_view_state.new_group.trim().is_empty() {
-                                cx.language.t("snippet_default_group").to_string()
-                            } else {
-                                window.snippet_view_state.new_group.trim().to_string()
-                            };
-
-                            if let Some(edit_id) = &window.snippet_view_state.editing {
-                                if let Some(snippet) = cx.snippets.iter_mut().find(|s| s.id == *edit_id) {
-                                    snippet.name = window.snippet_view_state.new_name.trim().to_string();
-                                    snippet.command = window.snippet_view_state.new_command.clone();
-                                    snippet.group = group;
-                                }
-                            } else {
-                                let snippet = Snippet {
-                                    id: Uuid::new_v4().to_string(),
-                                    name: window.snippet_view_state.new_name.trim().to_string(),
-                                    command: window.snippet_view_state.new_command.clone(),
-                                    group,
-                                };
-                                cx.snippets.push(snippet);
-                            }
-                            window.snippet_view_state.open = false;
-                            window.snippet_view_state.editing = None;
-                        }
-                        ui.add_space(8.0);
-                        if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
-                            window.snippet_view_state.open = false;
-                            window.snippet_view_state.editing = None;
-                        }
-                    });
+                        });
                 });
-            ui.add_space(24.0);
+
+            // Footer (fixed at bottom)
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.add_space(widgets::FORM_LEFT_MARGIN);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let can_save = !window.snippet_view_state.new_name.trim().is_empty();
+
+                    if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() && can_save {
+                        let group = if window.snippet_view_state.new_group.trim().is_empty() {
+                            cx.language.t("snippet_default_group").to_string()
+                        } else {
+                            window.snippet_view_state.new_group.trim().to_string()
+                        };
+
+                        if let Some(edit_id) = &window.snippet_view_state.editing {
+                            if let Some(snippet) = cx.snippets.iter_mut().find(|s| s.id == *edit_id) {
+                                snippet.name = window.snippet_view_state.new_name.trim().to_string();
+                                snippet.command = window.snippet_view_state.new_command.clone();
+                                snippet.group = group;
+                            }
+                        } else {
+                            let snippet = Snippet {
+                                id: Uuid::new_v4().to_string(),
+                                name: window.snippet_view_state.new_name.trim().to_string(),
+                                command: window.snippet_view_state.new_command.clone(),
+                                group,
+                            };
+                            cx.snippets.push(snippet);
+                        }
+                        window.snippet_view_state.open = false;
+                        window.snippet_view_state.editing = None;
+                    }
+                    ui.add_space(8.0);
+                    if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                        window.snippet_view_state.open = false;
+                        window.snippet_view_state.editing = None;
+                    }
+                });
+            });
         });
-    });
 }

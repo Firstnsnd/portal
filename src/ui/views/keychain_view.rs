@@ -270,25 +270,25 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                             if is_editing { cx.language.t("edit_credential") } else { cx.language.t("new_credential") }
                         ).size(16.0).strong().color(cx.theme.fg_primary));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.spacing_mut().item_spacing.x = 2.0;
                             // Close button
-                            let close_resp = ui.add(egui::Label::new(
-                                egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim)
-                            ).sense(egui::Sense::click()));
-                            if close_resp.clicked() {
+                            if ui.add(
+                                egui::Button::new(egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim))
+                                    .frame(false)
+                            ).clicked() {
                                 window.credential_dialog.open = false;
                                 window.credential_dialog.edit_id = None;
                             }
                             // Delete button (edit mode only)
                             if is_editing {
-                                let del_resp = ui.add(egui::Label::new(
-                                    egui::RichText::new("\u{1F5D1}").size(FONT_BASE)
-                                ).sense(egui::Sense::click()));
-                                if del_resp.clicked() {
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
+                                        .frame(false)
+                                ).on_hover_text(cx.language.t("delete"))
+                                .clicked() {
                                     window.credential_dialog.confirm_delete = window.credential_dialog.edit_id.clone();
                                     window.credential_dialog.open = false;
                                 }
-                                del_resp.on_hover_text(cx.language.t("delete"));
                             }
                         });
                     });
@@ -421,116 +421,118 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                                 });
                             }
 
-                            ui.add_space(widgets::SPACING_SECTION);
+                        });
+                });
 
-                    // Footer buttons
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let can_save = !window.credential_dialog.name.trim().is_empty();
-                        let has_auth = match window.credential_dialog.cred_type {
-                            crate::ui::types::dialogs::CredentialTypeChoice::Password => {
-                                !window.credential_dialog.username.trim().is_empty()
-                                    && !window.credential_dialog.password.is_empty()
-                            }
-                            crate::ui::types::dialogs::CredentialTypeChoice::SshKey => {
-                                if window.credential_dialog.key_source == crate::ui::types::dialogs::KeySourceChoice::LocalFile {
-                                    !window.credential_dialog.key_path.trim().is_empty()
-                                } else {
-                                    !window.credential_dialog.key_content.trim().is_empty()
-                                }
-                            }
-                        };
-
-                        if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() && can_save && has_auth {
-                            use crate::config::{Credential, store_credential_secret};
-                            use uuid::Uuid;
-
-                            if let Some(edit_id) = &window.credential_dialog.edit_id {
-                                if let Some(cred) = cx.credentials.iter_mut().find(|c| c.id == *edit_id) {
-                                    cred.name = window.credential_dialog.name.trim().to_string();
-                                    match window.credential_dialog.cred_type {
-                                        crate::ui::types::dialogs::CredentialTypeChoice::Password => {
-                                            cred.credential_type = CredentialType::Password {
-                                                username: window.credential_dialog.username.trim().to_string(),
-                                            };
-                                            let _ = store_credential_secret(&cred.id, &cred.name, "password", &window.credential_dialog.password);
-                                        }
-                                        crate::ui::types::dialogs::CredentialTypeChoice::SshKey => {
-                                            let (key_path, key_in_keychain) = if window.credential_dialog.key_source == crate::ui::types::dialogs::KeySourceChoice::LocalFile {
-                                                (window.credential_dialog.key_path.trim().to_string(), false)
-                                            } else {
-                                                let _ = store_credential_secret(&cred.id, &cred.name, "ssh_key", &window.credential_dialog.key_content);
-                                                (String::new(), true)
-                                            };
-                                            cred.credential_type = CredentialType::SshKey {
-                                                key_path,
-                                                key_in_keychain,
-                                                has_passphrase: !window.credential_dialog.key_passphrase.is_empty(),
-                                            };
-                                            if !window.credential_dialog.key_passphrase.is_empty() {
-                                                let _ = store_credential_secret(&cred.id, &cred.name, "passphrase", &window.credential_dialog.key_passphrase);
-                                            }
-                                        }
-                                    }
-                                }
+            // Footer (fixed at bottom)
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.add_space(widgets::FORM_LEFT_MARGIN);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let can_save = !window.credential_dialog.name.trim().is_empty();
+                    let has_auth = match window.credential_dialog.cred_type {
+                        crate::ui::types::dialogs::CredentialTypeChoice::Password => {
+                            !window.credential_dialog.username.trim().is_empty()
+                                && !window.credential_dialog.password.is_empty()
+                        }
+                        crate::ui::types::dialogs::CredentialTypeChoice::SshKey => {
+                            if window.credential_dialog.key_source == crate::ui::types::dialogs::KeySourceChoice::LocalFile {
+                                !window.credential_dialog.key_path.trim().is_empty()
                             } else {
-                                let id = Uuid::new_v4().to_string();
-                                let name = window.credential_dialog.name.trim().to_string();
+                                !window.credential_dialog.key_content.trim().is_empty()
+                            }
+                        }
+                    };
+
+                    if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() && can_save && has_auth {
+                        use crate::config::{Credential, store_credential_secret};
+                        use uuid::Uuid;
+
+                        if let Some(edit_id) = &window.credential_dialog.edit_id {
+                            if let Some(cred) = cx.credentials.iter_mut().find(|c| c.id == *edit_id) {
+                                cred.name = window.credential_dialog.name.trim().to_string();
                                 match window.credential_dialog.cred_type {
                                     crate::ui::types::dialogs::CredentialTypeChoice::Password => {
-                                        let credential_type = CredentialType::Password {
+                                        cred.credential_type = CredentialType::Password {
                                             username: window.credential_dialog.username.trim().to_string(),
                                         };
-                                        let cred = Credential {
-                                            id: id.clone(),
-                                            name: name.clone(),
-                                            credential_type,
-                                            created_at: std::time::SystemTime::now()
-                                                .duration_since(std::time::UNIX_EPOCH)
-                                                .unwrap_or_default()
-                                                .as_secs(),
-                                        };
-                                        cx.credentials.push(cred);
-                                        let _ = store_credential_secret(&id, &name, "password", &window.credential_dialog.password);
+                                        let _ = store_credential_secret(&cred.id, &cred.name, "password", &window.credential_dialog.password);
                                     }
                                     crate::ui::types::dialogs::CredentialTypeChoice::SshKey => {
                                         let (key_path, key_in_keychain) = if window.credential_dialog.key_source == crate::ui::types::dialogs::KeySourceChoice::LocalFile {
                                             (window.credential_dialog.key_path.trim().to_string(), false)
                                         } else {
-                                            let _ = store_credential_secret(&id, &name, "ssh_key", &window.credential_dialog.key_content);
+                                            let _ = store_credential_secret(&cred.id, &cred.name, "ssh_key", &window.credential_dialog.key_content);
                                             (String::new(), true)
                                         };
-                                        let credential_type = CredentialType::SshKey {
+                                        cred.credential_type = CredentialType::SshKey {
                                             key_path,
                                             key_in_keychain,
                                             has_passphrase: !window.credential_dialog.key_passphrase.is_empty(),
                                         };
-                                        let cred = Credential {
-                                            id: id.clone(),
-                                            name: name.clone(),
-                                            credential_type,
-                                            created_at: std::time::SystemTime::now()
-                                                .duration_since(std::time::UNIX_EPOCH)
-                                                .unwrap_or_default()
-                                                .as_secs(),
-                                        };
-                                        cx.credentials.push(cred);
                                         if !window.credential_dialog.key_passphrase.is_empty() {
-                                            let _ = store_credential_secret(&id, &name, "passphrase", &window.credential_dialog.key_passphrase);
+                                            let _ = store_credential_secret(&cred.id, &cred.name, "passphrase", &window.credential_dialog.key_passphrase);
                                         }
                                     }
                                 }
                             }
-                            window.credential_dialog.open = false;
-                            window.credential_dialog.edit_id = None;
+                        } else {
+                            let id = Uuid::new_v4().to_string();
+                            let name = window.credential_dialog.name.trim().to_string();
+                            match window.credential_dialog.cred_type {
+                                crate::ui::types::dialogs::CredentialTypeChoice::Password => {
+                                    let credential_type = CredentialType::Password {
+                                        username: window.credential_dialog.username.trim().to_string(),
+                                    };
+                                    let cred = Credential {
+                                        id: id.clone(),
+                                        name: name.clone(),
+                                        credential_type,
+                                        created_at: std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_secs(),
+                                    };
+                                    cx.credentials.push(cred);
+                                    let _ = store_credential_secret(&id, &name, "password", &window.credential_dialog.password);
+                                }
+                                crate::ui::types::dialogs::CredentialTypeChoice::SshKey => {
+                                    let (key_path, key_in_keychain) = if window.credential_dialog.key_source == crate::ui::types::dialogs::KeySourceChoice::LocalFile {
+                                        (window.credential_dialog.key_path.trim().to_string(), false)
+                                    } else {
+                                        let _ = store_credential_secret(&id, &name, "ssh_key", &window.credential_dialog.key_content);
+                                        (String::new(), true)
+                                    };
+                                    let credential_type = CredentialType::SshKey {
+                                        key_path,
+                                        key_in_keychain,
+                                        has_passphrase: !window.credential_dialog.key_passphrase.is_empty(),
+                                    };
+                                    let cred = Credential {
+                                        id: id.clone(),
+                                        name: name.clone(),
+                                        credential_type,
+                                        created_at: std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_secs(),
+                                    };
+                                    cx.credentials.push(cred);
+                                    if !window.credential_dialog.key_passphrase.is_empty() {
+                                        let _ = store_credential_secret(&id, &name, "passphrase", &window.credential_dialog.key_passphrase);
+                                    }
+                                }
+                            }
                         }
-                        ui.add_space(8.0);
-                        if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
-                            window.credential_dialog.open = false;
-                            window.credential_dialog.edit_id = None;
-                        }
-                    });
+                        window.credential_dialog.open = false;
+                        window.credential_dialog.edit_id = None;
+                    }
+                    ui.add_space(8.0);
+                    if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                        window.credential_dialog.open = false;
+                        window.credential_dialog.edit_id = None;
+                    }
                 });
-            ui.add_space(24.0);
+            });
         });
-    });
 }

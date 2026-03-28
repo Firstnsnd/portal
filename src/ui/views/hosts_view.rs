@@ -700,24 +700,24 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             .size(widgets::FONT_SIZE_TITLE).strong().color(cx.theme.fg_primary));
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.spacing_mut().item_spacing.x = 2.0;
                             // Close button
-                            let close_resp = ui.add(egui::Label::new(
-                                egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim)
-                            ).sense(egui::Sense::click()));
-                            if close_resp.clicked() {
+                            if ui.add(
+                                egui::Button::new(egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim))
+                                    .frame(false)
+                            ).clicked() {
                                 window.add_host_dialog.reset();
                             }
                             // Delete button (edit mode only)
                             if window.add_host_dialog.edit_index.is_some() {
-                                let del_resp = ui.add(egui::Label::new(
-                                    egui::RichText::new("\u{1F5D1}").size(FONT_BASE)
-                                ).sense(egui::Sense::click()));
-                                if del_resp.clicked() {
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
+                                        .frame(false)
+                                ).on_hover_text(cx.language.t("delete"))
+                                .clicked() {
                                     window.confirm_delete_host = window.add_host_dialog.edit_index;
                                     window.add_host_dialog.open = false;
                                 }
-                                del_resp.on_hover_text(cx.language.t("delete"));
                             }
                         });
                     });
@@ -929,29 +929,33 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                 }
                             }
 
-                            // Footer
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let can_save = !window.add_host_dialog.name.trim().is_empty()
-                                    && !window.add_host_dialog.host.trim().is_empty()
-                                    && !window.add_host_dialog.port.trim().is_empty()
-                                    && !window.add_host_dialog.username.trim().is_empty();
-
-                                let is_testing = matches!(window.add_host_dialog.test_conn_state, TestConnState::Testing);
-                                if ui.add_enabled(!is_testing, widgets::primary_button(cx.language.t("test"), cx.theme)).clicked() {
-                                    test_clicked = true;
-                                }
-                                ui.add_space(8.0);
-                                if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() && can_save {
-                                    save_clicked = true;
-                                }
-                                ui.add_space(8.0);
-                                if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
-                                    window.add_host_dialog.reset();
-                                }
-                            });
                         });
-                    ui.add_space(widgets::FORM_LEFT_MARGIN);
                 });
+
+            // Footer (fixed at bottom)
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.add_space(widgets::FORM_LEFT_MARGIN);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let can_save = !window.add_host_dialog.name.trim().is_empty()
+                        && !window.add_host_dialog.host.trim().is_empty()
+                        && !window.add_host_dialog.port.trim().is_empty()
+                        && !window.add_host_dialog.username.trim().is_empty();
+
+                    let is_testing = matches!(window.add_host_dialog.test_conn_state, TestConnState::Testing);
+                    if ui.add_enabled(!is_testing, widgets::primary_button(cx.language.t("test"), cx.theme)).clicked() {
+                        test_clicked = true;
+                    }
+                    ui.add_space(8.0);
+                    if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() && can_save {
+                        save_clicked = true;
+                    }
+                    ui.add_space(8.0);
+                    if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                        window.add_host_dialog.reset();
+                    }
+                });
+            });
         });
 
     // Handle test connection

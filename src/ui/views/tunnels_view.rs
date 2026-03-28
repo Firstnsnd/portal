@@ -229,7 +229,6 @@ pub fn render_tunnel_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mu
                                 egui::Button::new(egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim))
                                     .frame(false)
                                     .rounding(4.0)
-                                    .min_size(egui::vec2(32.0, 32.0))
                             ).clicked() {
                                 window.add_tunnel_dialog.close_drawer();
                                 window.add_tunnel_dialog.edit_index = None;
@@ -238,8 +237,6 @@ pub fn render_tunnel_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mu
                                 if ui.add(
                                     egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
                                         .frame(false)
-                                        .rounding(4.0)
-                                        .min_size(egui::vec2(28.0, 28.0))
                                 ).on_hover_text(cx.language.t("delete"))
                                 .clicked() {
                                     window.add_tunnel_dialog.confirm_delete = window.add_tunnel_dialog.edit_index;
@@ -351,65 +348,67 @@ pub fn render_tunnel_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mu
                                     .color(cx.theme.red).size(12.0));
                             }
 
-                            ui.add_space(widgets::SPACING_SECTION);
+                        });
+                });
 
-                    // Footer buttons
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let can_save = window.add_tunnel_dialog.selected_host_idx.is_some()
-                            && !window.add_tunnel_dialog.local_host.trim().is_empty()
-                            && !window.add_tunnel_dialog.local_port.trim().is_empty()
-                            && !window.add_tunnel_dialog.remote_host.trim().is_empty()
-                            && !window.add_tunnel_dialog.remote_port.trim().is_empty();
+            // Footer (fixed at bottom)
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.add_space(widgets::FORM_LEFT_MARGIN);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let can_save = window.add_tunnel_dialog.selected_host_idx.is_some()
+                        && !window.add_tunnel_dialog.local_host.trim().is_empty()
+                        && !window.add_tunnel_dialog.local_port.trim().is_empty()
+                        && !window.add_tunnel_dialog.remote_host.trim().is_empty()
+                        && !window.add_tunnel_dialog.remote_port.trim().is_empty();
 
-                        let button_text = if is_editing {
-                            cx.language.t("save")
-                        } else {
-                            cx.language.t("add_tunnel")
-                        };
+                    let button_text = if is_editing {
+                        cx.language.t("save")
+                    } else {
+                        cx.language.t("add_tunnel")
+                    };
 
-                        if ui.add(widgets::primary_button(button_text, cx.theme)).clicked() && can_save {
-                            if let Some(host_idx) = window.add_tunnel_dialog.selected_host_idx {
-                                if host_idx < cx.hosts.len() {
-                                    let local_port = window.add_tunnel_dialog.local_port.trim().parse::<u16>();
-                                    let remote_port = window.add_tunnel_dialog.remote_port.trim().parse::<u16>();
+                    if ui.add(widgets::primary_button(button_text, cx.theme)).clicked() && can_save {
+                        if let Some(host_idx) = window.add_tunnel_dialog.selected_host_idx {
+                            if host_idx < cx.hosts.len() {
+                                let local_port = window.add_tunnel_dialog.local_port.trim().parse::<u16>();
+                                let remote_port = window.add_tunnel_dialog.remote_port.trim().parse::<u16>();
 
-                                    if let (Ok(lp), Ok(rp)) = (local_port, remote_port) {
-                                        let forward = PortForwardConfig {
-                                            kind: window.add_tunnel_dialog.forward_kind.clone(),
-                                            local_host: window.add_tunnel_dialog.local_host.trim().to_string(),
-                                            local_port: lp,
-                                            remote_host: window.add_tunnel_dialog.remote_host.trim().to_string(),
-                                            remote_port: rp,
-                                        };
+                                if let (Ok(lp), Ok(rp)) = (local_port, remote_port) {
+                                    let forward = PortForwardConfig {
+                                        kind: window.add_tunnel_dialog.forward_kind.clone(),
+                                        local_host: window.add_tunnel_dialog.local_host.trim().to_string(),
+                                        local_port: lp,
+                                        remote_host: window.add_tunnel_dialog.remote_host.trim().to_string(),
+                                        remote_port: rp,
+                                    };
 
-                                        if let Some((edit_host_idx, edit_tunnel_idx)) = window.add_tunnel_dialog.edit_index {
-                                            // Edit mode: update existing tunnel
-                                            if edit_host_idx < cx.hosts.len() {
-                                                if let Some(existing) = cx.hosts[edit_host_idx].port_forwards.get_mut(edit_tunnel_idx) {
-                                                    *existing = forward;
-                                                }
+                                    if let Some((edit_host_idx, edit_tunnel_idx)) = window.add_tunnel_dialog.edit_index {
+                                        // Edit mode: update existing tunnel
+                                        if edit_host_idx < cx.hosts.len() {
+                                            if let Some(existing) = cx.hosts[edit_host_idx].port_forwards.get_mut(edit_tunnel_idx) {
+                                                *existing = forward;
                                             }
-                                        } else {
-                                            // Add mode: create new tunnel
-                                            cx.hosts[host_idx].port_forwards.push(forward);
                                         }
-                                        window.add_tunnel_dialog.reset();
                                     } else {
-                                        window.add_tunnel_dialog.error = "Invalid port numbers".to_string();
+                                        // Add mode: create new tunnel
+                                        cx.hosts[host_idx].port_forwards.push(forward);
                                     }
+                                    window.add_tunnel_dialog.reset();
+                                } else {
+                                    window.add_tunnel_dialog.error = "Invalid port numbers".to_string();
                                 }
                             }
                         }
-                        ui.add_space(8.0);
-                        if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
-                            window.add_tunnel_dialog.close_drawer();
-                            window.add_tunnel_dialog.edit_index = None;
-                        }
-                    });
+                    }
+                    ui.add_space(8.0);
+                    if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                        window.add_tunnel_dialog.close_drawer();
+                        window.add_tunnel_dialog.edit_index = None;
+                    }
                 });
-            ui.add_space(24.0);
+            });
         });
-    });
 
     // Delete confirmation dialog
     if let Some((host_idx, tunnel_idx)) = window.add_tunnel_dialog.confirm_delete {
