@@ -394,6 +394,7 @@ fn render_more_menu(
 ) -> TabBarAction {
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         let btn_color = if *show_more_menu { theme.accent } else { theme.fg_dim };
+        ui.add_space(8.0);
         let more_resp = ui.add(
             egui::Button::new(egui::RichText::new("⋯").color(btn_color).size(16.0))
                 .frame(false)

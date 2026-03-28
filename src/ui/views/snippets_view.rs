@@ -393,6 +393,7 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
             ui.horizontal(|ui| {
                 ui.add_space(widgets::FORM_LEFT_MARGIN);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(16.0);
                     let can_save = !window.snippet_view_state.new_name.trim().is_empty();
 
                     if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() && can_save {
@@ -428,4 +429,150 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                 });
             });
         });
+}
+
+/// Render the terminal snippet drawer — a quick-access snippet list bound to the active tab.
+/// Clicking a snippet executes its command in the active pane.
+pub fn render_terminal_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut WindowContext) {
+    let active_tab = window.active_tab;
+    let drawer_open = window.tabs.get(active_tab)
+        .map(|t| t.snippet_drawer_open)
+        .unwrap_or(false);
+
+    if !drawer_open {
+        return;
+    }
+
+    // Collect snippet commands to execute after rendering
+    let mut command_to_run: Option<String> = None;
+
+    egui::SidePanel::right("terminal_snippet_drawer")
+        .default_width(380.0)
+        .frame(egui::Frame {
+            fill: cx.theme.bg_elevated,
+            inner_margin: egui::Margin::ZERO,
+            ..Default::default()
+        })
+        .show(ctx, |ui| {
+            // Header
+            egui::TopBottomPanel::top("terminal_snippet_drawer_header")
+                .exact_height(56.0)
+                .frame(egui::Frame {
+                    fill: cx.theme.bg_elevated,
+                    inner_margin: egui::Margin { left: 24.0, right: 16.0, top: 16.0, bottom: 16.0 },
+                    ..Default::default()
+                })
+                .show_inside(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(cx.language.t("snippets"))
+                            .size(16.0).strong().color(cx.theme.fg_primary));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(
+                                egui::Button::new(egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim))
+                                    .frame(false)
+                            ).clicked() {
+                                if let Some(tab) = window.tabs.get_mut(active_tab) {
+                                    tab.snippet_drawer_open = false;
+                                }
+                            }
+                        });
+                    });
+                });
+
+            // Divider
+            ui.add_space(16.0);
+            ui.add(egui::Separator::default().spacing(0.0));
+            ui.add_space(16.0);
+
+            // Snippet list
+            egui::ScrollArea::vertical()
+                .id_salt("terminal_snippet_drawer_scroll")
+                .show(ui, |ui| {
+                    if cx.snippets.is_empty() {
+                        ui.add_space(SPACE_2XL);
+                        ui.vertical_centered(|ui| {
+                            ui.label(egui::RichText::new("\u{26A1}").size(SPACE_2XL).color(cx.theme.fg_dim));
+                            ui.add_space(SPACE_MD);
+                            ui.label(egui::RichText::new(cx.language.t("no_snippets")).color(cx.theme.fg_dim).size(FONT_BASE));
+                        });
+                    } else {
+                        // Group snippets by category
+                        let mut groups: std::collections::BTreeMap<String, Vec<&Snippet>> = std::collections::BTreeMap::new();
+                        for snippet in cx.snippets.iter() {
+                            groups.entry(snippet.group.clone()).or_default().push(snippet);
+                        }
+
+                        for (group_name, snippets_in_group) in &groups {
+                            ui.horizontal(|ui| {
+                                ui.add_space(24.0);
+                                ui.label(egui::RichText::new(group_name.to_uppercase())
+                                    .color(cx.theme.fg_dim)
+                                    .size(10.0)
+                                    .strong());
+                            });
+                            ui.add_space(4.0);
+
+                            for snippet in snippets_in_group {
+                                let row_h = 50.0;
+                                let width = ui.available_width();
+                                let (rect, resp) = ui.allocate_exact_size(
+                                    egui::vec2(width, row_h),
+                                    egui::Sense::click(),
+                                );
+                                let hovered = resp.hovered();
+
+                                if hovered {
+                                    ui.painter().rect_filled(rect, 4.0, cx.theme.hover_bg);
+                                }
+
+                                ui.painter().text(
+                                    egui::pos2(rect.min.x + 20.0, rect.min.y + 16.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    &snippet.name,
+                                    egui::FontId::proportional(13.0),
+                                    cx.theme.fg_primary,
+                                );
+
+                                let preview = if snippet.command.len() > 50 {
+                                    format!("{}...", &snippet.command[..50])
+                                } else {
+                                    snippet.command.clone()
+                                };
+                                let preview = preview.replace('\n', " \\ ");
+                                ui.painter().text(
+                                    egui::pos2(rect.min.x + 20.0, rect.min.y + 34.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    &preview,
+                                    egui::FontId::monospace(10.0),
+                                    cx.theme.fg_dim,
+                                );
+
+                                if resp.clicked() {
+                                    command_to_run = Some(snippet.command.clone());
+                                }
+                            }
+                            ui.add_space(8.0);
+                        }
+                    }
+                    ui.add_space(40.0);
+                });
+        });
+
+    // Execute snippet command — broadcast to all sessions if enabled
+    if let Some(cmd) = command_to_run {
+        if let Some(tab) = window.tabs.get_mut(active_tab) {
+            let full_cmd = cmd + "\r";
+            if tab.broadcast_enabled {
+                for session in &mut tab.sessions {
+                    session.write(&full_cmd);
+                }
+            } else {
+                let focused = tab.focused_session;
+                if let Some(session) = tab.sessions.get_mut(focused) {
+                    session.write(&full_cmd);
+                }
+            }
+            tab.snippet_drawer_open = false;
+        }
+    }
 }

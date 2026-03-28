@@ -937,6 +937,7 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
             ui.horizontal(|ui| {
                 ui.add_space(widgets::FORM_LEFT_MARGIN);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(16.0);
                     let can_save = !window.add_host_dialog.name.trim().is_empty()
                         && !window.add_host_dialog.host.trim().is_empty()
                         && !window.add_host_dialog.port.trim().is_empty()

@@ -429,6 +429,7 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
             ui.horizontal(|ui| {
                 ui.add_space(widgets::FORM_LEFT_MARGIN);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(16.0);
                     let can_save = !window.credential_dialog.name.trim().is_empty();
                     let has_auth = match window.credential_dialog.cred_type {
                         crate::ui::types::dialogs::CredentialTypeChoice::Password => {

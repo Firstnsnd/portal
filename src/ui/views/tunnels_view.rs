@@ -356,6 +356,7 @@ pub fn render_tunnel_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mu
             ui.horizontal(|ui| {
                 ui.add_space(widgets::FORM_LEFT_MARGIN);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(16.0);
                     let can_save = window.add_tunnel_dialog.selected_host_idx.is_some()
                         && !window.add_tunnel_dialog.local_host.trim().is_empty()
                         && !window.add_tunnel_dialog.local_port.trim().is_empty()

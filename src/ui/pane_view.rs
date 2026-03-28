@@ -143,9 +143,14 @@ impl AppWindow {
             keychain_view::render_credential_drawer(self, ctx, cx);
         }
 
-        // Snippet drawer
+        // Snippet drawer (snippets page)
         if self.current_view == AppView::Snippets && self.snippet_view_state.open {
             snippets_view::render_snippet_drawer(self, ctx, cx);
+        }
+
+        // Terminal snippet drawer (quick-access snippet list)
+        if self.current_view == AppView::Terminal {
+            snippets_view::render_terminal_snippet_drawer(self, ctx, cx);
         }
 
         // Tunnel drawer
