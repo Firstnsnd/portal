@@ -95,6 +95,7 @@ impl PortalApp {
             focused_session: 0,
             broadcast_enabled: false,
             snippet_drawer_open: false,
+            pending_snippet: None,
         };
 
         // Create the first (main) window

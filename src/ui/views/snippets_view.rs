@@ -558,20 +558,10 @@ pub fn render_terminal_snippet_drawer(window: &mut AppWindow, ctx: &egui::Contex
                 });
         });
 
-    // Execute snippet command — broadcast to all sessions if enabled
+    // Store snippet command as pending — execute on next frame after drawer closes and PTY resizes
     if let Some(cmd) = command_to_run {
         if let Some(tab) = window.tabs.get_mut(active_tab) {
-            let full_cmd = cmd + "\r";
-            if tab.broadcast_enabled {
-                for session in &mut tab.sessions {
-                    session.write(&full_cmd);
-                }
-            } else {
-                let focused = tab.focused_session;
-                if let Some(session) = tab.sessions.get_mut(focused) {
-                    session.write(&full_cmd);
-                }
-            }
+            tab.pending_snippet = Some(cmd);
             tab.snippet_drawer_open = false;
         }
     }

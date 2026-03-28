@@ -31,6 +31,7 @@ impl PortalApp {
             focused_session: 0,
             broadcast_enabled: false,
             snippet_drawer_open: false,
+            pending_snippet: None,
         };
         window.tabs.push(tab);
         window.active_tab = window.tabs.len() - 1;
@@ -70,14 +71,13 @@ impl PortalApp {
             focused_session: 0,
             broadcast_enabled: false,
             snippet_drawer_open: false,
+            pending_snippet: None,
         };
-
         let window = if let Some(w) = self.windows.get_mut(window_idx) {
             w
         } else {
             return;
         };
-
         window.tabs.push(tab);
         window.active_tab = window.tabs.len() - 1;
         window.current_view = AppView::Terminal;

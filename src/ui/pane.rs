@@ -210,6 +210,8 @@ pub struct Tab {
     pub broadcast_enabled: bool,
     /// Whether the snippet drawer is open for this tab
     pub snippet_drawer_open: bool,
+    /// Pending snippet command to execute on next frame (after drawer closes and PTY resizes)
+    pub pending_snippet: Option<String>,
 }
 
 /// Per-tab animation state for smooth reordering

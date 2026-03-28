@@ -68,6 +68,25 @@ impl PortalApp {
             }
         }
 
+        // ── Execute pending snippet (after drawer closed and PTY resized) ──
+        if current_view == AppView::Terminal {
+            let active_tab = self.windows[window_idx].active_tab;
+            if let Some(tab) = self.windows[window_idx].tabs.get_mut(active_tab) {
+                if let Some(cmd) = tab.pending_snippet.take() {
+                    let focused = tab.focused_session;
+                    if tab.broadcast_enabled {
+                        for session in &mut tab.sessions {
+                            session.write(&cmd);
+                            session.write("\r");
+                        }
+                    } else if let Some(session) = tab.sessions.get_mut(focused) {
+                        session.write(&cmd);
+                        session.write("\r");
+                    }
+                }
+            }
+        }
+
         // ── Sidebar (Navigation) ──
         let current_view = self.windows[window_idx].current_view;
         let nav_id = if is_detached {
@@ -344,6 +363,7 @@ impl PortalApp {
                     focused_session: 0,
                     broadcast_enabled: false,
                     snippet_drawer_open: false,
+                    pending_snippet: None,
                 };
                 window.tabs.push(new_tab);
                 window.active_tab = window.tabs.len() - 1;
