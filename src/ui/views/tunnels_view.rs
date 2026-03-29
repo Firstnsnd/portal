@@ -15,7 +15,7 @@ use crate::config::ForwardKind;
 pub fn render_tunnels_view(
     window: &mut AppWindow,
     ctx: &egui::Context,
-    ui: &mut egui::Ui,
+    _ui: &mut egui::Ui,
     cx: &mut WindowContext,
 ) -> ViewActions {
     // Top navigation bar

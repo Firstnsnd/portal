@@ -46,6 +46,7 @@ impl PortForward {
         }
     }
 
+    #[allow(dead_code)]
     pub fn current_state(&self) -> ForwardState {
         self.state
             .lock()

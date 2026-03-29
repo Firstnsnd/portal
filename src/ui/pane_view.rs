@@ -48,7 +48,9 @@ pub struct WindowContext<'a> {
     pub connection_history: &'a mut Vec<ConnectionRecord>,
 
     // File paths
+    #[allow(dead_code)]
     pub hosts_file: &'a PathBuf,
+    #[allow(dead_code)]
     pub credentials_file: &'a PathBuf,
 
     // Settings and theme

@@ -9,7 +9,6 @@ use super::theme::ThemeColors;
 pub const DRAWER_WIDTH: f32 = 380.0;
 
 /// Form label width (fixed, for alignment)
-pub const LABEL_WIDTH: f32 = 80.0;
 
 /// Font sizes
 pub const FONT_SIZE_LABEL: f32 = 12.0;
@@ -19,7 +18,6 @@ pub const FONT_SIZE_TITLE: f32 = 14.0;
 /// Spacing
 pub const SPACING_FIELD: f32 = 12.0;      // Between fields
 pub const SPACING_LABEL: f32 = 4.0;       // Between label and input
-pub const SPACING_SECTION: f32 = 0.0;     // Between sections (before footer)
 pub const SPACING_INLINE: f32 = 8.0;      // Between inline fields
 
 /// Input dimensions
@@ -372,16 +370,6 @@ pub fn form_field_textarea(
     });
 }
 
-/// Form section header with optional separator
-pub fn form_section(ui: &mut egui::Ui, title: &str, theme: &ThemeColors) {
-    ui.add_space(SPACING_SECTION);
-    ui.label(egui::RichText::new(title)
-        .color(theme.fg_primary)
-        .size(FONT_SIZE_TITLE)
-        .strong());
-    ui.add_space(SPACING_FIELD);
-}
-
 /// Form separator line
 pub fn form_separator(ui: &mut egui::Ui) {
     ui.add_space(8.0);
@@ -463,7 +451,3 @@ pub fn shadcn_textarea<'a>(
     });
 }
 
-// Legacy aliases
-pub use form_field as form_row;
-pub use fixed_input as compact_input;
-pub use fixed_password_input as compact_password_input;

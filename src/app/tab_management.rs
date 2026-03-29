@@ -139,6 +139,7 @@ impl PortalApp {
     }
 
     /// Save credentials to disk
+    #[allow(dead_code)]
     pub fn save_credentials(&self) {
         crate::config::save_credentials(&self.credentials_file, &self.credentials);
     }

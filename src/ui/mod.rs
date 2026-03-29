@@ -57,9 +57,10 @@ pub use i18n::Language;
 pub use types::{
     SessionBackend, AppView, BroadcastState,
     AddHostDialog, CredentialDialog, SnippetViewState, HostFilter,
-    AddTunnelDialog, KeychainDeleteRequest,
+    AddTunnelDialog,
 };
 pub use pane::{AppWindow, TabDragState};
+#[allow(unused_imports)]
 pub use pane_view::{WindowContext, ViewActions};
 pub use terminal::render_pane_tree;
 pub use tokens::STATUS_BAR_HEIGHT;

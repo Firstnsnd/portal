@@ -15,7 +15,7 @@ use crate::ui::widgets;
 pub fn render_snippets_view(
     window: &mut AppWindow,
     ctx: &egui::Context,
-    ui: &mut egui::Ui,
+    _ui: &mut egui::Ui,
     cx: &mut WindowContext,
 ) -> ViewActions {
     let mut snippet_to_delete: Option<String> = None;

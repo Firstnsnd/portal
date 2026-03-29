@@ -413,12 +413,6 @@ impl AddTunnelDialog {
     }
 }
 
-/// Pending keychain credential deletion (awaiting user confirmation).
-pub enum KeychainDeleteRequest {
-    /// Delete a credential by id, with list of affected host names
-    ById { credential_id: String, affected_hosts: Vec<String> },
-}
-
 /// Snippet view state for Command Snippets feature
 pub struct SnippetViewState {
     #[allow(dead_code)]
