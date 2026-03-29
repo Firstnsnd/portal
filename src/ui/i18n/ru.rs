@@ -25,6 +25,7 @@ pub fn t(key: &str) -> &'static str {
         "connect" => "Подключиться",
         "delete" => "Удалить",
         "delete_host" => "Удалить Хост",
+        "delete_credential" => "Удалить Учётные Данные",
         "confirm_delete" => "Это действие нельзя отменить.",
         "local" => "ЛОКАЛЬНЫЙ",
         "ssh_hosts" => "SSH ХОСТЫ",

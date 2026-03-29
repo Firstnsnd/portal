@@ -193,6 +193,7 @@ pub fn render_keychain_view(
         });
 
     // Delete confirmation dialog
+    let mut credential_to_delete = None;
     if let Some(delete_id) = &window.credential_dialog.confirm_delete.clone() {
         let cred_name = cx.credentials.iter()
             .find(|c| c.id == *delete_id)
@@ -222,7 +223,7 @@ pub fn render_keychain_view(
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.add(widgets::danger_button(cx.language.t("delete"), cx.theme)).clicked() {
-                            cx.credentials.retain(|c| c.id != *delete_id);
+                            credential_to_delete = Some(delete_id.clone());
                             window.credential_dialog.confirm_delete = None;
                         }
                         if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
@@ -235,6 +236,13 @@ pub fn render_keychain_view(
         if !open {
             window.credential_dialog.confirm_delete = None;
         }
+    }
+
+    if let Some(id) = credential_to_delete {
+        cx.credentials.retain(|c| c.id != id);
+        let mut actions = ViewActions::default();
+        actions.delete_credential = Some(id);
+        return actions;
     }
 
     ViewActions::default()

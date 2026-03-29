@@ -25,6 +25,7 @@ pub fn t(key: &str) -> &'static str {
         "connect" => "接続",
         "delete" => "削除",
         "delete_host" => "ホスト削除",
+        "delete_credential" => "認証情報削除",
         "confirm_delete" => "この操作は元に戻せません。",
         "local" => "ローカル",
         "ssh_hosts" => "SSH ホスト",

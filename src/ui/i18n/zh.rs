@@ -25,6 +25,7 @@ pub fn t(key: &str) -> &'static str {
         "connect" => "连接",
         "delete" => "删除",
         "delete_host" => "删除主机",
+        "delete_credential" => "删除凭据",
         "confirm_delete" => "此操作无法撤销。",
         "local" => "本地",
         "ssh_hosts" => "SSH 主机",
