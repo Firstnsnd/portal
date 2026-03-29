@@ -222,7 +222,38 @@ pub fn render_terminal_session(
     } else if response.double_clicked() {
         double_click_pos = response.interact_pointer_pos();
     } else if response.clicked() {
-        if session.selection.has_selection() {
+        // Check if click landed on a URL
+        let mut clicked_url: Option<String> = None;
+        if let Some(pos) = response.interact_pointer_pos() {
+            if rect.contains(pos) {
+                let screen_row = ((pos.y - rect.min.y) / line_height) as usize;
+                let col = ((pos.x - rect.min.x) / char_width) as usize;
+                if let Ok(grid) = session.grid.lock() {
+                    let scrollback_len = grid.scrollback_len();
+                    let offset = session.scroll_offset;
+                    let cells: Option<&Vec<terminal::TerminalCell>> =
+                        if offset > 0 && screen_row < offset {
+                            let sb_idx = scrollback_len.saturating_sub(offset) + screen_row;
+                            grid.get_scrollback_row(sb_idx)
+                        } else {
+                            let gr = screen_row.saturating_sub(offset);
+                            if gr < grid.rows { Some(&grid.cells[gr]) } else { None }
+                        };
+                    if let Some(cells) = cells {
+                        let urls = terminal::url::scan_row_for_urls(cells, grid.cols);
+                        for (start_col, end_col, url) in &urls {
+                            if col >= *start_col && col < *end_col {
+                                clicked_url = Some(url.clone());
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(url) = clicked_url {
+            let _ = std::process::Command::new("open").arg(&url).spawn();
+        } else if session.selection.has_selection() {
             session.selection.clear();
         }
     }
@@ -1059,6 +1090,65 @@ pub fn render_terminal_session(
                 );
                 painter.rect_filled(highlight_rect, 0.0, if is_current { current_color } else { match_color });
             }
+        }
+
+        // ── URL detection & hover highlight ──────────────────────────────────
+        let mut hovered_url: Option<String> = None;
+        if is_hovering {
+            if let Some(pointer) = pointer_pos {
+                if rect.contains(pointer) {
+                    let p_row = ((pointer.y - rect.min.y) / line_height) as usize;
+                    let p_col = ((pointer.x - rect.min.x) / char_width) as usize;
+                    let cells: Option<&Vec<terminal::TerminalCell>> =
+                        if offset > 0 && p_row < offset {
+                            let sb_idx = scrollback_len.saturating_sub(offset) + p_row;
+                            grid.get_scrollback_row(sb_idx)
+                        } else {
+                            let gr = p_row.saturating_sub(offset);
+                            if gr < grid.rows { Some(&grid.cells[gr]) } else { None }
+                        };
+                    if let Some(cells) = cells {
+                        let urls = terminal::url::scan_row_for_urls(cells, grid.cols);
+                        for (start_col, end_col, url) in &urls {
+                            if p_col >= *start_col && p_col < *end_col {
+                                hovered_url = Some(url.clone());
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Draw URL underlines and handle cursor
+        if let Some(ref _url) = hovered_url {
+            let pointer = pointer_pos.unwrap();
+            let p_row = ((pointer.y - rect.min.y) / line_height) as usize;
+            let p_col = ((pointer.x - rect.min.x) / char_width) as usize;
+            let cells: Option<&Vec<terminal::TerminalCell>> =
+                if offset > 0 && p_row < offset {
+                    let sb_idx = scrollback_len.saturating_sub(offset) + p_row;
+                    grid.get_scrollback_row(sb_idx)
+                } else {
+                    let gr = p_row.saturating_sub(offset);
+                    if gr < grid.rows { Some(&grid.cells[gr]) } else { None }
+                };
+            if let Some(cells) = cells {
+                let urls = terminal::url::scan_row_for_urls(cells, grid.cols);
+                for (start_col, end_col, _) in &urls {
+                    if p_col >= *start_col && p_col < *end_col {
+                        let x0 = rect.min.x + *start_col as f32 * char_width;
+                        let x1 = rect.min.x + *end_col as f32 * char_width;
+                        let y = rect.min.y + p_row as f32 * line_height + line_height - 2.0;
+                        painter.line_segment(
+                            [egui::pos2(x0, y), egui::pos2(x1, y)],
+                            egui::Stroke::new(1.5, theme.accent),
+                        );
+                        break;
+                    }
+                }
+            }
+            ctx.output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
         }
 
         // ── Cursor ───────────────────────────────────────────────────────────
