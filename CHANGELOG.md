@@ -2,6 +2,19 @@
 
 All notable changes to Portal will be documented in this file.
 
+## [0.12.0] - 2026-03-29
+
+### Added
+- **Clickable URLs** - Auto-detect URLs in terminal output (http/https/ftp/ssh/git), hover highlight with underline, click to open in browser
+- **Port Forwards in Host Drawer** - Add/edit/remove port forwarding rules directly when creating or editing a host
+- **Keyboard Shortcuts System** - All shortcuts now configurable in Settings; added New Tab (Cmd+T), Close Tab (Cmd+W), Close Pane (Cmd+Shift+P), Next/Prev Tab (Cmd+Shift+]/[)
+- **Connection History** - Recent SSH connections shown on Hosts page
+
+### Fixed
+- **Keychain Delete** - Fixed "delete_credential" i18n key missing (showed "???") and delete not actually removing from system keychain
+- **Host List Interaction** - Replaced Edit button with Connect; single-click row to edit (removed double-click)
+- **Compiler Warnings** - Removed all dead code and eliminated all build warnings
+
 ## [0.11.1] - 2026-03-25
 
 ### Fixed

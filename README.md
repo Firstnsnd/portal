@@ -2,7 +2,7 @@
 
 A modern GUI terminal emulator built with Rust and egui, inspired by Termius.
 
-![Portal](https://img.shields.io/badge/Portal-0.11.0-blue)
+![Portal](https://img.shields.io/badge/Portal-0.12.0-blue)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)
 
 ## Features
@@ -15,6 +15,7 @@ A modern GUI terminal emulator built with Rust and egui, inspired by Termius.
 - **Scrollback** - Mouse wheel scrollback history
 - **CJK Characters** - Unicode double-width rendering with font fallback
 - **Text Selection** - Mouse drag select, double-click word, triple-click line selection
+- **Clickable URLs** - Auto-detect URLs in terminal output, hover to highlight, click to open in browser
 - **Click to Focus** - Click terminal pane to focus and type
 
 ### SSH
