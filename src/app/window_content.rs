@@ -9,6 +9,7 @@
 use eframe::egui;
 
 use crate::config;
+use crate::config::ShortcutAction;
 use crate::ssh::SshConnectionState;
 use crate::ui::*;
 use crate::ui::views::tab_view::{TabBarAction, render_tab_bar};
@@ -51,15 +52,81 @@ impl PortalApp {
         // ── Keyboard shortcuts (terminal view only) ─────────────────────
         let current_view = self.windows[window_idx].current_view;
         if current_view == AppView::Terminal {
-            // Cmd+D → split horizontally
-            if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && !i.modifiers.shift) {
+            let sr = self.shortcut_resolver.clone();
+
+            if sr.matches(ShortcutAction::SplitHorizontal, ctx) {
                 self.split_focused_pane_in_window(window_idx, SplitDirection::Horizontal);
             }
-            // Cmd+Shift+D → split vertically
-            if ctx.input(|i| i.key_pressed(egui::Key::D) && i.modifiers.command && i.modifiers.shift) {
+            if sr.matches(ShortcutAction::SplitVertical, ctx) {
                 self.split_focused_pane_in_window(window_idx, SplitDirection::Vertical);
             }
-            // Cmd+Shift+S → toggle snippet drawer
+            if sr.matches(ShortcutAction::NewTab, ctx) {
+                self.add_tab_local_to_window(window_idx);
+            }
+            if sr.matches(ShortcutAction::CloseTab, ctx) {
+                let window = &mut self.windows[window_idx];
+                let active = window.active_tab;
+                let tab = &mut window.tabs[active];
+                if tab.sessions.len() > 1 {
+                    // Multiple panes — close focused pane
+                    let focused = tab.focused_session;
+                    let old_layout = tab.layout.clone();
+                    if let Some(new_layout) = old_layout.remove(focused) {
+                        tab.layout = new_layout;
+                    }
+                    tab.layout.decrement_indices_above(focused);
+                    tab.sessions.remove(focused);
+                    if tab.focused_session >= tab.sessions.len() {
+                        tab.focused_session = tab.sessions.len().saturating_sub(1);
+                    } else if tab.focused_session == focused && focused > 0 {
+                        tab.focused_session = focused - 1;
+                    }
+                } else if window.tabs.len() > 1 {
+                    // Single pane — close the tab
+                    let removed_idx = active;
+                    window.tabs.remove(active);
+                    if window.active_tab >= window.tabs.len() {
+                        window.active_tab = window.tabs.len().saturating_sub(1);
+                    }
+                    result.pending_detach.retain(|&(w, t)| w != window_idx || t != removed_idx);
+                }
+            }
+            if sr.matches(ShortcutAction::ClosePane, ctx) {
+                let window = &mut self.windows[window_idx];
+                let active = window.active_tab;
+                let tab = &mut window.tabs[active];
+                if tab.sessions.len() > 1 {
+                    let focused = tab.focused_session;
+                    let old_layout = tab.layout.clone();
+                    if let Some(new_layout) = old_layout.remove(focused) {
+                        tab.layout = new_layout;
+                    }
+                    tab.layout.decrement_indices_above(focused);
+                    tab.sessions.remove(focused);
+                    if tab.focused_session >= tab.sessions.len() {
+                        tab.focused_session = tab.sessions.len().saturating_sub(1);
+                    } else if tab.focused_session == focused && focused > 0 {
+                        tab.focused_session = focused - 1;
+                    }
+                }
+            }
+            if sr.matches(ShortcutAction::NextTab, ctx) {
+                let window = &mut self.windows[window_idx];
+                if window.tabs.len() > 1 {
+                    window.active_tab = (window.active_tab + 1) % window.tabs.len();
+                }
+            }
+            if sr.matches(ShortcutAction::PrevTab, ctx) {
+                let window = &mut self.windows[window_idx];
+                if window.tabs.len() > 1 {
+                    window.active_tab = if window.active_tab == 0 {
+                        window.tabs.len() - 1
+                    } else {
+                        window.active_tab - 1
+                    };
+                }
+            }
+            // Cmd+Shift+S → toggle snippet drawer (not configurable via settings)
             if ctx.input(|i| i.key_pressed(egui::Key::S) && i.modifiers.command && i.modifiers.shift) {
                 let active_tab = self.windows[window_idx].active_tab;
                 if let Some(tab) = self.windows[window_idx].tabs.get_mut(active_tab) {

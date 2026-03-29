@@ -443,30 +443,30 @@ pub fn render_hosts_view(
                         }
 
                         let visible_right = ui.clip_rect().max.x;
-                        let edit_btn_rect = egui::Rect::from_center_size(
+                        let btn_rect = egui::Rect::from_center_size(
                             egui::pos2(visible_right - 40.0, rect.min.y + 26.0),
                             egui::vec2(56.0, 22.0),
                         );
                         if hovered {
                             let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
-                            let over_edit = pointer_pos.map_or(false, |p| edit_btn_rect.contains(p));
+                            let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
 
-                            let edit_bg = if over_edit { cx.theme.accent } else { cx.theme.bg_elevated };
-                            let edit_text = if over_edit { cx.theme.bg_primary } else { cx.theme.accent };
-                            ui.painter().rect(edit_btn_rect, 4.0, edit_bg, egui::Stroke::new(1.0, cx.theme.accent));
+                            let btn_bg = if over_btn { cx.theme.accent } else { cx.theme.bg_elevated };
+                            let btn_text = if over_btn { cx.theme.bg_primary } else { cx.theme.accent };
+                            ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, cx.theme.accent));
                             ui.painter().text(
-                                edit_btn_rect.center(),
+                                btn_rect.center(),
                                 egui::Align2::CENTER_CENTER,
-                                cx.language.t("edit_file"),
+                                cx.language.t("connect"),
                                 egui::FontId::proportional(11.0),
-                                edit_text,
+                                btn_text,
                             );
                         }
-                        if resp.double_clicked() {
-                            connect_ssh_host_idx = Some(i);
-                        } else if resp.clicked() {
+                        if resp.clicked() {
                             let click_pos = ui.ctx().input(|i| i.pointer.interact_pos());
-                            if click_pos.map_or(false, |p| edit_btn_rect.contains(p)) {
+                            if click_pos.map_or(false, |p| btn_rect.contains(p)) {
+                                connect_ssh_host_idx = Some(i);
+                            } else {
                                 edit_host_index = Some(i);
                             }
                         }
@@ -541,30 +541,30 @@ pub fn render_hosts_view(
                             }
 
                             let visible_right = ui.clip_rect().max.x;
-                            let edit_btn_rect = egui::Rect::from_center_size(
+                            let btn_rect = egui::Rect::from_center_size(
                                 egui::pos2(visible_right - 40.0, rect.min.y + 26.0),
                                 egui::vec2(56.0, 22.0),
                             );
                             if hovered {
                                 let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
-                                let over_edit = pointer_pos.map_or(false, |p| edit_btn_rect.contains(p));
+                                let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
 
-                                let edit_bg = if over_edit { cx.theme.accent } else { cx.theme.bg_elevated };
-                                let edit_text = if over_edit { cx.theme.bg_primary } else { cx.theme.accent };
-                                ui.painter().rect(edit_btn_rect, 4.0, edit_bg, egui::Stroke::new(1.0, cx.theme.accent));
+                                let btn_bg = if over_btn { cx.theme.accent } else { cx.theme.bg_elevated };
+                                let btn_text = if over_btn { cx.theme.bg_primary } else { cx.theme.accent };
+                                ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, cx.theme.accent));
                                 ui.painter().text(
-                                    edit_btn_rect.center(),
+                                    btn_rect.center(),
                                     egui::Align2::CENTER_CENTER,
-                                    cx.language.t("edit_file"),
+                                    cx.language.t("connect"),
                                     egui::FontId::proportional(11.0),
-                                    edit_text,
+                                    btn_text,
                                 );
                             }
-                            if resp.double_clicked() {
-                                connect_ssh_host_idx = Some(i);
-                            } else if resp.clicked() {
+                            if resp.clicked() {
                                 let click_pos = ui.ctx().input(|i| i.pointer.interact_pos());
-                                if click_pos.map_or(false, |p| edit_btn_rect.contains(p)) {
+                                if click_pos.map_or(false, |p| btn_rect.contains(p)) {
+                                    connect_ssh_host_idx = Some(i);
+                                } else {
                                     edit_host_index = Some(i);
                                 }
                             }
@@ -900,6 +900,127 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                             cx.language.t("key_passphrase_hint"), cx.theme);
                                     }
                                 }
+                            }
+
+                            widgets::form_separator(ui);
+
+                            // Port Forwards section
+                            ui.label(egui::RichText::new(cx.language.t("port_forwards"))
+                                .color(cx.theme.fg_primary)
+                                .size(widgets::FONT_SIZE_TITLE)
+                                .strong());
+                            ui.add_space(widgets::SPACING_FIELD);
+
+                            // Existing port forwards list
+                            let mut remove_forward_idx = None;
+                            for (fi, fwd) in window.add_host_dialog.port_forwards.iter().enumerate() {
+                                let kind_label = match fwd.kind {
+                                    crate::config::ForwardKind::Local => "-L",
+                                    crate::config::ForwardKind::Remote => "-R",
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(kind_label)
+                                        .size(widgets::FONT_SIZE_INPUT).color(cx.theme.accent));
+                                    ui.add_space(SPACE_SM);
+                                    ui.label(egui::RichText::new(format!(
+                                        "{}:{} → {}:{}",
+                                        fwd.local_host, fwd.local_port,
+                                        fwd.remote_host, fwd.remote_port
+                                    )).size(widgets::FONT_SIZE_INPUT).color(cx.theme.fg_primary));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui.add(
+                                            egui::Button::new(egui::RichText::new("×").size(14.0).color(cx.theme.fg_dim))
+                                                .frame(false)
+                                        ).clicked() {
+                                            remove_forward_idx = Some(fi);
+                                        }
+                                    });
+                                });
+                                ui.add_space(4.0);
+                            }
+                            if let Some(idx) = remove_forward_idx {
+                                window.add_host_dialog.port_forwards.remove(idx);
+                            }
+
+                            // Add forward inline form
+                            {
+                                let dlg = &mut window.add_host_dialog;
+                                // Forward type selector
+                                ui.horizontal(|ui| {
+                                    let local_sel = matches!(dlg.new_forward_kind, crate::config::ForwardKind::Local);
+                                    let local_color = if local_sel { cx.theme.accent } else { cx.theme.fg_dim };
+                                    let local_bg = if local_sel { cx.theme.accent_alpha(15) } else { egui::Color32::TRANSPARENT };
+                                    let btn = egui::Button::new(
+                                        egui::RichText::new(cx.language.t("local_forward")).size(12.0).color(local_color)
+                                    )
+                                    .fill(local_bg)
+                                    .rounding(4.0)
+                                    .stroke(egui::Stroke::new(1.0, if local_sel { cx.theme.accent } else { egui::Color32::TRANSPARENT }));
+                                    if ui.add(btn).clicked() {
+                                        dlg.new_forward_kind = crate::config::ForwardKind::Local;
+                                    }
+                                    ui.add_space(4.0);
+                                    let remote_sel = !local_sel;
+                                    let remote_color = if remote_sel { cx.theme.accent } else { cx.theme.fg_dim };
+                                    let remote_bg = if remote_sel { cx.theme.accent_alpha(15) } else { egui::Color32::TRANSPARENT };
+                                    let btn = egui::Button::new(
+                                        egui::RichText::new(cx.language.t("remote_forward")).size(12.0).color(remote_color)
+                                    )
+                                    .fill(remote_bg)
+                                    .rounding(4.0)
+                                    .stroke(egui::Stroke::new(1.0, if remote_sel { cx.theme.accent } else { egui::Color32::TRANSPARENT }));
+                                    if ui.add(btn).clicked() {
+                                        dlg.new_forward_kind = crate::config::ForwardKind::Remote;
+                                    }
+                                });
+                                ui.add_space(widgets::SPACING_FIELD);
+
+                                // Local host + port
+                                widgets::form_field_2col(
+                                    ui,
+                                    cx.language.t("forward_local_host"), true,
+                                    &mut dlg.new_forward_local_host,
+                                    "127.0.0.1", 170.0,
+                                    cx.language.t("forward_local_port"), true,
+                                    &mut dlg.new_forward_local_port,
+                                    "8080", 80.0,
+                                    cx.theme
+                                );
+                                ui.add_space(widgets::SPACING_FIELD);
+
+                                // Remote host + port
+                                widgets::form_field_2col(
+                                    ui,
+                                    cx.language.t("forward_remote_host"), true,
+                                    &mut dlg.new_forward_remote_host,
+                                    "localhost", 170.0,
+                                    cx.language.t("forward_remote_port"), true,
+                                    &mut dlg.new_forward_remote_port,
+                                    "3306", 80.0,
+                                    cx.theme
+                                );
+                                ui.add_space(widgets::SPACING_FIELD);
+
+                                // Add button
+                                let can_add = !dlg.new_forward_local_port.trim().is_empty()
+                                    && !dlg.new_forward_remote_port.trim().is_empty();
+                                ui.horizontal(|ui| {
+                                    if ui.add_enabled(can_add, widgets::primary_button(cx.language.t("add_forward"), cx.theme)).clicked() {
+                                        let lp = dlg.new_forward_local_port.trim().parse::<u16>();
+                                        let rp = dlg.new_forward_remote_port.trim().parse::<u16>();
+                                        if let (Ok(local_port), Ok(remote_port)) = (lp, rp) {
+                                            dlg.port_forwards.push(crate::config::PortForwardConfig {
+                                                kind: dlg.new_forward_kind.clone(),
+                                                local_host: dlg.new_forward_local_host.trim().to_string(),
+                                                local_port,
+                                                remote_host: dlg.new_forward_remote_host.trim().to_string(),
+                                                remote_port,
+                                            });
+                                            dlg.new_forward_local_port.clear();
+                                            dlg.new_forward_remote_port.clear();
+                                        }
+                                    }
+                                });
                             }
 
                             // Error message

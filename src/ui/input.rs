@@ -1,6 +1,7 @@
 use eframe::egui;
 use crate::config::{KeyBinding, ShortcutAction};
 
+#[derive(Clone)]
 pub struct ShortcutResolver {
     bindings: Vec<KeyBinding>,
 }
