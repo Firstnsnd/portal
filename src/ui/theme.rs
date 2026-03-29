@@ -22,6 +22,8 @@ pub struct ThemeColors {
     pub card_hover: egui::Color32,      // List item hover
     pub input_bg: egui::Color32,        // Text input background
     pub input_border: egui::Color32,    // Text input border
+    #[allow(dead_code)]
+    #[allow(dead_code)]
     pub button_bg: egui::Color32,       // Button background
     pub badge_bg: egui::Color32,        // Tag / badge background
     pub menu_bg: egui::Color32,         // Dropdown menu / popup background

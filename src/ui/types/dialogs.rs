@@ -273,9 +273,11 @@ pub enum CredentialTypeChoice {
 }
 
 /// Credential create/edit dialog state
+#[derive(Clone)]
 pub struct CredentialDialog {
     pub open: bool,
     pub edit_id: Option<String>,
+    pub confirm_delete: Option<String>,
     pub name: String,
     pub cred_type: CredentialTypeChoice,
     pub username: String,
@@ -292,6 +294,7 @@ impl Default for CredentialDialog {
         Self {
             open: false,
             edit_id: None,
+            confirm_delete: None,
             name: String::new(),
             cred_type: CredentialTypeChoice::Password,
             username: String::new(),
@@ -352,6 +355,8 @@ pub struct AddTunnelDialog {
     pub open: bool,
     /// Index of the selected host (in app.hosts) to add tunnel to
     pub selected_host_idx: Option<usize>,
+    /// Editing mode: (host_idx, tunnel_idx)
+    pub edit_index: Option<(usize, usize)>,
     pub forward_kind: crate::config::ForwardKind,
     pub local_host: String,
     pub local_port: String,
@@ -367,6 +372,7 @@ impl Default for AddTunnelDialog {
         Self {
             open: false,
             selected_host_idx: None,
+            edit_index: None,
             forward_kind: crate::config::ForwardKind::Local,
             local_host: "127.0.0.1".to_owned(),
             local_port: String::new(),
@@ -383,21 +389,28 @@ impl AddTunnelDialog {
         *self = Self::default();
     }
 
-    /// Open the drawer
+    /// Open the drawer for new tunnel
     pub fn open_drawer(&mut self) {
         self.open = true;
+    }
+
+    /// Open the drawer for editing an existing tunnel
+    pub fn open_edit(&mut self, host_idx: usize, tunnel_idx: usize, tunnel: &crate::config::PortForwardConfig) {
+        self.open = true;
+        self.edit_index = Some((host_idx, tunnel_idx));
+        self.selected_host_idx = Some(host_idx);
+        self.forward_kind = tunnel.kind.clone();
+        self.local_host = tunnel.local_host.clone();
+        self.local_port = tunnel.local_port.to_string();
+        self.remote_host = tunnel.remote_host.clone();
+        self.remote_port = tunnel.remote_port.to_string();
+        self.error.clear();
     }
 
     /// Close the drawer
     pub fn close_drawer(&mut self) {
         self.open = false;
     }
-}
-
-/// Pending keychain credential deletion (awaiting user confirmation).
-pub enum KeychainDeleteRequest {
-    /// Delete a credential by id, with list of affected host names
-    ById { credential_id: String, affected_hosts: Vec<String> },
 }
 
 /// Snippet view state for Command Snippets feature
@@ -418,9 +431,6 @@ pub struct SnippetViewState {
     pub new_command: String,
     pub new_group: String,
     pub confirm_delete: Option<String>,  // id of snippet pending delete confirmation
-    // Quick selector state for running snippets from terminal view
-    pub quick_selector_open: bool,  // Whether quick snippet selector is open (from terminal)
-    pub selected_snippet_index: Option<usize>,  // Currently selected snippet index in quick selector
     // Session selector state for running snippets (deprecated, kept for compatibility)
     #[allow(dead_code)]
     pub pending_run_command: Option<String>,  // Command waiting to be executed
@@ -472,8 +482,6 @@ impl Default for SnippetViewState {
             new_command: String::new(),
             new_group: String::new(),
             confirm_delete: None,
-            quick_selector_open: false,
-            selected_snippet_index: None,
             pending_run_command: None,
             selector_open: false,
             selected_tab: None,

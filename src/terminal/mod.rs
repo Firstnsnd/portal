@@ -5,6 +5,7 @@ mod types;
 mod grid;
 mod vte;
 mod session;
+pub mod url;
 
 #[cfg(unix)]
 mod unix_pty;

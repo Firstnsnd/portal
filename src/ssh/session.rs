@@ -27,7 +27,9 @@ enum SshCommand {
     Write(Vec<u8>),
     Resize { cols: u32, rows: u32 },
     Disconnect,
+    #[allow(dead_code)]
     StartPortForward(PortForwardConfig),
+    #[allow(dead_code)]
     StopPortForward(PortForwardConfig),
 }
 
@@ -302,6 +304,7 @@ pub struct SshSession {
     /// Remote shell path detected via exec channel (e.g. "/bin/zsh")
     pub shell_hint: Arc<Mutex<Option<String>>>,
     /// Active port forwards managed by this session
+    #[allow(dead_code)]
     pub port_forwards: Arc<Mutex<Vec<PortForward>>>,
 }
 
@@ -741,16 +744,19 @@ impl SshSession {
     }
 
     /// Start a port forward on this session (sent as a command to the async task)
+    #[allow(dead_code)]
     pub fn start_port_forward(&self, config: PortForwardConfig) {
         let _ = self.cmd_tx.send(SshCommand::StartPortForward(config));
     }
 
     /// Stop a port forward by index
+    #[allow(dead_code)]
     pub fn stop_port_forward(&self, config: PortForwardConfig) {
         let _ = self.cmd_tx.send(SshCommand::StopPortForward(config));
     }
 
     /// Get the current list of port forward states
+    #[allow(dead_code)]
     pub fn get_port_forward_states(&self) -> Vec<(PortForwardConfig, ForwardState)> {
         self.port_forwards.lock().ok().map(|fwds| {
             fwds.iter().map(|pf| (pf.config.clone(), pf.current_state())).collect()

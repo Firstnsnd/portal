@@ -841,7 +841,7 @@ pub fn default_shortcuts() -> Vec<KeyBinding> {
         KeyBinding { action: ShortcutAction::SplitVertical, key: "D".into(), ctrl: false, alt: false, shift: true, command: true },
         KeyBinding { action: ShortcutAction::NewTab, key: "T".into(), ctrl: false, alt: false, shift: false, command: true },
         KeyBinding { action: ShortcutAction::CloseTab, key: "W".into(), ctrl: false, alt: false, shift: false, command: true },
-        KeyBinding { action: ShortcutAction::ClosePane, key: "W".into(), ctrl: false, alt: false, shift: true, command: true },
+        KeyBinding { action: ShortcutAction::ClosePane, key: "P".into(), ctrl: false, alt: false, shift: true, command: true },
         KeyBinding { action: ShortcutAction::NextTab, key: "RightBracket".into(), ctrl: false, alt: false, shift: true, command: true },
         KeyBinding { action: ShortcutAction::PrevTab, key: "LeftBracket".into(), ctrl: false, alt: false, shift: true, command: true },
         KeyBinding { action: ShortcutAction::ToggleBroadcast, key: "I".into(), ctrl: false, alt: false, shift: true, command: true },
