@@ -10,7 +10,7 @@ use eframe::egui;
 
 use crate::config;
 use crate::config::ShortcutAction;
-use crate::ssh::SshConnectionState;
+use crate::ssh::{SshConnectionState, NotificationLevel};
 use crate::ui::*;
 use crate::ui::views::tab_view::{TabBarAction, render_tab_bar};
 use crate::ui::types::dialogs::AppView;
@@ -165,6 +165,133 @@ impl PortalApp {
             ctx, current_view, &self.theme, &self.language, nav_id
         ) {
             self.windows[window_idx].current_view = clicked_view;
+        }
+
+        // ── Poll session notifications ──
+        {
+            let window = &mut self.windows[window_idx];
+            for tab in &window.tabs {
+                for session in &tab.sessions {
+                    if let Some(ref backend) = session.session {
+                        let new_notifications = backend.drain_notifications();
+                        window.notifications.extend(new_notifications);
+                    }
+                }
+            }
+        }
+
+        // ── Toast notifications (shadcn/ui style, top-right) ──
+        {
+            let window = &mut self.windows[window_idx];
+            window.notifications.retain(|n| !n.is_expired(5));
+
+            if !window.notifications.is_empty() {
+                let area_id = if is_detached {
+                    egui::Id::new("detached_toasts").with(window_idx)
+                } else {
+                    egui::Id::new("app_toasts")
+                };
+
+                let notifications_count = window.notifications.len();
+                let theme = &self.theme;
+
+                egui::Area::new(area_id)
+                    .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-16.0, 16.0))
+                    .order(egui::Order::Foreground)
+                    .interactable(true)
+                    .show(ctx, |ui| {
+                        ui.set_width(380.0);
+                        ui.vertical(|ui| {
+                            ui.add_space(0.0);
+                            let mut to_remove = Vec::new();
+                            for (i, notification) in window.notifications.iter().enumerate() {
+                                // shadcn/ui toast: bg_elevated, thin border, subtle shadow, rounded
+                                let (icon, icon_color, border_tint) = match notification.level {
+                                    NotificationLevel::Info => {
+                                        ("\u{2139}", theme.accent, theme.accent)
+                                    }
+                                    NotificationLevel::Warning => {
+                                        ("\u{26A0}", egui::Color32::from_rgb(234, 179, 8), egui::Color32::from_rgb(234, 179, 8))
+                                    }
+                                    NotificationLevel::Error => {
+                                        ("\u{274C}", theme.red, theme.red)
+                                    }
+                                };
+
+                                let border_color = egui::Color32::from_rgba_unmultiplied(
+                                    border_tint.r(), border_tint.g(), border_tint.b(), 60,
+                                );
+
+                                let frame = egui::Frame {
+                                    fill: theme.bg_elevated,
+                                    rounding: egui::Rounding::same(8.0),
+                                    inner_margin: egui::Margin::same(14.0),
+                                    stroke: egui::Stroke::new(1.0, border_color),
+                                    shadow: egui::epaint::Shadow {
+                                        offset: egui::vec2(0.0, 4.0),
+                                        blur: 12.0,
+                                        spread: 0.0,
+                                        color: egui::Color32::from_black_alpha(40),
+                                    },
+                                    ..Default::default()
+                                };
+
+                                frame.show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        // Icon
+                                        ui.label(
+                                            egui::RichText::new(icon)
+                                                .size(15.0)
+                                                .color(icon_color),
+                                        );
+                                        ui.add_space(6.0);
+
+                                        // Message
+                                        ui.with_layout(
+                                            egui::Layout::left_to_right(egui::Align::Center)
+                                                .with_main_wrap(true),
+                                            |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(&notification.message)
+                                                        .size(13.0)
+                                                        .color(theme.fg_primary),
+                                                );
+                                            },
+                                        );
+
+                                        // Close button (shadcn: ghost button, rounded)
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                let close_resp = ui.add(
+                                                    egui::Button::new(
+                                                        egui::RichText::new("\u{00D7}")
+                                                            .size(16.0)
+                                                            .color(theme.fg_dim),
+                                                    )
+                                                    .frame(false)
+                                                    .rounding(egui::Rounding::same(4.0)),
+                                                );
+                                                if close_resp.clicked() {
+                                                    to_remove.push(i);
+                                                }
+                                                close_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+                                            },
+                                        );
+                                    });
+                                });
+
+                                // Gap between toasts
+                                if i < notifications_count - 1 {
+                                    ui.add_space(8.0);
+                                }
+                            }
+                            for i in to_remove.into_iter().rev() {
+                                window.notifications.remove(i);
+                            }
+                        });
+                    });
+            }
         }
 
         // ── Tab Bar (terminal view only) ──

@@ -15,7 +15,58 @@ pub enum ForwardState {
     Starting,
     Active,
     Error(String),
+    /// Port is already in use by another session
+    Conflict(String),
     Stopped,
+}
+
+/// Notification severity level
+#[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
+pub enum NotificationLevel {
+    Info,
+    Warning,
+    Error,
+}
+
+/// A single app notification
+#[derive(Debug, Clone)]
+pub struct AppNotification {
+    pub message: String,
+    pub level: NotificationLevel,
+    pub created_at: std::time::Instant,
+}
+
+impl AppNotification {
+    #[allow(dead_code)]
+    pub fn info(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            level: NotificationLevel::Info,
+            created_at: std::time::Instant::now(),
+        }
+    }
+
+    pub fn warning(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            level: NotificationLevel::Warning,
+            created_at: std::time::Instant::now(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            level: NotificationLevel::Error,
+            created_at: std::time::Instant::now(),
+        }
+    }
+
+    pub fn is_expired(&self, timeout_secs: u64) -> bool {
+        self.created_at.elapsed().as_secs() >= timeout_secs
+    }
 }
 
 /// A live port forward with cancellation handle
@@ -63,14 +114,39 @@ pub async fn start_local_forward(
     config: PortForwardConfig,
     state: Arc<std::sync::Mutex<ForwardState>>,
     mut cancel_rx: watch::Receiver<bool>,
+    notifications: Arc<std::sync::Mutex<Vec<AppNotification>>>,
 ) {
     let bind_addr = format!("{}:{}", config.local_host, config.local_port);
     let listener = match TcpListener::bind(&bind_addr).await {
         Ok(l) => l,
         Err(e) => {
-            log::error!("Port forward: failed to bind {}: {}", bind_addr, e);
-            if let Ok(mut s) = state.lock() {
-                *s = ForwardState::Error(format!("Bind failed: {}", e));
+            let error_msg = e.to_string();
+            let is_addr_in_use = error_msg.contains("Address already in use")
+                || error_msg.contains("address in use")
+                || error_msg.contains("EADDRINUSE");
+
+            if is_addr_in_use {
+                log::warn!(
+                    "Port forward conflict: {}:{} already in use, skipping",
+                    config.local_host, config.local_port
+                );
+                if let Ok(mut s) = state.lock() {
+                    *s = ForwardState::Conflict(format!(
+                        "Port {}:{} already in use",
+                        config.local_host, config.local_port
+                    ));
+                }
+                if let Ok(mut ns) = notifications.lock() {
+                    ns.push(AppNotification::warning(format!(
+                        "Port {}:{} is already in use by another session, skipping forward",
+                        config.local_host, config.local_port
+                    )));
+                }
+            } else {
+                log::error!("Port forward: failed to bind {}: {}", bind_addr, e);
+                if let Ok(mut s) = state.lock() {
+                    *s = ForwardState::Error(format!("Bind failed: {}", e));
+                }
             }
             return;
         }

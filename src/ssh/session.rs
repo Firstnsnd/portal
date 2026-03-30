@@ -19,7 +19,7 @@ pub struct JumpHostInfo {
 }
 use super::port_forward::{
     PortForwardConfig, PortForward, ForwardKind, ForwardState,
-    start_local_forward,
+    start_local_forward, AppNotification,
 };
 
 /// Commands sent from the synchronous GUI thread to the async SSH task
@@ -306,6 +306,8 @@ pub struct SshSession {
     /// Active port forwards managed by this session
     #[allow(dead_code)]
     pub port_forwards: Arc<Mutex<Vec<PortForward>>>,
+    /// Notifications queue (drained by UI layer)
+    pub notifications: Arc<Mutex<Vec<AppNotification>>>,
 }
 
 impl SshSession {
@@ -364,19 +366,21 @@ impl SshSession {
         let alive = Arc::new(AtomicBool::new(true));
         let shell_hint = Arc::new(Mutex::new(None::<String>));
         let port_forwards = Arc::new(Mutex::new(Vec::<PortForward>::new()));
+        let notifications = Arc::new(Mutex::new(Vec::<AppNotification>::new()));
 
         let grid_clone = Arc::clone(&grid);
         let state_clone = Arc::clone(&state);
         let alive_clone = Arc::clone(&alive);
         let shell_hint_clone = Arc::clone(&shell_hint);
         let port_forwards_clone = Arc::clone(&port_forwards);
+        let notifications_clone = Arc::clone(&notifications);
 
         runtime.spawn(async move {
             Self::ssh_task(
                 host, port, username, auth, cols, rows, grid_clone, cmd_rx,
                 state_clone, alive_clone, shell_hint_clone, startup_commands,
                 keepalive_interval, agent_forwarding, port_forward_configs,
-                port_forwards_clone, jump_host,
+                port_forwards_clone, notifications_clone, jump_host,
             )
             .await;
         });
@@ -387,6 +391,7 @@ impl SshSession {
             state,
             shell_hint,
             port_forwards,
+            notifications,
         }
     }
 
@@ -407,6 +412,7 @@ impl SshSession {
         agent_forwarding: bool,
         port_forward_configs: Vec<PortForwardConfig>,
         port_forwards: Arc<Mutex<Vec<PortForward>>>,
+        notifications: Arc<Mutex<Vec<AppNotification>>>,
         jump_host: Option<JumpHostInfo>,
     ) {
         let set_state = |s: SshConnectionState| {
@@ -571,6 +577,7 @@ impl SshSession {
                 Arc::clone(&handle),
                 cfg.clone(),
                 &port_forwards,
+                &notifications,
             );
         }
 
@@ -631,6 +638,7 @@ impl SshSession {
                                     Arc::clone(&handle),
                                     cfg,
                                     &port_forwards,
+                                    &notifications,
                                 );
                             } else {
                                 log::warn!("Dynamic remote forward not supported after connection (requires &mut Handle)");
@@ -698,6 +706,7 @@ impl SshSession {
         handle: Arc<russh::client::Handle<SshClient>>,
         cfg: PortForwardConfig,
         port_forwards: &Arc<Mutex<Vec<PortForward>>>,
+        notifications: &Arc<Mutex<Vec<AppNotification>>>,
     ) {
         let (pf, cancel_rx) = PortForward::new(cfg.clone());
         let fwd_state = Arc::clone(&pf.state);
@@ -706,8 +715,9 @@ impl SshSession {
             fwds.push(pf);
         }
 
+        let notifications = Arc::clone(notifications);
         tokio::spawn(async move {
-            start_local_forward(handle, cfg, fwd_state, cancel_rx).await;
+            start_local_forward(handle, cfg, fwd_state, cancel_rx, notifications).await;
         });
     }
 
@@ -761,6 +771,13 @@ impl SshSession {
         self.port_forwards.lock().ok().map(|fwds| {
             fwds.iter().map(|pf| (pf.config.clone(), pf.current_state())).collect()
         }).unwrap_or_default()
+    }
+
+    /// Drain pending notifications from the session
+    pub fn drain_notifications(&self) -> Vec<AppNotification> {
+        self.notifications.lock()
+            .map(|mut ns| std::mem::take(&mut *ns))
+            .unwrap_or_default()
     }
 }
 

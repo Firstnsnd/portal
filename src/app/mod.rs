@@ -137,6 +137,7 @@ impl PortalApp {
             host_filter: crate::ui::types::dialogs::HostFilter::default(),
             confirm_delete_host: None,
             add_tunnel_dialog: crate::ui::types::dialogs::AddTunnelDialog::default(),
+            notifications: Vec::new(),
         };
 
         let connection_history = crate::config::load_history();

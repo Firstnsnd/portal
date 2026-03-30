@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::config::{HostEntry, ResolvedAuth};
-use crate::ssh::{SshSession, SshConnectionState, JumpHostInfo};
+use crate::ssh::{SshSession, SshConnectionState, JumpHostInfo, AppNotification};
 use crate::terminal::{TerminalGrid, RealPtySession};
 
 /// Unified session backend: local PTY or SSH
@@ -48,6 +48,14 @@ impl SessionBackend {
         match self {
             SessionBackend::Local(s) => s.get_shell_name(),
             SessionBackend::Ssh(_) => None,
+        }
+    }
+
+    /// Drain pending notifications from the session backend
+    pub fn drain_notifications(&self) -> Vec<AppNotification> {
+        match self {
+            SessionBackend::Local(_) => Vec::new(),
+            SessionBackend::Ssh(ssh) => ssh.drain_notifications(),
         }
     }
 }

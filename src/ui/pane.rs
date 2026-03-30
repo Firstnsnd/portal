@@ -351,6 +351,7 @@ pub struct AppWindow {
     pub host_filter: HostFilter,
     pub confirm_delete_host: Option<usize>,
     pub add_tunnel_dialog: AddTunnelDialog,
+    pub notifications: Vec<crate::ssh::AppNotification>,
 }
 
 #[cfg(test)]
@@ -366,6 +367,7 @@ mod tests {
             focused_session: 0,
             broadcast_enabled: false,
             snippet_drawer_open: false,
+            pending_snippet: None,
         }
     }
 
