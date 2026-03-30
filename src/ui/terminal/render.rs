@@ -1152,9 +1152,14 @@ pub fn render_terminal_session(
         }
 
         // ── Cursor ───────────────────────────────────────────────────────────
-        let ssh_not_connected = matches!(&session.session, Some(SessionBackend::Ssh(ssh))
-            if !matches!(ssh.connection_state(), SshConnectionState::Connected));
-        if !ssh_not_connected && offset == 0
+        let session_disconnected = match &session.session {
+            Some(SessionBackend::Ssh(ssh)) => {
+                !matches!(ssh.connection_state(), SshConnectionState::Connected)
+            }
+            Some(SessionBackend::Local(local)) => !local.is_connected(),
+            None => true,
+        };
+        if !session_disconnected && offset == 0
             && grid.cursor_visible
             && grid.cursor_col < grid.cols
             && grid.cursor_row < grid.rows
@@ -1353,6 +1358,22 @@ pub fn render_terminal_session(
                     );
                 }
                 SshConnectionState::Connected => {}
+            }
+        }
+
+        // ── Local session disconnected overlay ──────────────────────────────
+        if let Some(SessionBackend::Local(local)) = &session.session {
+            if !local.is_connected() {
+                let galley = ui.fonts(|f| f.layout_no_wrap(
+                    language.t("session_ended").to_string(),
+                    egui::FontId::monospace(11.0),
+                    theme.red,
+                ));
+                painter.galley(
+                    egui::pos2(rect.min.x + 4.0, rect.max.y - galley.rect.height() - 4.0),
+                    galley,
+                    egui::Color32::TRANSPARENT,
+                );
             }
         }
     } // end grid.lock()

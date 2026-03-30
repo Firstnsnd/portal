@@ -202,6 +202,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "n_items" => format!("{}개 항목", arg),
         "ssh_error" => format!("SSH 오류: {}", arg),
         "disconnected" => format!("[연결 끊김: {}]", arg),
+        "session_ended" => "[세션 종료됨]".to_string(),
         "lines_above" => format!(" ↑ {} 줄 위 ", arg),
         "uploading" => format!("업로드 중 {}", arg),
         "downloading" => format!("다운로드 중 {}", arg),

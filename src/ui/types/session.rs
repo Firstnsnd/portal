@@ -39,7 +39,7 @@ impl SessionBackend {
 
     pub fn is_connected(&self) -> bool {
         match self {
-            SessionBackend::Local(_) => true,
+            SessionBackend::Local(s) => s.is_connected(),
             SessionBackend::Ssh(s) => matches!(s.connection_state(), SshConnectionState::Connected),
         }
     }

@@ -135,6 +135,7 @@ impl RealPtySession {
                             }
                         }
                         Err(_) => {
+                            alive_clone.store(false, Ordering::Relaxed);
                             break;
                         }
                     }
@@ -211,6 +212,14 @@ impl RealPtySession {
             return pty_ref.is_alive();
         }
         false
+    }
+
+    /// Check if the session is still connected (reader thread alive + PTY alive)
+    pub fn is_connected(&self) -> bool {
+        if !self.alive.load(Ordering::Relaxed) {
+            return false;
+        }
+        self.is_alive()
     }
 
     /// Get the shell name (cached for 5 seconds)
