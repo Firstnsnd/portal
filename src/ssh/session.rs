@@ -587,6 +587,17 @@ impl SshSession {
 
         loop {
             tokio::select! {
+                // Periodic health check: if no activity for 30s, the keepalive
+                // should have caught a dead connection. If we still haven't
+                // received anything, the transport is likely stuck.
+                _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
+                    // Keepalive handles transport liveness. This branch just
+                    // ensures the select! doesn't block indefinitely if both
+                    // channel.wait() and cmd_rx are idle.
+                    if !alive.load(Ordering::Relaxed) {
+                        break;
+                    }
+                }
                 msg = channel.wait() => {
                     match msg {
                         Some(russh::ChannelMsg::Data { data }) => {
@@ -622,10 +633,20 @@ impl SshSession {
                 cmd = cmd_rx.recv() => {
                     match cmd {
                         Some(SshCommand::Write(data)) => {
-                            let _ = channel.data(&data[..]).await;
+                            if let Err(e) = channel.data(&data[..]).await {
+                                log::warn!("SSH write failed, connection lost: {}", e);
+                                set_state(SshConnectionState::Disconnected("Write failed".into()));
+                                alive.store(false, Ordering::Relaxed);
+                                break;
+                            }
                         }
                         Some(SshCommand::Resize { cols, rows }) => {
-                            let _ = channel.window_change(cols, rows, 0, 0).await;
+                            if let Err(e) = channel.window_change(cols, rows, 0, 0).await {
+                                log::warn!("SSH resize failed, connection lost: {}", e);
+                                set_state(SshConnectionState::Disconnected("Resize failed".into()));
+                                alive.store(false, Ordering::Relaxed);
+                                break;
+                            }
                             if let Ok(mut g) = grid.lock() {
                                 g.resize(cols as usize, rows as usize);
                             }
