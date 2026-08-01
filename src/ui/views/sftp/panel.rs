@@ -10,6 +10,26 @@ use crate::ui::i18n::Language;
 use crate::ui::views::sftp::{DragEntry, DragPayload, SelectionAction, MoveToDirRequest};
 use crate::ui::views::sftp::format::{format_file_size, format_permissions};
 
+/// Maximum characters shown for a single breadcrumb segment before it is
+/// middle-truncated. Keeps long segments (e.g. UUIDs) from blowing out the
+/// panel width; the full segment is revealed on hover.
+const MAX_SEGMENT_CHARS: usize = 20;
+
+/// Truncate a path segment with a middle ellipsis, preserving head + tail so
+/// the segment stays identifiable. Yields "1f27397b-…-945a55" rather than a
+/// left-only "1f27397b…", which would hide the discriminating suffix.
+fn truncate_segment(s: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max_chars {
+        return s.to_string();
+    }
+    let head = (max_chars * 2 / 5).max(1);
+    let tail = max_chars.saturating_sub(head + 1).max(1);
+    let head_s: String = chars[..head].iter().collect();
+    let tail_s: String = chars[chars.len() - tail..].iter().collect();
+    format!("{head_s}…{tail_s}")
+}
+
 /// Render breadcrumb path navigation. Each path segment is a clickable button.
 pub fn render_breadcrumbs(
     ui: &mut egui::Ui,
@@ -33,16 +53,27 @@ pub fn render_breadcrumbs(
         ui.add_space(0.0);
 
         let is_last = i == parts.len() - 1;
-        let text = egui::RichText::new(*part)
+        let was_truncated = part.chars().count() > MAX_SEGMENT_CHARS;
+        let display = truncate_segment(part, MAX_SEGMENT_CHARS);
+        let text = egui::RichText::new(&display)
             .color(if is_last { theme.fg_primary } else { theme.accent })
             .size(12.0)
             .family(egui::FontFamily::Monospace);
 
         if is_last {
-            ui.label(text);
-        } else if ui.add(egui::Button::new(text).frame(false)).clicked() {
-            let target: String = format!("/{}", parts[..=i].join("/"));
-            *navigate_to = Some(target);
+            let resp = ui.label(text);
+            if was_truncated {
+                resp.on_hover_text(*part);
+            }
+        } else {
+            let mut btn = ui.add(egui::Button::new(text).frame(false));
+            if was_truncated {
+                btn = btn.on_hover_text(*part);
+            }
+            if btn.clicked() {
+                let target: String = format!("/{}", parts[..=i].join("/"));
+                *navigate_to = Some(target);
+            }
         }
     }
 }
