@@ -222,6 +222,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "n_items" => format!("{} items", arg),
         "ssh_error" => format!("SSH Error: {}", arg),
         "disconnected" => format!("[Disconnected: {}]", arg),
+        "session_ended" => "[Session ended]".to_string(),
         "lines_above" => format!(" ↑ {} lines above ", arg),
         "uploading" => format!("Uploading {}", arg),
         "downloading" => format!("Downloading {}", arg),

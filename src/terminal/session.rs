@@ -135,6 +135,7 @@ impl RealPtySession {
                             }
                         }
                         Err(_) => {
+                            alive_clone.store(false, Ordering::Relaxed);
                             break;
                         }
                     }
@@ -213,6 +214,14 @@ impl RealPtySession {
         false
     }
 
+    /// Check if the session is still connected (reader thread alive + PTY alive)
+    pub fn is_connected(&self) -> bool {
+        if !self.alive.load(Ordering::Relaxed) {
+            return false;
+        }
+        self.is_alive()
+    }
+
     /// Get the shell name (cached for 5 seconds)
     pub fn get_shell_name(&self) -> Option<String> {
         // Check cache first (5 second TTL)
@@ -268,5 +277,91 @@ impl Drop for RealPtySession {
             let mut pty_ref = pty.lock().unwrap();
             let _ = pty_ref.kill();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    /// Verify that is_connected() returns false when the alive flag is false.
+    /// This simulates what happens when the reader thread encounters a read error
+    /// and sets alive to false before exiting.
+    #[test]
+    fn test_is_connected_false_when_reader_thread_dies() {
+        // Simulate: alive = false (reader thread exited on error), no PTY
+        let grid = Arc::new(Mutex::new(
+            TerminalGrid::with_scrollback_limit(80, 24, 1024 * 1024)
+        ));
+        let session = RealPtySession {
+            #[cfg(unix)]
+            pty: None,
+            #[cfg(windows)]
+            pty: None,
+            #[cfg(unix)]
+            writer: None,
+            grid,
+            alive: Arc::new(AtomicBool::new(false)), // Reader thread died
+            _reader_thread: None,
+            cached_shell_name: Arc::new(Mutex::new(None)),
+            last_shell_check: Arc::new(Mutex::new(Instant::now())),
+        };
+
+        assert!(!session.is_connected(), "is_connected() must return false when alive flag is false");
+    }
+
+    /// Verify that is_connected() returns false when alive is true but PTY is None.
+    /// This covers the case where the session was constructed without a valid PTY.
+    #[test]
+    fn test_is_connected_false_when_no_pty() {
+        let grid = Arc::new(Mutex::new(
+            TerminalGrid::with_scrollback_limit(80, 24, 1024 * 1024)
+        ));
+        let session = RealPtySession {
+            #[cfg(unix)]
+            pty: None,
+            #[cfg(windows)]
+            pty: None,
+            #[cfg(unix)]
+            writer: None,
+            grid,
+            alive: Arc::new(AtomicBool::new(true)),
+            _reader_thread: None,
+            cached_shell_name: Arc::new(Mutex::new(None)),
+            last_shell_check: Arc::new(Mutex::new(Instant::now())),
+        };
+
+        // alive=true but no PTY → is_alive() returns false → is_connected() returns false
+        assert!(!session.is_connected(), "is_connected() must return false when PTY is None");
+    }
+
+    /// Verify that Drop sets alive to false, ensuring is_connected() transitions correctly.
+    #[test]
+    fn test_drop_sets_alive_false() {
+        let alive = Arc::new(AtomicBool::new(true));
+        let grid = Arc::new(Mutex::new(
+            TerminalGrid::with_scrollback_limit(80, 24, 1024 * 1024)
+        ));
+
+        {
+            let _session = RealPtySession {
+                #[cfg(unix)]
+                pty: None,
+                #[cfg(windows)]
+                pty: None,
+                #[cfg(unix)]
+                writer: None,
+                grid: Arc::clone(&grid),
+                alive: Arc::clone(&alive),
+                _reader_thread: None,
+                cached_shell_name: Arc::new(Mutex::new(None)),
+                last_shell_check: Arc::new(Mutex::new(Instant::now())),
+            };
+            // session is alive while in scope
+            assert!(alive.load(Ordering::Relaxed));
+        }
+        // After drop, alive must be false
+        assert!(!alive.load(Ordering::Relaxed), "Drop must set alive to false");
     }
 }

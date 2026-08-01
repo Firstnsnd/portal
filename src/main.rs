@@ -221,6 +221,7 @@ impl eframe::App for PortalApp {
                         host_filter: HostFilter::default(),
                         confirm_delete_host: None,
                         add_tunnel_dialog: AddTunnelDialog::default(),
+                        notifications: Vec::new(),
                     });
                 }
             }

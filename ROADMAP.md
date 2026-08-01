@@ -27,9 +27,6 @@
 
 ## 📋 TODO
 
-### P0 — 最高优先级
-- [ ] 终端超链接检测 (URL/文件路径可点击)
-
 ### P1 — 高优先级
 - [ ] SSH Agent 转发
 - [ ] SSH Config 导入 (~/.ssh/config)
@@ -73,6 +70,7 @@
 - [x] **终端滚动缓冲区** (scrollback history) — 鼠标滚轮翻阅历史输出
 - [x] **CJK 宽字符渲染** — unicode-width 检测 + 双格占位 + CJK 字体回退
 - [x] **搜索终端输出内容** — 搜索栏 + 匹配高亮 + 上/下导航
+- [x] **终端超链接检测** — 自动识别 URL, hover 高亮下划线, 单击在浏览器打开
 
 ### 输入系统
 - [x] 直接键盘事件处理 (allocate_painter + Event::Key)

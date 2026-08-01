@@ -351,6 +351,7 @@ pub struct AppWindow {
     pub host_filter: HostFilter,
     pub confirm_delete_host: Option<usize>,
     pub add_tunnel_dialog: AddTunnelDialog,
+    pub notifications: Vec<crate::ssh::AppNotification>,
 }
 
 #[cfg(test)]
@@ -366,6 +367,7 @@ mod tests {
             focused_session: 0,
             broadcast_enabled: false,
             snippet_drawer_open: false,
+            pending_snippet: None,
         }
     }
 
@@ -455,5 +457,246 @@ mod tests {
         assert!(!tabs[2].snippet_drawer_open, "Tab 2 should now be closed");
         assert!(!tabs[3].snippet_drawer_open, "Tab 3 should be unaffected (was closed originally)");
         assert!(tabs[4].snippet_drawer_open, "Tab 4 should be unaffected");
+    }
+
+    // ── PaneNode lifecycle tests ──────────────────────────────────────────
+    //
+    // These tests verify the pane tree operations used when closing sessions
+    // and managing split layouts. Regressions here cause zombie panes,
+    // index corruption, and crash-on-close bugs.
+
+    /// remove(Terminal(N)) on a single terminal returns None.
+    #[test]
+    fn test_pane_node_remove_single_terminal() {
+        let node = PaneNode::Terminal(0);
+        let result = node.remove(0);
+        assert!(result.is_none(), "Removing the only terminal must return None");
+    }
+
+    /// remove(Terminal(N)) on a different terminal returns Some(Terminal(N)).
+    #[test]
+    fn test_pane_node_remove_wrong_terminal() {
+        let node = PaneNode::Terminal(5);
+        let result = node.remove(3);
+        assert!(matches!(result, Some(PaneNode::Terminal(5))),
+            "Removing a non-matching terminal must return the original node");
+    }
+
+    /// remove on a Split collapses to the surviving child.
+    #[test]
+    fn test_pane_node_remove_from_split_collapses() {
+        // Split(Terminal(0), Terminal(1))
+        let split = PaneNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneNode::Terminal(0)),
+            second: Box::new(PaneNode::Terminal(1)),
+        };
+
+        // Remove first child → collapses to second
+        let result = split.remove(0);
+        assert!(matches!(result, Some(PaneNode::Terminal(1))),
+            "Removing first child must collapse to second");
+
+        // Remove second child → collapses to first
+        let split = PaneNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneNode::Terminal(0)),
+            second: Box::new(PaneNode::Terminal(1)),
+        };
+        let result = split.remove(1);
+        assert!(matches!(result, Some(PaneNode::Terminal(0))),
+            "Removing second child must collapse to first");
+    }
+
+    /// remove on a deep tree removes the target and collapses correctly.
+    #[test]
+    fn test_pane_node_remove_deep_tree() {
+        //     Split
+        //    /     \
+        //  T(0)   Split
+        //         /    \
+        //       T(1)  T(2)
+        let tree = PaneNode::Split {
+            direction: SplitDirection::Vertical,
+            ratio: 0.5,
+            first: Box::new(PaneNode::Terminal(0)),
+            second: Box::new(PaneNode::Split {
+                direction: SplitDirection::Horizontal,
+                ratio: 0.5,
+                first: Box::new(PaneNode::Terminal(1)),
+                second: Box::new(PaneNode::Terminal(2)),
+            }),
+        };
+
+        // Remove T(1) → right side collapses to T(2)
+        let result = tree.remove(1);
+        assert!(result.is_some(), "remove(1) must return Some");
+        let tree = result.unwrap();
+        // Should be Split(T(0), T(2))
+        match &tree {
+            PaneNode::Split { first, second, .. } => {
+                assert!(matches!(**first, PaneNode::Terminal(0)), "first must be T(0)");
+                assert!(matches!(**second, PaneNode::Terminal(2)), "second must be T(2)");
+            }
+            _ => panic!("Expected Split, got Terminal"),
+        }
+    }
+
+    /// decrement_indices_above shifts indices > threshold down by 1.
+    #[test]
+    fn test_pane_node_decrement_indices_above() {
+        let mut tree = PaneNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneNode::Terminal(0)),
+            second: Box::new(PaneNode::Split {
+                direction: SplitDirection::Vertical,
+                ratio: 0.5,
+                first: Box::new(PaneNode::Terminal(2)),
+                second: Box::new(PaneNode::Terminal(4)),
+            }),
+        };
+
+        // After removing session at index 1, decrement indices > 1
+        tree.decrement_indices_above(1);
+
+        // Index 0 → unchanged, Index 2 → 1, Index 4 → 3
+        match &tree {
+            PaneNode::Split { first, second, .. } => {
+                assert!(matches!(**first, PaneNode::Terminal(0)), "Index 0 unchanged");
+                match &**second {
+                    PaneNode::Split { first, second, .. } => {
+                        assert!(matches!(**first, PaneNode::Terminal(1)), "Index 2 → 1");
+                        assert!(matches!(**second, PaneNode::Terminal(3)), "Index 4 → 3");
+                    }
+                    _ => panic!("Expected nested Split"),
+                }
+            }
+            _ => panic!("Expected Split"),
+        }
+    }
+
+    /// decrement_indices_above does not affect indices <= threshold.
+    #[test]
+    fn test_pane_node_decrement_preserves_lower_indices() {
+        let mut tree = PaneNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneNode::Terminal(0)),
+            second: Box::new(PaneNode::Terminal(1)),
+        };
+
+        tree.decrement_indices_above(5);
+
+        // No indices > 5, nothing changes
+        assert!(matches!(tree, PaneNode::Split { .. }));
+    }
+
+    /// replace(Terminal(N), new_node) correctly substitutes the target.
+    #[test]
+    fn test_pane_node_replace_target() {
+        let mut tree = PaneNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneNode::Terminal(0)),
+            second: Box::new(PaneNode::Terminal(1)),
+        };
+
+        let replaced = tree.replace(1, PaneNode::Terminal(99));
+        assert!(replaced, "replace must return true when target is found");
+
+        // Verify the replacement took effect
+        match &tree {
+            PaneNode::Split { first, second, .. } => {
+                assert!(matches!(**first, PaneNode::Terminal(0)));
+                assert!(matches!(**second, PaneNode::Terminal(99)));
+            }
+            _ => panic!("Expected Split"),
+        }
+    }
+
+    /// replace returns false when target is not in the tree.
+    #[test]
+    fn test_pane_node_replace_not_found() {
+        let mut tree = PaneNode::Terminal(0);
+        let replaced = tree.replace(99, PaneNode::Terminal(1));
+        assert!(!replaced, "replace must return false when target not found");
+    }
+
+    /// offset_indices adds offset to all terminal indices.
+    #[test]
+    fn test_pane_node_offset_indices() {
+        let mut tree = PaneNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneNode::Terminal(0)),
+            second: Box::new(PaneNode::Terminal(1)),
+        };
+
+        tree.offset_indices(5);
+
+        match &tree {
+            PaneNode::Split { first, second, .. } => {
+                assert!(matches!(**first, PaneNode::Terminal(5)));
+                assert!(matches!(**second, PaneNode::Terminal(6)));
+            }
+            _ => panic!("Expected Split"),
+        }
+    }
+
+    /// Full lifecycle: split, remove, decrement — simulates closing a pane.
+    #[test]
+    fn test_pane_lifecycle_close_focused_pane() {
+        // Start: Split(T(0), T(1)) — two panes, focused on T(1)
+        let mut tree = PaneNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneNode::Terminal(0)),
+            second: Box::new(PaneNode::Terminal(1)),
+        };
+
+        // Step 1: Remove T(1)
+        let new_tree = tree.remove(1);
+        assert!(matches!(new_tree, Some(PaneNode::Terminal(0))),
+            "After closing T(1), tree must collapse to T(0)");
+        tree = new_tree.unwrap();
+
+        // Step 2: decrement_indices_above(1) — no-op since tree has only T(0)
+        tree.decrement_indices_above(1);
+        assert!(matches!(tree, PaneNode::Terminal(0)));
+    }
+
+    /// Full lifecycle with 3 sessions: close middle, verify indices adjust.
+    #[test]
+    fn test_pane_lifecycle_close_middle_session() {
+        // Split(T(0), Split(T(1), T(2)))
+        let mut tree = PaneNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneNode::Terminal(0)),
+            second: Box::new(PaneNode::Split {
+                direction: SplitDirection::Vertical,
+                ratio: 0.5,
+                first: Box::new(PaneNode::Terminal(1)),
+                second: Box::new(PaneNode::Terminal(2)),
+            }),
+        };
+
+        // Close session 1 (middle)
+        let new_tree = tree.remove(1);
+        tree = new_tree.expect("remove must return Some for multi-node tree");
+        tree.decrement_indices_above(1);
+
+        // Expected: Split(T(0), T(1)) — T(2) shifted down to T(1)
+        match &tree {
+            PaneNode::Split { first, second, .. } => {
+                assert!(matches!(**first, PaneNode::Terminal(0)));
+                assert!(matches!(**second, PaneNode::Terminal(1)),
+                    "Index 2 must be decremented to 1 after removing session at index 1");
+            }
+            _ => panic!("Tree must remain a Split after closing one of 3 panes"),
+        }
     }
 }

@@ -222,6 +222,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "n_items" => format!("{} 个项目", arg),
         "ssh_error" => format!("SSH 错误: {}", arg),
         "disconnected" => format!("[已断开: {}]", arg),
+        "session_ended" => "[会话已结束]".to_string(),
         "lines_above" => format!(" ↑ {} 行在上方 ", arg),
         "uploading" => format!("正在上传 {}", arg),
         "downloading" => format!("正在下载 {}", arg),

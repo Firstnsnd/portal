@@ -202,6 +202,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "n_items" => format!("{} элементов", arg),
         "ssh_error" => format!("Ошибка SSH: {}", arg),
         "disconnected" => format!("[Отключено: {}]", arg),
+        "session_ended" => "[Сеанс завершён]".to_string(),
         "lines_above" => format!(" ↑ {} строк выше ", arg),
         "uploading" => format!("Загрузка {}", arg),
         "downloading" => format!("Скачивание {}", arg),
