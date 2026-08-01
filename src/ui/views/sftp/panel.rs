@@ -8,12 +8,19 @@ use crate::sftp::{FileSelection, SftpEntry, SftpEntryKind};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
 use crate::ui::views::sftp::{DragEntry, DragPayload, SelectionAction, MoveToDirRequest};
-use crate::ui::views::sftp::format::{format_file_size, format_permissions};
+use crate::ui::views::sftp::format::{format_file_size, format_modified, format_permissions};
 
 /// Maximum characters shown for a single breadcrumb segment before it is
 /// middle-truncated. Keeps long segments (e.g. UUIDs) from blowing out the
 /// panel width; the full segment is revealed on hover.
 const MAX_SEGMENT_CHARS: usize = 20;
+
+/// Horizontal space reserved to the right of the breadcrumb bar for the
+/// per-panel toolbar controls (refresh, switch-to-remote / disconnect, and the
+/// show/hide hidden-files toggle). When the full path would not fit alongside
+/// these controls, the breadcrumb collapses its middle ancestors into a
+/// clickable "…" rather than pushing the toolbar off-screen.
+const RIGHT_CONTROLS_RESERVE: f32 = 210.0;
 
 /// Truncate a path segment with a middle ellipsis, preserving head + tail so
 /// the segment stays identifiable. Yields "1f27397b-…-945a55" rather than a
@@ -31,6 +38,12 @@ fn truncate_segment(s: &str, max_chars: usize) -> String {
 }
 
 /// Render breadcrumb path navigation. Each path segment is a clickable button.
+///
+/// When the full path would overflow the bar, intermediate ancestors collapse
+/// into a single "…" button whose dropdown lists every hidden segment — each
+/// clickable to jump straight to that directory. The leading ancestor(s) and
+/// the current (last) segment stay visible so global context and the current
+/// location are always readable.
 pub fn render_breadcrumbs(
     ui: &mut egui::Ui,
     current_path: &str,
@@ -39,42 +52,146 @@ pub fn render_breadcrumbs(
     theme: &ThemeColors,
 ) {
     let parts: Vec<&str> = current_path.split('/').filter(|s| !s.is_empty()).collect();
+    let n = parts.len();
 
+    // Root "/"
     if ui
         .add(egui::Button::new(egui::RichText::new("/").color(theme.fg_dim).size(12.0).family(egui::FontFamily::Monospace)).frame(false))
         .clicked()
     {
         *navigate_to = Some("/".to_string());
     }
+    if n == 0 {
+        return;
+    }
 
-    for (i, part) in parts.iter().enumerate() {
+    // Precompute truncated display text and measured widths so we can decide
+    // how many leading ancestors fit before overflowing the available width.
+    let seg_font = egui::FontId::monospace(12.0);
+    let sep_font = egui::FontId::monospace(10.0);
+    let gap = ui.spacing().item_spacing.x.max(0.0);
+
+    // Measure rendered text width via a memoized single-line galley.
+    let text_w = |fid: &egui::FontId, text: &str| -> f32 {
+        ui.fonts(|f| f.layout_no_wrap(text.to_string(), fid.clone(), egui::Color32::PLACEHOLDER).size().x)
+    };
+
+    let displays: Vec<String> = parts.iter().map(|p| truncate_segment(p, MAX_SEGMENT_CHARS)).collect();
+    let seg_widths: Vec<f32> = (0..n).map(|i| text_w(&seg_font, &displays[i])).collect();
+    let sep_w = text_w(&sep_font, "/");
+    let root_w = text_w(&seg_font, "/");
+    // Pad the ellipsis click target a little; over-estimating its width only
+    // makes us collapse slightly earlier, never risks overflow.
+    let ellipsis_w = text_w(&seg_font, "\u{2026}") + 10.0;
+    let safety = 12.0;
+
+    let last = n - 1;
+    // Total width if we keep the first `keep` ancestors (parts[0..keep]),
+    // collapse the rest into one "…", then show the last segment.
+    let width_for = |keep: usize| -> f32 {
+        let mut w = root_w + gap;
+        for &sw in seg_widths.iter().take(keep) {
+            w += sep_w + gap + sw + gap;
+        }
+        let hidden = last.saturating_sub(keep);
+        if hidden > 0 {
+            w += sep_w + gap + ellipsis_w + gap;
+        }
+        w += sep_w + gap + seg_widths[last] + gap;
+        w + safety
+    };
+
+    let budget = (ui.available_width() - RIGHT_CONTROLS_RESERVE).max(0.0);
+    let keep = if width_for(last) <= budget {
+        last // everything fits — render the full path
+    } else {
+        (0..n).rev().find(|&k| width_for(k) <= budget).unwrap_or(0)
+    };
+    let hidden_count = last.saturating_sub(keep);
+
+    // Kept leading ancestors (clickable → jump to that path).
+    for i in 0..keep {
         ui.add_space(0.0);
         ui.label(egui::RichText::new("/").color(theme.fg_dim).size(10.0));
         ui.add_space(0.0);
 
-        let is_last = i == parts.len() - 1;
-        let was_truncated = part.chars().count() > MAX_SEGMENT_CHARS;
-        let display = truncate_segment(part, MAX_SEGMENT_CHARS);
-        let text = egui::RichText::new(&display)
-            .color(if is_last { theme.fg_primary } else { theme.accent })
+        let was_truncated = parts[i].chars().count() > MAX_SEGMENT_CHARS;
+        let text = egui::RichText::new(&displays[i])
+            .color(theme.accent)
             .size(12.0)
             .family(egui::FontFamily::Monospace);
-
-        if is_last {
-            let resp = ui.label(text);
-            if was_truncated {
-                resp.on_hover_text(*part);
-            }
-        } else {
-            let mut btn = ui.add(egui::Button::new(text).frame(false));
-            if was_truncated {
-                btn = btn.on_hover_text(*part);
-            }
-            if btn.clicked() {
-                let target: String = format!("/{}", parts[..=i].join("/"));
-                *navigate_to = Some(target);
-            }
+        let mut btn = ui.add(egui::Button::new(text).frame(false));
+        if was_truncated {
+            btn = btn.on_hover_text(parts[i]);
         }
+        if btn.clicked() {
+            *navigate_to = Some(format!("/{}", parts[..=i].join("/")));
+        }
+    }
+
+    // Collapsed middle → "…" menu listing the hidden ancestors.
+    if hidden_count > 0 {
+        ui.add_space(0.0);
+        ui.label(egui::RichText::new("/").color(theme.fg_dim).size(10.0));
+        ui.add_space(0.0);
+
+        let mut ellipsis = ui.add(
+            egui::Button::new(
+                egui::RichText::new("\u{2026}")
+                    .color(theme.fg_dim)
+                    .size(13.0)
+                    .family(egui::FontFamily::Monospace),
+            )
+            .frame(false),
+        );
+        let hidden_path: String = (keep..last).map(|i| parts[i]).collect::<Vec<_>>().join("/");
+        ellipsis = ellipsis.on_hover_text(format!("{hidden_path}/"));
+
+        let popup_id = ui.make_persistent_id("breadcrumb_ellipsis");
+        if ellipsis.clicked() {
+            ui.memory_mut(|m| m.toggle_popup(popup_id));
+        }
+        egui::popup::popup_below_widget(
+            ui,
+            popup_id,
+            &ellipsis,
+            egui::popup::PopupCloseBehavior::CloseOnClick,
+            |ui| {
+                ui.set_min_width(80.0);
+                for i in keep..last {
+                    // Full (untruncated) segment name so it stays identifiable.
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(parts[i])
+                                    .color(theme.accent)
+                                    .size(12.0)
+                                    .family(egui::FontFamily::Monospace),
+                            )
+                            .frame(false),
+                        )
+                        .clicked()
+                    {
+                        *navigate_to = Some(format!("/{}", parts[..=i].join("/")));
+                        ui.memory_mut(|m| m.close_popup());
+                    }
+                }
+            },
+        );
+    }
+
+    // Current (last) segment — non-clickable label; full text on hover if truncated.
+    ui.add_space(0.0);
+    ui.label(egui::RichText::new("/").color(theme.fg_dim).size(10.0));
+    ui.add_space(0.0);
+    let was_truncated = parts[last].chars().count() > MAX_SEGMENT_CHARS;
+    let text = egui::RichText::new(&displays[last])
+        .color(theme.fg_primary)
+        .size(12.0)
+        .family(egui::FontFamily::Monospace);
+    let resp = ui.label(text);
+    if was_truncated {
+        resp.on_hover_text(parts[last]);
     }
 }
 
@@ -287,7 +404,7 @@ pub fn render_file_panel(
                 // Permissions are right-aligned at rect.max.x - 75.0, text extends left
                 // "drwxrwxrwx" is ~60px wide, so permissions end around rect.max.x - 135.0
                 // Leave some padding, name should not extend past rect.max.x - 145.0
-                let name_max_x = (rect.max.x - 145.0).max(name_x + 20.0);
+                let name_max_x = (rect.max.x - 250.0).max(name_x + 40.0);
                 let max_name_width = name_max_x - name_x;
 
                 // Create a layout job that doesn't wrap but truncates with ellipsis
@@ -329,6 +446,15 @@ pub fn render_file_panel(
                         theme.fg_dim,
                     );
                 }
+
+                // Modified time (right-aligned, before permissions) — shown on every row.
+                ui.painter().text(
+                    egui::pos2(rect.max.x - 145.0, rect.center().y),
+                    egui::Align2::RIGHT_CENTER,
+                    format_modified(entry.modified),
+                    egui::FontId::monospace(10.0),
+                    theme.fg_dim,
+                );
 
                 // Drag payload (multi-select aware) — only set when dragging
                 if resp.dragged() {

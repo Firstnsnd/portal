@@ -638,7 +638,10 @@ impl PortalApp {
             .exact_height(STATUS_BAR_HEIGHT)
             .frame(egui::Frame {
                 fill: self.theme.bg_secondary,
-                inner_margin: egui::Margin::symmetric(12.0, if is_detached { 0.0 } else { 8.0 }),
+                // No vertical inner margin: it would shrink the content rect
+                // below the text height and break `horizontal_centered`'s
+                // vertical centering (text ended up glued to the bottom).
+                inner_margin: egui::Margin::symmetric(12.0, 0.0),
                 outer_margin: egui::Margin::symmetric(0.0, 0.0),
                 stroke: egui::Stroke::NONE,
                 ..Default::default()

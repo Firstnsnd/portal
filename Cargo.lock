@@ -4262,6 +4262,7 @@ version = "0.12.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "chrono",
  "cocoa",
  "dirs 5.0.1",
  "eframe",

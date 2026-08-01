@@ -11,6 +11,9 @@ pub struct SftpEntry {
     pub kind: SftpEntryKind,
     pub size: Option<u64>,
     pub permissions: Option<u32>,
+    /// Last-modified time. Local gets it from `std::fs::Metadata::modified()`;
+    /// remote from SFTP `mtime`. `None` when unavailable.
+    pub modified: Option<std::time::SystemTime>,
 }
 
 /// Kind of a remote filesystem entry
