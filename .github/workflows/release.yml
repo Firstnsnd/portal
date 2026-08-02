@@ -8,7 +8,11 @@ on:
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
+  # ── macOS ──────────────────────────────────────────────────────────
   build-macos:
     strategy:
       matrix:
@@ -47,8 +51,49 @@ jobs:
           name: macos-${{ matrix.name }}-dmg
           path: Portal-macos-${{ matrix.name }}.dmg
 
+  # ── Linux ──────────────────────────────────────────────────────────
+  build-linux:
+    strategy:
+      matrix:
+        include:
+          - name: x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libfontconfig1-dev
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package .tar.gz
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          mkdir Portal-linux-${{ matrix.name }}-v$VERSION
+          cp target/release/portal Portal-linux-${{ matrix.name }}-v$VERSION/
+          cp ROADMAP.md Portal-linux-${{ matrix.name }}-v$VERSION/README.md 2>/dev/null || true
+          tar czf Portal-linux-${{ matrix.name }}-v$VERSION.tar.gz Portal-linux-${{ matrix.name }}-v$VERSION/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.name }}
+          path: |
+            Portal-linux-${{ matrix.name }}-v*.tar.gz
+
+  # ── GitHub Release ─────────────────────────────────────────────────
   release:
-    needs: build-macos
+    needs: [build-macos, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,6 +108,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: macos-arm64-dmg
+          path: ./artifacts
+
+      - name: Download Linux x86_64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x86_64
           path: ./artifacts
 
       - name: Upload to GitHub Release
