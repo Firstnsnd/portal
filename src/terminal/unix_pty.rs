@@ -74,6 +74,14 @@ impl Pty for UnixPty {
                     libc::setenv(b"TERM\0".as_ptr() as *const i8, b"xterm-256color\0".as_ptr() as *const i8, 1);
                     libc::setenv(b"LANG\0".as_ptr() as *const i8, b"en_US.UTF-8\0".as_ptr() as *const i8, 1);
                     libc::setenv(b"LC_ALL\0".as_ptr() as *const i8, b"en_US.UTF-8\0".as_ptr() as *const i8, 1);
+
+                    // Default to the user's home directory so new terminals open at ~
+                    // instead of the app's working directory. getenv/chdir are
+                    // async-signal-safe (allowed between fork and exec).
+                    let home = libc::getenv(b"HOME\0".as_ptr() as *const i8);
+                    if !home.is_null() {
+                        libc::chdir(home);
+                    }
                 }
 
                 // Build args for execvp (command + args + null terminator)

@@ -66,8 +66,10 @@ impl TerminalGrid {
     /// Create a new grid with a specific scrollback memory limit.
     pub fn with_scrollback_limit(cols: usize, rows: usize, max_bytes: usize) -> Self {
         let cells = vec![vec![TerminalCell::default(); cols]; rows];
-        // Get initial cwd
-        let cwd = std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string());
+        // Initial cwd matches the PTY, which starts in the user's home dir.
+        let cwd = dirs::home_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()));
         Self {
             cols,
             rows,
