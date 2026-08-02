@@ -557,6 +557,7 @@ impl PortalApp {
                     focused_session: 0,
                     broadcast_enabled: false,
                     snippet_drawer_open: false,
+                    metrics_drawer_open: false,
                     pending_snippet: None,
                 };
                 window.tabs.push(new_tab);
@@ -690,6 +691,49 @@ impl PortalApp {
                             ui.add_space(8.0);
                             ui.label(egui::RichText::new(format!("Windows: {}", n))
                                 .color(self.theme.green).size(11.0));
+                        }
+                    }
+
+                    // Metrics toggle — custom hover-aware button
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("|").color(sep_color).size(11.0));
+                    ui.add_space(8.0);
+                    let metrics_open = {
+                        let active = self.windows[window_idx].active_tab;
+                        self.windows[window_idx].tabs.get(active)
+                            .map(|t| t.metrics_drawer_open)
+                            .unwrap_or(false)
+                    };
+                    let metrics_h = if is_detached { 24.0 } else { 20.0 };
+                    let (m_rect, m_resp) = ui.allocate_exact_size(
+                        egui::vec2(28.0, metrics_h),
+                        egui::Sense::click(),
+                    );
+                    let m_hovered = m_resp.hovered();
+                    let m_color = if metrics_open {
+                        self.theme.accent
+                    } else if m_hovered {
+                        self.theme.fg_primary
+                    } else {
+                        self.theme.fg_dim
+                    };
+                    if m_hovered {
+                        ui.painter().rect_filled(
+                            m_rect.expand(4.0), 4.0, self.theme.hover_bg,
+                        );
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    ui.painter().text(
+                        m_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "\u{1F4CA}",
+                        egui::FontId::proportional(font_size),
+                        m_color,
+                    );
+                    if m_resp.clicked() {
+                        let active = self.windows[window_idx].active_tab;
+                        if let Some(tab) = self.windows[window_idx].tabs.get_mut(active) {
+                            tab.metrics_drawer_open = !tab.metrics_drawer_open;
                         }
                     }
                 });

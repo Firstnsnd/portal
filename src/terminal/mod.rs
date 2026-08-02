@@ -6,6 +6,7 @@ mod grid;
 mod vte;
 mod session;
 pub mod url;
+pub mod metrics;
 
 #[cfg(unix)]
 mod unix_pty;
