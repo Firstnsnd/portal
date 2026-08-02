@@ -131,6 +131,7 @@ impl PortalApp {
                 let active_tab = self.windows[window_idx].active_tab;
                 if let Some(tab) = self.windows[window_idx].tabs.get_mut(active_tab) {
                     tab.snippet_drawer_open = !tab.snippet_drawer_open;
+                    if tab.snippet_drawer_open { tab.metrics_drawer_open = false; }
                 }
             }
         }
@@ -575,6 +576,7 @@ impl PortalApp {
                 let active_tab = window.active_tab;
                 if let Some(tab) = window.tabs.get_mut(active_tab) {
                     tab.snippet_drawer_open = true;
+                    tab.metrics_drawer_open = false;
                 }
                 ctx.data_mut(|d| d.insert_temp(more_menu_id, false));
             }
@@ -734,6 +736,7 @@ impl PortalApp {
                         let active = self.windows[window_idx].active_tab;
                         if let Some(tab) = self.windows[window_idx].tabs.get_mut(active) {
                             tab.metrics_drawer_open = !tab.metrics_drawer_open;
+                            if tab.metrics_drawer_open { tab.snippet_drawer_open = false; }
                         }
                     }
                 });
