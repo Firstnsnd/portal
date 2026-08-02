@@ -155,6 +155,24 @@ impl AppWindow {
             snippets_view::render_terminal_snippet_drawer(self, ctx, cx);
         }
 
+        // Terminal metrics drawer
+        if self.current_view == AppView::Terminal {
+            let idx = self.active_tab;
+            let was_open = self.tabs[idx].metrics_drawer_open;
+            if was_open {
+                let mut open = was_open;
+                let session = &self.tabs[idx].sessions[self.tabs[idx].focused_session];
+                crate::ui::views::metrics_drawer::render_metrics_drawer(
+                    ctx,
+                    session,
+                    &cx.language,
+                    cx.theme,
+                    &mut open,
+                );
+                self.tabs[idx].metrics_drawer_open = open;
+            }
+        }
+
         // Tunnel drawer
         if self.current_view == AppView::Tunnels && self.add_tunnel_dialog.open {
             tunnels_view::render_tunnel_drawer(self, ctx, cx);

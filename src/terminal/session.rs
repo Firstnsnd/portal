@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Instant;
 
+use sysinfo::System;
+use crate::terminal::metrics::{MetricsSnapshot, SystemMetrics};
+
 pub use super::{Pty, PtySize, Result};
 
 #[cfg(unix)]
@@ -65,6 +68,8 @@ pub struct RealPtySession {
     _reader_thread: Option<thread::JoinHandle<()>>,
     cached_shell_name: Arc<Mutex<Option<String>>>,
     last_shell_check: Arc<Mutex<Instant>>,
+    /// Live system metrics collected from the local machine
+    pub metrics: Arc<Mutex<MetricsSnapshot>>,
 }
 
 impl RealPtySession {
@@ -145,6 +150,44 @@ impl RealPtySession {
 
         let cached_shell_name = Arc::new(Mutex::new(None));
         let last_shell_check = Arc::new(Mutex::new(Instant::now()));
+        let metrics = Arc::new(Mutex::new(MetricsSnapshot::new()));
+
+        // Spawn a background thread for local metrics collection
+        let metrics_clone: Arc<Mutex<MetricsSnapshot>> = Arc::clone(&metrics);
+        thread::Builder::new()
+            .name("metrics-collector".to_string())
+            .spawn(move || {
+                let mut sys = System::new();
+                let mut nets = sysinfo::Networks::new_with_refreshed_list();
+                let mut prev_rx: Option<u64> = None;
+                let mut prev_tx: Option<u64> = None;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    sys.refresh_memory();
+                    sys.refresh_cpu_usage();
+                    nets.refresh();
+                    let rx: u64 = nets.iter().map(|(_, n)| n.total_received()).sum();
+                    let tx: u64 = nets.iter().map(|(_, n)| n.total_transmitted()).sum();
+                    let net_rx_rate = prev_rx
+                        .map(|p| ((rx.saturating_sub(p)) as f64 / 5.0) as u64)
+                        .unwrap_or(0);
+                    let net_tx_rate = prev_tx
+                        .map(|p| ((tx.saturating_sub(p)) as f64 / 5.0) as u64)
+                        .unwrap_or(0);
+                    prev_rx = Some(rx);
+                    prev_tx = Some(tx);
+                    let m = SystemMetrics {
+                        cpu_percent: sys.global_cpu_usage(),
+                        mem_used_bytes: sys.used_memory(),
+                        mem_total_bytes: sys.total_memory(),
+                        load_1: System::load_average().one as f32,
+                        net_rx_bytes_per_sec: net_rx_rate,
+                        net_tx_bytes_per_sec: net_tx_rate,
+                    };
+                    metrics_clone.lock().unwrap().push(m);
+                }
+            })
+            .ok(); // fire-and-forget; thread outlives the loop, cleaned on drop
 
         Ok(Self {
             pty: Some(pty),
@@ -154,6 +197,7 @@ impl RealPtySession {
             _reader_thread: Some(reader_thread),
             cached_shell_name,
             last_shell_check,
+            metrics,
         })
     }
 
@@ -306,6 +350,7 @@ mod tests {
             _reader_thread: None,
             cached_shell_name: Arc::new(Mutex::new(None)),
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
+            metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
         };
 
         assert!(!session.is_connected(), "is_connected() must return false when alive flag is false");
@@ -330,6 +375,7 @@ mod tests {
             _reader_thread: None,
             cached_shell_name: Arc::new(Mutex::new(None)),
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
+            metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
         };
 
         // alive=true but no PTY → is_alive() returns false → is_connected() returns false
@@ -357,6 +403,7 @@ mod tests {
                 _reader_thread: None,
                 cached_shell_name: Arc::new(Mutex::new(None)),
                 last_shell_check: Arc::new(Mutex::new(Instant::now())),
+                metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
             };
             // session is alive while in scope
             assert!(alive.load(Ordering::Relaxed));

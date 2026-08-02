@@ -11,6 +11,10 @@ egui = "0.29"
 
 # Animations
 egui_animation = "0.6"
+egui_plot = "0.29"
+
+# System metrics (local target)
+sysinfo = "0.32"
 
 # Terminal emulation
 vte = "0.11"

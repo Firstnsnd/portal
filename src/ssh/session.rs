@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 
 use crate::terminal::{CellAttrs, TerminalGrid, VteHandler};
 use crate::config::ResolvedAuth;
+use crate::terminal::metrics::MetricsSnapshot;
 
 #[derive(Clone)]
 pub struct JumpHostInfo {
@@ -296,6 +297,32 @@ pub async fn connect_via_jump(
     }
 }
 
+/// Execute a one-off command over an open SSH handle and return stdout.
+async fn exec_command(
+    handle: &Arc<russh::client::Handle<SshClient>>,
+    cmd: &str,
+) -> Result<String, String> {
+    let mut channel = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("open session: {}", e))?;
+    channel
+        .exec(false, cmd)
+        .await
+        .map_err(|e| format!("exec: {}", e))?;
+    let mut output = Vec::new();
+    loop {
+        match channel.wait().await {
+            Some(russh::ChannelMsg::Data { data }) => output.extend_from_slice(&data),
+            Some(russh::ChannelMsg::Eof)
+            | Some(russh::ChannelMsg::Close)
+            | None => break,
+            _ => {}
+        }
+    }
+    Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
 /// SSH session that mirrors RealPtySession's interface
 pub struct SshSession {
     pub grid: Arc<Mutex<TerminalGrid>>,
@@ -308,6 +335,8 @@ pub struct SshSession {
     pub port_forwards: Arc<Mutex<Vec<PortForward>>>,
     /// Notifications queue (drained by UI layer)
     pub notifications: Arc<Mutex<Vec<AppNotification>>>,
+    /// Live system metrics collected from the remote host
+    pub metrics: Arc<Mutex<MetricsSnapshot>>,
 }
 
 impl SshSession {
@@ -367,6 +396,7 @@ impl SshSession {
         let shell_hint = Arc::new(Mutex::new(None::<String>));
         let port_forwards = Arc::new(Mutex::new(Vec::<PortForward>::new()));
         let notifications = Arc::new(Mutex::new(Vec::<AppNotification>::new()));
+        let metrics = Arc::new(Mutex::new(MetricsSnapshot::new()));
 
         let grid_clone = Arc::clone(&grid);
         let state_clone = Arc::clone(&state);
@@ -374,13 +404,14 @@ impl SshSession {
         let shell_hint_clone = Arc::clone(&shell_hint);
         let port_forwards_clone = Arc::clone(&port_forwards);
         let notifications_clone = Arc::clone(&notifications);
+        let metrics_clone = Arc::clone(&metrics);
 
         runtime.spawn(async move {
             Self::ssh_task(
                 host, port, username, auth, cols, rows, grid_clone, cmd_rx,
                 state_clone, alive_clone, shell_hint_clone, startup_commands,
                 keepalive_interval, agent_forwarding, port_forward_configs,
-                port_forwards_clone, notifications_clone, jump_host,
+                port_forwards_clone, notifications_clone, metrics_clone, jump_host,
             )
             .await;
         });
@@ -392,6 +423,7 @@ impl SshSession {
             shell_hint,
             port_forwards,
             notifications,
+            metrics,
         }
     }
 
@@ -413,6 +445,7 @@ impl SshSession {
         port_forward_configs: Vec<PortForwardConfig>,
         port_forwards: Arc<Mutex<Vec<PortForward>>>,
         notifications: Arc<Mutex<Vec<AppNotification>>>,
+        metrics: Arc<Mutex<MetricsSnapshot>>,
         jump_host: Option<JumpHostInfo>,
     ) {
         let set_state = |s: SshConnectionState| {
@@ -580,6 +613,22 @@ impl SshSession {
                 &notifications,
             );
         }
+
+        // 5b. Metrics collection loop (spawned, non-blocking)
+        let metrics_handle = Arc::clone(&handle);
+        let metrics_arc = Arc::clone(&metrics);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                let cmd = "echo =M=; grep -E 'MemTotal|MemAvailable' /proc/meminfo; \
+                           echo =N=; cat /proc/net/dev; echo =L=; cat /proc/loadavg; \
+                           echo =C=; head -n1 /proc/stat";
+                if let Ok(out) = exec_command(&metrics_handle, cmd).await {
+                    let mut snap = metrics_arc.lock().unwrap();
+                    crate::terminal::metrics::parse_remote(&out, &mut snap);
+                }
+            }
+        });
 
         // 6. Main I/O loop
         let mut parser = vte::Parser::new();

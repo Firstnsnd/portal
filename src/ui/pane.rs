@@ -210,6 +210,8 @@ pub struct Tab {
     pub broadcast_enabled: bool,
     /// Whether the snippet drawer is open for this tab
     pub snippet_drawer_open: bool,
+    /// Whether the metrics drawer is open for this tab
+    pub metrics_drawer_open: bool,
     /// Pending snippet command to execute on next frame (after drawer closes and PTY resizes)
     pub pending_snippet: Option<String>,
 }
@@ -367,6 +369,7 @@ mod tests {
             focused_session: 0,
             broadcast_enabled: false,
             snippet_drawer_open: false,
+            metrics_drawer_open: false,
             pending_snippet: None,
         }
     }
