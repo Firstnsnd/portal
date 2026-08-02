@@ -257,27 +257,40 @@ impl Pty for UnixPty {
             return None;
         }
 
-        // 1. Direct PTY child process name (ps first, then proc_pidpath fallback).
-        let direct_name = ps_comm(self.child_pid as u32).or_else(|| {
-            use std::path::PathBuf;
-            unsafe {
-                let mut path: Vec<u8> = vec![0; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
-                if libc::proc_pidpath(
-                    self.child_pid,
-                    path.as_mut_ptr() as *mut libc::c_void,
-                    path.len() as u32,
-                ) > 0 {
-                    let null_pos = path.iter().position(|&b| b == 0).unwrap_or(path.len());
-                    let path_str = std::str::from_utf8(&path[..null_pos]).ok()?;
-                    PathBuf::from(path_str)
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .map(|s| s.to_string())
-                } else {
+        // 1. Direct PTY child process name (ps first, then platform fallback).
+        let direct_name =
+            if let Some(name) = ps_comm(self.child_pid as u32) {
+                Some(name)
+            } else {
+                // macOS: fall back to proc_pidpath if ps failed.
+                #[cfg(target_os = "macos")]
+                {
+                    use std::path::PathBuf;
+                    (|| {
+                        unsafe {
+                            let mut path: Vec<u8> = vec![0; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+                            if libc::proc_pidpath(
+                                self.child_pid,
+                                path.as_mut_ptr() as *mut libc::c_void,
+                                path.len() as u32,
+                            ) > 0 {
+                                let null_pos = path.iter().position(|&b| b == 0).unwrap_or(path.len());
+                                let path_str = std::str::from_utf8(&path[..null_pos]).ok()?;
+                                PathBuf::from(path_str)
+                                    .file_name()
+                                    .and_then(|name| name.to_str())
+                                    .map(|s| s.to_string())
+                            } else {
+                                None
+                            }
+                        }
+                    })()
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
                     None
                 }
-            }
-        })?;
+            }?;
 
         // 2. Scan direct children for a nested known interactive shell.
         //    Handles "zsh → user ran `bash`" — the visible shell is the
