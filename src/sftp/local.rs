@@ -44,6 +44,7 @@ impl LocalBrowser {
                     _ => SftpEntryKind::Other,
                 };
                 let size = meta.as_ref().map(|m| m.len());
+                let modified = meta.as_ref().and_then(|m| m.modified().ok());
                 #[cfg(unix)]
                 let permissions = {
                     use std::os::unix::fs::PermissionsExt;
@@ -56,6 +57,7 @@ impl LocalBrowser {
                     kind,
                     size,
                     permissions,
+                    modified,
                 });
             }
         }

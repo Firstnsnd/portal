@@ -46,3 +46,17 @@ pub fn format_permissions(mode: u32) -> String {
     }
     s
 }
+
+/// Format an optional last-modified time as "YYYY-MM-DD HH:MM" in the user's
+/// local timezone, or "—" when unknown. Uses chrono for correct timezone /
+/// leap-year / DST handling.
+pub fn format_modified(t: Option<std::time::SystemTime>) -> String {
+    use chrono::{DateTime, Local};
+    match t {
+        Some(t) => {
+            let dt: DateTime<Local> = DateTime::from(t);
+            dt.format("%Y-%m-%d %H:%M").to_string()
+        }
+        None => "\u{2014}".to_string(),
+    }
+}

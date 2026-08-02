@@ -1,6 +1,6 @@
 [package]
 name = "portal"
-version = "0.12.0"
+version = "0.12.1"
 edition = "2021"
 description = "A modern terminal emulator with GUI"
 
@@ -48,6 +48,9 @@ syntect = "5.2"
 # Unicode width detection (CJK double-width characters)
 unicode-width = "0.2"
 
+# Time / date formatting (local-timezone file timestamps)
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
 # SSH support
 russh = "0.57"
 russh-sftp = "2.1"
@@ -60,7 +63,7 @@ signal-hook = "0.3"
 [package.metadata.bundle]
 name = "Portal"
 identifier = "com.portal.app"
-version = "0.12.0"
+version = "0.12.1"
 copyright = "Copyright © 2024 Portal"
 category = "public.app-category.developer-tools"
 short_description = "A modern terminal emulator with GUI"

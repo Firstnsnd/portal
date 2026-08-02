@@ -351,6 +351,9 @@ async fn list_dir(
                 kind,
                 size: meta.size,
                 permissions: meta.permissions,
+                modified: meta.mtime.map(|secs| {
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs as u64)
+                }),
             }
         })
         .collect();
