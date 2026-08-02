@@ -10,6 +10,22 @@ use std::process::ExitStatus;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+/// Get the process name for a given PID via `ps -p PID -o comm=`.
+fn ps_comm(pid: u32) -> Option<String> {
+    use std::process::Command;
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !name.is_empty() {
+            return Some(name);
+        }
+    }
+    None
+}
+
 /// Unix PTY implementation
 pub struct UnixPty {
     /// Master file descriptor for the PTY
@@ -241,41 +257,61 @@ impl Pty for UnixPty {
             return None;
         }
 
-        use std::process::Command;
+        // 1. Direct PTY child process name (ps first, then proc_pidpath fallback).
+        let direct_name = ps_comm(self.child_pid as u32).or_else(|| {
+            use std::path::PathBuf;
+            unsafe {
+                let mut path: Vec<u8> = vec![0; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+                if libc::proc_pidpath(
+                    self.child_pid,
+                    path.as_mut_ptr() as *mut libc::c_void,
+                    path.len() as u32,
+                ) > 0 {
+                    let null_pos = path.iter().position(|&b| b == 0).unwrap_or(path.len());
+                    let path_str = std::str::from_utf8(&path[..null_pos]).ok()?;
+                    PathBuf::from(path_str)
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .map(|s| s.to_string())
+                } else {
+                    None
+                }
+            }
+        })?;
 
-        // Use `ps -p PID -o comm=` to get process name more reliably
-        let output = Command::new("ps")
-            .args(["-p", &self.child_pid.to_string(), "-o", "comm="])
-            .output()
-            .ok()?;
-
-        if output.status.success() {
-            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !name.is_empty() {
-                return Some(name);
+        // 2. Scan direct children for a nested known interactive shell.
+        //    Handles "zsh → user ran `bash`" — the visible shell is the
+        //    child, not the PTY's login shell.
+        {
+            use std::process::Command;
+            const KNOWN: &[&str] = &["bash", "zsh", "fish", "ksh", "csh", "tcsh", "dash"];
+            if let Ok(out) = Command::new("pgrep")
+                .args(["-P", &self.child_pid.to_string()])
+                .output()
+            {
+                if out.status.success() {
+                    let mut best: Option<(u32, String)> = None;
+                    for line in String::from_utf8_lossy(&out.stdout).lines() {
+                        let cpid: u32 = match line.trim().parse() {
+                            Ok(p) => p,
+                            Err(_) => continue,
+                        };
+                        if let Some(comm) = ps_comm(cpid) {
+                            if KNOWN.contains(&comm.as_str()) && comm != direct_name {
+                                if best.as_ref().map_or(true, |(pid, _)| cpid > *pid) {
+                                    best = Some((cpid, comm));
+                                }
+                            }
+                        }
+                    }
+                    if let Some((_, name)) = best {
+                        return Some(name);
+                    }
+                }
             }
         }
 
-        // Fallback to proc_pidpath
-        use std::path::PathBuf;
-        unsafe {
-            let mut path: Vec<u8> = vec![0; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
-            if libc::proc_pidpath(
-                self.child_pid,
-                path.as_mut_ptr() as *mut libc::c_void,
-                path.len() as u32,
-            ) > 0 {
-                let null_pos = path.iter().position(|&b| b == 0).unwrap_or(path.len());
-                let path_str = std::str::from_utf8(&path[..null_pos]).ok()?;
-                
-                PathBuf::from(path_str)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .map(|s| s.to_string())
-            } else {
-                None
-            }
-        }
+        Some(direct_name)
     }
 }
 

@@ -78,6 +78,7 @@ pub fn t(key: &str) -> &'static str {
         "credential_passphrase" => "パスフレーズ",
         "storage_keychain" => "\u{1f512} キーチェーン",
         "key_source_path" => "インポート元",
+        "key_source" => "キーソース",
         "batch" => "一括実行",
         "batch_targets" => "ターゲット",
         "batch_no_targets" => "ターゲット未選択",

@@ -78,6 +78,7 @@ pub fn t(key: &str) -> &'static str {
         "credential_passphrase" => "密钥密码",
         "storage_keychain" => "\u{1f512} 钥匙串",
         "key_source_path" => "导入自",
+        "key_source" => "密钥来源",
         "batch" => "批量执行",
         "batch_targets" => "目标",
         "batch_no_targets" => "未选择目标",

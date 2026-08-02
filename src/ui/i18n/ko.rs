@@ -78,6 +78,7 @@ pub fn t(key: &str) -> &'static str {
         "credential_passphrase" => "패스프레이즈",
         "storage_keychain" => "\u{1f512} 키체인",
         "key_source_path" => "가져온 위치",
+        "key_source" => "키 소스",
         "batch" => "일괄 실행",
         "batch_targets" => "대상",
         "batch_no_targets" => "선택된 대상 없음",

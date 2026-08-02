@@ -222,13 +222,13 @@ impl RealPtySession {
         self.is_alive()
     }
 
-    /// Get the shell name (cached for 5 seconds)
+    /// Get the shell name (cached for 1 second)
     pub fn get_shell_name(&self) -> Option<String> {
         // Check cache first (5 second TTL)
         {
             let mut last_check = self.last_shell_check.lock().unwrap();
             if let Some(ref name) = *self.cached_shell_name.lock().unwrap() {
-                if last_check.elapsed() < std::time::Duration::from_secs(5) {
+                if last_check.elapsed() < std::time::Duration::from_secs(1) {
                     return Some(name.clone());
                 }
             }

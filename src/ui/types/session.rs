@@ -256,14 +256,18 @@ impl TerminalSession {
     pub fn shell_name(&self) -> String {
         match &self.session {
             Some(SessionBackend::Local(_)) => {
-                // Use stored shell path directly (more reliable than process detection)
+                // Try process-tree detection first (handles nested shells,
+                // e.g. user ran `bash` from inside zsh).
+                // Falls back to the shell path stored at session creation.
+                if let Some(name) = self.session.as_ref()
+                    .and_then(|s| s.get_shell_name())
+                {
+                    return name;
+                }
                 if !self.local_shell.is_empty() {
                     self.local_shell.rsplit('/').next().unwrap_or("shell").to_string()
                 } else {
-                    // Fallback: try to get actual running shell name
-                    self.session.as_ref()
-                        .and_then(|s| s.get_shell_name())
-                        .unwrap_or_else(|| "shell".to_string())
+                    "shell".to_string()
                 }
             }
             Some(SessionBackend::Ssh(ssh)) => {
