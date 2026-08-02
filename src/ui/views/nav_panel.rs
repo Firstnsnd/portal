@@ -70,7 +70,6 @@ pub fn show_nav_panel(
                         available_size,
                         egui::Layout::bottom_up(egui::Align::LEFT),
                         |ui| {
-                            ui.add_space(8.0);
                             if nav_button(ui, "⚙", language.t("settings"), current_view == AppView::Settings, theme) {
                                 clicked_view = Some(AppView::Settings);
                             }
