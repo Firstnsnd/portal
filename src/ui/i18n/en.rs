@@ -78,6 +78,7 @@ pub fn t(key: &str) -> &'static str {
         "credential_passphrase" => "Passphrase",
         "storage_keychain" => "\u{1f512} Keychain",
         "key_source_path" => "Imported from",
+        "key_source" => "Key Source",
         "batch" => "Batch Execution",
         "batch_targets" => "Targets",
         "batch_no_targets" => "No targets selected",

@@ -78,6 +78,7 @@ pub fn t(key: &str) -> &'static str {
         "credential_passphrase" => "Кодовая Фраза",
         "storage_keychain" => "\u{1f512} Keychain",
         "key_source_path" => "Импортировано из",
+        "key_source" => "Источник Ключа",
         "batch" => "Пакетное Выполнение",
         "batch_targets" => "Цели",
         "batch_no_targets" => "Нет выбранных целей",
