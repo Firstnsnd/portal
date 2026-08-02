@@ -253,7 +253,7 @@ pub fn fixed_password_input(
 // Form Row Layouts
 // ============================================================================
 
-/// Single form field: label above, input below (fills width)
+/// Single form field: label above, input below (fills width).
 pub fn form_field(
     ui: &mut egui::Ui,
     label: &str,
@@ -269,7 +269,7 @@ pub fn form_field(
     });
 }
 
-/// Password form field: label above, input below
+/// Password form field: label above, input below.
 pub fn form_field_password(
     ui: &mut egui::Ui,
     label: &str,

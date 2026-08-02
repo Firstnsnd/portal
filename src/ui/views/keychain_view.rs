@@ -315,9 +315,9 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                         .inner_margin(egui::Margin::symmetric(widgets::FORM_LEFT_MARGIN, 0.0))
                         .show(ui, |ui| {
                             // Credential type selector
-                            ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
                                 widgets::form_label(ui, cx.language.t("credential_type"), true, cx.theme);
-                                ui.add_space(8.0);
+                                ui.add_space(widgets::SPACING_LABEL);
                                 let selected_text = match window.credential_dialog.cred_type {
                                     crate::ui::types::dialogs::CredentialTypeChoice::Password => cx.language.t("credential_password"),
                                     crate::ui::types::dialogs::CredentialTypeChoice::SshKey => cx.language.t("credential_private_key"),
@@ -371,9 +371,9 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                             // SSH key fields
                             if window.credential_dialog.cred_type == crate::ui::types::dialogs::CredentialTypeChoice::SshKey {
                                 // Key source selector
-                                ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
                                     widgets::form_label(ui, cx.language.t("key_source"), true, cx.theme);
-                                    ui.add_space(8.0);
+                                    ui.add_space(widgets::SPACING_LABEL);
                                     let source_text = match window.credential_dialog.key_source {
                                         crate::ui::types::dialogs::KeySourceChoice::LocalFile => cx.language.t("key_source_path"),
                                         crate::ui::types::dialogs::KeySourceChoice::ImportContent => cx.language.t("import_key"),
