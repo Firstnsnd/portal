@@ -57,7 +57,6 @@ pub use i18n::Language;
 pub use types::{
     SessionBackend, AppView, BroadcastState,
     AddHostDialog, CredentialDialog, SnippetViewState, HostFilter,
-    AddTunnelDialog,
 };
 pub use pane::{AppWindow, TabDragState};
 #[allow(unused_imports)]

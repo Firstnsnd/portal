@@ -12,7 +12,6 @@
 //! - **hosts_view**: Hosts management view
 //! - **keychain_view**: Credentials/keychain view
 //! - **snippets_view**: Command snippets view
-//! - **tunnels_view**: SSH tunnel management view
 
 pub mod nav_panel;
 pub mod tab_view;
@@ -23,4 +22,3 @@ pub mod hosts_view;
 pub mod keychain_view;
 pub mod snippets_view;
 pub mod metrics_drawer;
-pub mod tunnels_view;

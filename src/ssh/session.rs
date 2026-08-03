@@ -824,13 +824,11 @@ impl SshSession {
     }
 
     /// Start a port forward on this session (sent as a command to the async task)
-    #[allow(dead_code)]
     pub fn start_port_forward(&self, config: PortForwardConfig) {
         let _ = self.cmd_tx.send(SshCommand::StartPortForward(config));
     }
 
     /// Stop a port forward by index
-    #[allow(dead_code)]
     pub fn stop_port_forward(&self, config: PortForwardConfig) {
         let _ = self.cmd_tx.send(SshCommand::StopPortForward(config));
     }

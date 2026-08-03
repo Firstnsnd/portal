@@ -35,7 +35,6 @@ impl eframe::App for PortalApp {
                 AppView::Keychain => self.language.t("keychain").to_string(),
                 AppView::Settings => self.language.t("settings").to_string(),
                 AppView::Snippets => "Snippets".to_string(),
-                AppView::Tunnels => "Tunnels".to_string(),
             };
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
         }
@@ -107,7 +106,6 @@ impl eframe::App for PortalApp {
                     AppView::Keychain => self.language.t("keychain").to_string(),
                     AppView::Settings => self.language.t("settings").to_string(),
                     AppView::Snippets => "Snippets".to_string(),
-                    AppView::Tunnels => "Tunnels".to_string(),
                 };
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
             }
@@ -132,7 +130,6 @@ impl eframe::App for PortalApp {
                     AppView::Keychain => self.language.t("keychain").to_string(),
                     AppView::Settings => self.language.t("settings").to_string(),
                     AppView::Snippets => "Snippets".to_string(),
-                    AppView::Tunnels => "Tunnels".to_string(),
                 };
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
                 ctx.request_repaint_after(Duration::from_millis(16));
@@ -220,7 +217,6 @@ impl eframe::App for PortalApp {
                         snippet_view_state: SnippetViewState::default(),
                         host_filter: HostFilter::default(),
                         confirm_delete_host: None,
-                        add_tunnel_dialog: AddTunnelDialog::default(),
                         notifications: Vec::new(),
                     });
                 }

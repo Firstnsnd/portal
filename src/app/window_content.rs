@@ -126,12 +126,28 @@ impl PortalApp {
                     };
                 }
             }
-            // Cmd+Shift+S → toggle snippet drawer (not configurable via settings)
+            // Cmd+Shift+M → open tools drawer with Metrics tab
+            if ctx.input(|i| i.key_pressed(egui::Key::M) && i.modifiers.command && i.modifiers.shift) {
+                let at = self.windows[window_idx].active_tab;
+                if let Some(tab) = self.windows[window_idx].tabs.get_mut(at) {
+                    if tab.tools_drawer_open && tab.tools_tab == 0 {
+                        tab.tools_drawer_open = false; // toggle off if already on Metrics
+                    } else {
+                        tab.tools_drawer_open = true;
+                        tab.tools_tab = 0;
+                    }
+                }
+            }
+            // Cmd+Shift+S → open tools drawer with Snippets tab
             if ctx.input(|i| i.key_pressed(egui::Key::S) && i.modifiers.command && i.modifiers.shift) {
-                let active_tab = self.windows[window_idx].active_tab;
-                if let Some(tab) = self.windows[window_idx].tabs.get_mut(active_tab) {
-                    tab.snippet_drawer_open = !tab.snippet_drawer_open;
-                    if tab.snippet_drawer_open { tab.metrics_drawer_open = false; }
+                let at = self.windows[window_idx].active_tab;
+                if let Some(tab) = self.windows[window_idx].tabs.get_mut(at) {
+                    if tab.tools_drawer_open && tab.tools_tab == 1 {
+                        tab.tools_drawer_open = false; // toggle off if already on Snippets
+                    } else {
+                        tab.tools_drawer_open = true;
+                        tab.tools_tab = 1;
+                    }
                 }
             }
         }
@@ -316,15 +332,15 @@ impl PortalApp {
                     ..Default::default()
                 })
                 .show(ctx, |ui| {
-                    let mut show_more_menu = ctx.data_mut(|d| *d.get_temp_mut_or_default::<bool>(more_menu_id));
+                    let mut showmore_menu_id = ctx.data_mut(|d| *d.get_temp_mut_or_default::<bool>(more_menu_id));
 
                     let window = &mut self.windows[window_idx];
                     let action = render_tab_bar(
                         ui, ctx, &window.tabs, window.active_tab, &mut window.tab_drag,
-                        &self.theme, &self.language, &mut show_more_menu, window_idx
+                        &self.theme, &self.language, &mut showmore_menu_id, window_idx
                     );
 
-                    ctx.data_mut(|d| d.insert_temp(more_menu_id, show_more_menu));
+                    ctx.data_mut(|d| d.insert_temp(more_menu_id, showmore_menu_id));
 
                     // Handle tab bar actions
                     self.handle_tab_bar_action(window_idx, action, &mut result, is_detached, ctx);
@@ -446,24 +462,6 @@ impl PortalApp {
                         };
                         self.handle_view_actions(view_actions, window_idx, ctx);
                     }
-                    AppView::Tunnels => {
-                        let view_actions = {
-                            let mut cx = WindowContext::new(
-                                &mut self.hosts,
-                                &mut self.credentials,
-                                &mut self.snippets,
-                                &mut self.connection_history,
-                                &self.hosts_file,
-                                &self.credentials_file,
-                                &self.theme,
-                                self.language,
-                                &self.runtime,
-                                self.font_size,
-                            );
-                            self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
-                        };
-                        self.handle_view_actions(view_actions, window_idx, ctx);
-                    }
                 }
             });
 
@@ -479,7 +477,8 @@ impl PortalApp {
         is_detached: bool,
         ctx: &egui::Context,
     ) {
-        let more_menu_id = if is_detached {
+        let _ = ctx;
+        let _more_menu_id = if is_detached {
             egui::Id::new("dw_tab_bar_more_menu").with(window_idx)
         } else {
             egui::Id::new("tab_bar_more_menu")
@@ -557,28 +556,24 @@ impl PortalApp {
                     layout: PaneNode::Terminal(0),
                     focused_session: 0,
                     broadcast_enabled: false,
-                    snippet_drawer_open: false,
-                    metrics_drawer_open: false,
+                    tools_drawer_open: false,
+                    tools_tab: 0,
                     pending_snippet: None,
                 };
                 window.tabs.push(new_tab);
                 window.active_tab = window.tabs.len() - 1;
             }
-            TabBarAction::ToggleBroadcast(ti) => {
-                let window = &mut self.windows[window_idx];
-                if ti < window.tabs.len() {
-                    window.tabs[ti].broadcast_enabled = !window.tabs[ti].broadcast_enabled;
-                }
-                ctx.data_mut(|d| d.insert_temp(more_menu_id, false));
-            }
-            TabBarAction::OpenSnippets => {
+            TabBarAction::ToggleToolsDrawer => {
                 let window = &mut self.windows[window_idx];
                 let active_tab = window.active_tab;
                 if let Some(tab) = window.tabs.get_mut(active_tab) {
-                    tab.snippet_drawer_open = true;
-                    tab.metrics_drawer_open = false;
+                    if tab.tools_drawer_open {
+                        tab.tools_drawer_open = false;
+                    } else {
+                        tab.tools_drawer_open = true;
+                        tab.tools_tab = 0; // default to Metrics
+                    }
                 }
-                ctx.data_mut(|d| d.insert_temp(more_menu_id, false));
             }
             TabBarAction::None => {}
         }
@@ -693,50 +688,6 @@ impl PortalApp {
                             ui.add_space(8.0);
                             ui.label(egui::RichText::new(format!("Windows: {}", n))
                                 .color(self.theme.green).size(11.0));
-                        }
-                    }
-
-                    // Metrics toggle — custom hover-aware button
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("|").color(sep_color).size(11.0));
-                    ui.add_space(8.0);
-                    let metrics_open = {
-                        let active = self.windows[window_idx].active_tab;
-                        self.windows[window_idx].tabs.get(active)
-                            .map(|t| t.metrics_drawer_open)
-                            .unwrap_or(false)
-                    };
-                    let metrics_h = if is_detached { 24.0 } else { 20.0 };
-                    let (m_rect, m_resp) = ui.allocate_exact_size(
-                        egui::vec2(28.0, metrics_h),
-                        egui::Sense::click(),
-                    );
-                    let m_hovered = m_resp.hovered();
-                    let m_color = if metrics_open {
-                        self.theme.accent
-                    } else if m_hovered {
-                        self.theme.fg_primary
-                    } else {
-                        self.theme.fg_dim
-                    };
-                    if m_hovered {
-                        ui.painter().rect_filled(
-                            m_rect.expand(4.0), 4.0, self.theme.hover_bg,
-                        );
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                    }
-                    ui.painter().text(
-                        m_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "\u{1F4CA}",
-                        egui::FontId::proportional(font_size),
-                        m_color,
-                    );
-                    if m_resp.clicked() {
-                        let active = self.windows[window_idx].active_tab;
-                        if let Some(tab) = self.windows[window_idx].tabs.get_mut(active) {
-                            tab.metrics_drawer_open = !tab.metrics_drawer_open;
-                            if tab.metrics_drawer_open { tab.snippet_drawer_open = false; }
                         }
                     }
                 });

@@ -12,7 +12,7 @@ use crate::ui::pane::AppWindow;
 use crate::ui::{ThemeColors, Language};
 
 // Import view rendering functions
-use crate::ui::views::{hosts_view, keychain_view, snippets_view, tunnels_view, sftp_view};
+use crate::ui::views::{hosts_view, keychain_view, snippets_view, sftp_view};
 
 /// Actions that a view may request to be performed after rendering.
 /// These are returned from view methods and executed by the caller.
@@ -122,9 +122,6 @@ impl AppWindow {
             AppView::Snippets => {
                 snippets_view::render_snippets_view(self, ctx, ui, cx)
             }
-            AppView::Tunnels => {
-                tunnels_view::render_tunnels_view(self, ctx, ui, cx)
-            }
         }
     }
 
@@ -150,32 +147,11 @@ impl AppWindow {
             snippets_view::render_snippet_drawer(self, ctx, cx);
         }
 
-        // Terminal snippet drawer (quick-access snippet list)
-        if self.current_view == AppView::Terminal {
-            snippets_view::render_terminal_snippet_drawer(self, ctx, cx);
-        }
-
-        // Terminal metrics drawer
-        if self.current_view == AppView::Terminal {
-            let idx = self.active_tab;
-            let was_open = self.tabs[idx].metrics_drawer_open;
-            if was_open {
-                let mut open = was_open;
-                let session = &self.tabs[idx].sessions[self.tabs[idx].focused_session];
-                crate::ui::views::metrics_drawer::render_metrics_drawer(
-                    ctx,
-                    session,
-                    &cx.language,
-                    cx.theme,
-                    &mut open,
-                );
-                self.tabs[idx].metrics_drawer_open = open;
-            }
-        }
-
-        // Tunnel drawer
-        if self.current_view == AppView::Tunnels && self.add_tunnel_dialog.open {
-            tunnels_view::render_tunnel_drawer(self, ctx, cx);
+        // Terminal tools drawer (broadcast + snippets + metrics in one panel)
+        if self.current_view == AppView::Terminal
+            && self.tabs[self.active_tab].tools_drawer_open
+        {
+            crate::ui::views::metrics_drawer::render_tools_drawer(self, ctx, cx);
         }
     }
 }

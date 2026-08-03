@@ -5,7 +5,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::config::{HostEntry, ResolvedAuth};
+use crate::config::{HostEntry, PortForwardConfig, ResolvedAuth};
+use crate::ssh::port_forward::ForwardState;
 use crate::ssh::{SshSession, SshConnectionState, JumpHostInfo, AppNotification};
 use crate::terminal::{TerminalGrid, RealPtySession};
 
@@ -394,4 +395,33 @@ impl Drop for TerminalSession {
             drop(session);
         }
     }
+}
+
+/// Look up the live runtime state of a configured port forward by scanning
+/// SSH sessions for one bound to `host` whose `PortForwardConfig` matches.
+/// Returns `None` when no matching active session exists. Used by the host
+/// list to show how many forwards are running for a host.
+pub fn forward_state<'a>(
+    sessions: impl Iterator<Item = &'a TerminalSession>,
+    host: &HostEntry,
+    cfg: &PortForwardConfig,
+) -> Option<ForwardState> {
+    for s in sessions {
+        if let Some(SessionBackend::Ssh(ssh)) = &s.session {
+            let bound = s.ssh_host.as_ref()
+                .map(|h| h.host == host.host && h.port == host.port)
+                .unwrap_or(false);
+            if !bound {
+                continue;
+            }
+            if let Ok(pfs) = ssh.port_forwards.lock() {
+                for pf in pfs.iter() {
+                    if &pf.config == cfg {
+                        return pf.state.lock().ok().map(|g| g.clone());
+                    }
+                }
+            }
+        }
+    }
+    None
 }

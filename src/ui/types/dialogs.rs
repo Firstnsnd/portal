@@ -350,69 +350,6 @@ impl CredentialDialog {
     }
 }
 
-/// State for the "Add Tunnel" dialog
-pub struct AddTunnelDialog {
-    pub open: bool,
-    /// Index of the selected host (in app.hosts) to add tunnel to
-    pub selected_host_idx: Option<usize>,
-    /// Editing mode: (host_idx, tunnel_idx)
-    pub edit_index: Option<(usize, usize)>,
-    pub forward_kind: crate::config::ForwardKind,
-    pub local_host: String,
-    pub local_port: String,
-    pub remote_host: String,
-    pub remote_port: String,
-    pub error: String,
-    /// Pending delete confirmation: (host_idx, tunnel_idx)
-    pub confirm_delete: Option<(usize, usize)>,
-}
-
-impl Default for AddTunnelDialog {
-    fn default() -> Self {
-        Self {
-            open: false,
-            selected_host_idx: None,
-            edit_index: None,
-            forward_kind: crate::config::ForwardKind::Local,
-            local_host: "127.0.0.1".to_owned(),
-            local_port: String::new(),
-            remote_host: "127.0.0.1".to_owned(),
-            remote_port: String::new(),
-            error: String::new(),
-            confirm_delete: None,
-        }
-    }
-}
-
-impl AddTunnelDialog {
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
-
-    /// Open the drawer for new tunnel
-    pub fn open_drawer(&mut self) {
-        self.open = true;
-    }
-
-    /// Open the drawer for editing an existing tunnel
-    pub fn open_edit(&mut self, host_idx: usize, tunnel_idx: usize, tunnel: &crate::config::PortForwardConfig) {
-        self.open = true;
-        self.edit_index = Some((host_idx, tunnel_idx));
-        self.selected_host_idx = Some(host_idx);
-        self.forward_kind = tunnel.kind.clone();
-        self.local_host = tunnel.local_host.clone();
-        self.local_port = tunnel.local_port.to_string();
-        self.remote_host = tunnel.remote_host.clone();
-        self.remote_port = tunnel.remote_port.to_string();
-        self.error.clear();
-    }
-
-    /// Close the drawer
-    pub fn close_drawer(&mut self) {
-        self.open = false;
-    }
-}
-
 /// Snippet view state for Command Snippets feature
 pub struct SnippetViewState {
     #[allow(dead_code)]
@@ -542,7 +479,6 @@ pub enum AppView {
     Sftp,
     Keychain,
     Snippets,
-    Tunnels,
     Settings,
 }
 

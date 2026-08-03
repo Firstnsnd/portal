@@ -19,8 +19,7 @@ pub enum TabBarAction {
     MergeTabs { src: usize, dst: usize },
     ReorderTab { src: usize, dst: usize, insert_before: bool },
     NewTab,
-    ToggleBroadcast(usize),
-    OpenSnippets,
+    ToggleToolsDrawer,
     None,
 }
 
@@ -60,7 +59,20 @@ pub fn render_tab_bar(
             return scroll_result;
         }
 
-        render_more_menu(ui, ctx, tabs, active_tab, theme, language, show_more_menu, more_menu_id)
+        // ⋯ button → toggle the tools drawer (no popup menu)
+        let _ = (show_more_menu, more_menu_id); // kept for signature stability
+        let mut action = TabBarAction::None;
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let tools_open = active_tab < tabs.len() && tabs[active_tab].tools_drawer_open;
+            let btn_color = if tools_open { theme.accent } else { theme.fg_dim };
+            ui.add_space(8.0);
+            if ui.add(
+                egui::Button::new(egui::RichText::new("\u{22EF}").color(btn_color).size(16.0)).frame(false),
+            ).clicked() {
+                action = TabBarAction::ToggleToolsDrawer;
+            }
+        });
+        action
     }).inner
 }
 
@@ -382,107 +394,6 @@ fn render_tabs_inner(
 }
 
 /// Render the more menu (⋯) button
-fn render_more_menu(
-    ui: &mut egui::Ui,
-    ctx: &egui::Context,
-    tabs: &[Tab],
-    active_tab: usize,
-    theme: &ThemeColors,
-    language: &Language,
-    show_more_menu: &mut bool,
-    more_menu_id: egui::Id,
-) -> TabBarAction {
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let btn_color = if *show_more_menu { theme.accent } else { theme.fg_dim };
-        ui.add_space(8.0);
-        let more_resp = ui.add(
-            egui::Button::new(egui::RichText::new("⋯").color(btn_color).size(16.0))
-                .frame(false)
-        );
-
-        if more_resp.clicked() {
-            *show_more_menu = !*show_more_menu;
-        }
-
-        let mut action = TabBarAction::None;
-        if *show_more_menu {
-            // Position menu below the button
-            let menu_pos = more_resp.rect.left_bottom();
-            let menu_id = more_menu_id.with("popup");
-
-            // Allocate space for the menu in the current UI
-            // Use egui's Area with proper positioning
-            egui::Area::new(menu_id)
-                .order(egui::Order::Foreground)
-                .anchor(egui::Align2::LEFT_TOP, menu_pos.to_vec2())
-                .show(ctx, |ui| {
-                    egui::Frame {
-                        fill: theme.bg_elevated,
-                        rounding: egui::Rounding::same(6.0),
-                        inner_margin: egui::Margin::same(8.0),
-                        stroke: egui::Stroke::new(1.0, theme.border),
-                        ..Default::default()
-                    }
-                    .show(ui, |ui| {
-                        ui.set_min_width(200.0);
-                        ui.vertical(|ui| {
-                            // Snippets drawer menu item
-                            let snippets_label = format!("{}  ⌘⇧S", language.t("snippets"));
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(&snippets_label)
-                                        .color(theme.fg_primary)
-                                        .size(13.0)
-                                )
-                                .frame(false)
-                            ).clicked() {
-                                action = TabBarAction::OpenSnippets;
-                            }
-
-                            ui.separator();
-                            ui.add_space(4.0);
-
-                            // Broadcast toggle menu item
-                            let current_tab_broadcast = active_tab < tabs.len() && tabs[active_tab].broadcast_enabled;
-                            let broadcast_label = if current_tab_broadcast {
-                                format!("◉ {}  ⌘⇧I", language.t("broadcast_off"))
-                            } else {
-                                format!("○ {}  ⌘⇧I", language.t("broadcast_on"))
-                            };
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(&broadcast_label)
-                                        .color(if current_tab_broadcast { theme.accent } else { theme.fg_primary })
-                                        .size(13.0)
-                                )
-                                .frame(false)
-                            ).clicked() {
-                                action = TabBarAction::ToggleBroadcast(active_tab);
-                            }
-                        });
-                    });
-                });
-
-            // Close menu when clicking outside
-            if ctx.input(|i| i.pointer.any_click()) {
-                let menu_rect = egui::Rect::from_min_size(menu_pos, egui::vec2(200.0, 80.0));
-                if let Some(click_pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                    if !menu_rect.contains(click_pos) && !more_resp.rect.contains(click_pos) {
-                        *show_more_menu = false;
-                    }
-                }
-            }
-        }
-
-        if action != TabBarAction::None {
-            *show_more_menu = false;
-        }
-
-        action
-    }).inner
-}
-
-/// Draw animated insertion indicator
 fn draw_insertion_indicator(
     ui: &mut egui::Ui,
     target_rect: egui::Rect,

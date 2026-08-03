@@ -30,8 +30,8 @@ impl PortalApp {
             layout: PaneNode::Terminal(0),
             focused_session: 0,
             broadcast_enabled: false,
-            snippet_drawer_open: false,
-            metrics_drawer_open: false,
+            tools_drawer_open: false,
+            tools_tab: 0,
             pending_snippet: None,
         };
         window.tabs.push(tab);
@@ -71,8 +71,8 @@ impl PortalApp {
             layout: PaneNode::Terminal(0),
             focused_session: 0,
             broadcast_enabled: false,
-            snippet_drawer_open: false,
-            metrics_drawer_open: false,
+            tools_drawer_open: false,
+            tools_tab: 0,
             pending_snippet: None,
         };
         let window = if let Some(w) = self.windows.get_mut(window_idx) {

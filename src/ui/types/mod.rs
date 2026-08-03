@@ -14,7 +14,6 @@ pub mod dialogs;
 pub use dialogs::{
     AppView, BroadcastState,
     AddHostDialog, CredentialDialog, SnippetViewState, HostFilter,
-    AddTunnelDialog,
 };
 
 // SFTP types

@@ -76,7 +76,7 @@ use eframe::egui;
 use crate::sftp::{LocalBrowser, SftpBrowser};
 use crate::ui::types::{
     session::TerminalSession,
-    dialogs::{AppView, BroadcastState, AddHostDialog, CredentialDialog, SnippetViewState, HostFilter, AddTunnelDialog},
+    dialogs::{AppView, BroadcastState, AddHostDialog, CredentialDialog, SnippetViewState, HostFilter},
     sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog},
 };
 
@@ -208,10 +208,10 @@ pub struct Tab {
     pub layout: PaneNode,
     pub focused_session: usize,
     pub broadcast_enabled: bool,
-    /// Whether the snippet drawer is open for this tab
-    pub snippet_drawer_open: bool,
-    /// Whether the metrics drawer is open for this tab
-    pub metrics_drawer_open: bool,
+    /// Whether the unified tools drawer (broadcast + snippets + metrics) is open
+    pub tools_drawer_open: bool,
+    /// Which content tab is active: false = Metrics (default), true = Snippets
+    pub tools_tab: u8,  // 0=Metrics 1=Snippets 2=Tunnels
     /// Pending snippet command to execute on next frame (after drawer closes and PTY resizes)
     pub pending_snippet: Option<String>,
 }
@@ -352,7 +352,6 @@ pub struct AppWindow {
     pub snippet_view_state: SnippetViewState,
     pub host_filter: HostFilter,
     pub confirm_delete_host: Option<usize>,
-    pub add_tunnel_dialog: AddTunnelDialog,
     pub notifications: Vec<crate::ssh::AppNotification>,
 }
 
@@ -368,37 +367,37 @@ mod tests {
             layout: PaneNode::Terminal(0),
             focused_session: 0,
             broadcast_enabled: false,
-            snippet_drawer_open: false,
-            metrics_drawer_open: false,
+            tools_drawer_open: false,
+            tools_tab: 0,
             pending_snippet: None,
         }
     }
 
     #[test]
-    fn test_tab_default_snippet_drawer_closed() {
+    fn test_tab_default_tools_drawer_closed() {
         let tab = create_test_tab("Test Tab");
-        assert!(!tab.snippet_drawer_open, "New tabs should have snippet drawer closed by default");
+        assert!(!tab.tools_drawer_open, "New tabs should have tools drawer closed by default");
     }
 
     #[test]
-    fn test_snippet_drawer_state_per_tab() {
+    fn test_tools_drawer_state_per_tab() {
         // Create two tabs
         let mut tab_a = create_test_tab("Tab A");
         let mut tab_b = create_test_tab("Tab B");
 
-        // Open snippet drawer on Tab A only
-        tab_a.snippet_drawer_open = true;
-        assert!(tab_a.snippet_drawer_open, "Tab A should have snippet drawer open");
-        assert!(!tab_b.snippet_drawer_open, "Tab B should remain closed");
+        // Open tools drawer on Tab A only
+        tab_a.tools_drawer_open = true;
+        assert!(tab_a.tools_drawer_open, "Tab A should have tools drawer open");
+        assert!(!tab_b.tools_drawer_open, "Tab B should remain closed");
 
         // Close Tab A's drawer
-        tab_a.snippet_drawer_open = false;
-        assert!(!tab_a.snippet_drawer_open, "Tab A should now be closed");
+        tab_a.tools_drawer_open = false;
+        assert!(!tab_a.tools_drawer_open, "Tab A should now be closed");
 
         // Open Tab B's drawer
-        tab_b.snippet_drawer_open = true;
-        assert!(tab_b.snippet_drawer_open, "Tab B should have snippet drawer open");
-        assert!(!tab_a.snippet_drawer_open, "Tab A should remain closed");
+        tab_b.tools_drawer_open = true;
+        assert!(tab_b.tools_drawer_open, "Tab B should have tools drawer open");
+        assert!(!tab_a.tools_drawer_open, "Tab A should remain closed");
     }
 
     #[test]
@@ -411,22 +410,22 @@ mod tests {
         ];
 
         // Open drawer on tabs 0 and 2, leave tab 1 closed
-        tabs[0].snippet_drawer_open = true;
-        tabs[2].snippet_drawer_open = true;
+        tabs[0].tools_drawer_open = true;
+        tabs[2].tools_drawer_open = true;
 
         // Simulate switching tabs and verifying states are preserved
         let active_tab = 0;
-        assert!(tabs[active_tab].snippet_drawer_open, "Tab 0 should have drawer open");
+        assert!(tabs[active_tab].tools_drawer_open, "Tab 0 should have drawer open");
 
         let active_tab = 1;
-        assert!(!tabs[active_tab].snippet_drawer_open, "Tab 1 should have drawer closed");
+        assert!(!tabs[active_tab].tools_drawer_open, "Tab 1 should have drawer closed");
 
         let active_tab = 2;
-        assert!(tabs[active_tab].snippet_drawer_open, "Tab 2 should have drawer open");
+        assert!(tabs[active_tab].tools_drawer_open, "Tab 2 should have drawer open");
 
         // Switch back to tab 0
         let active_tab = 0;
-        assert!(tabs[active_tab].snippet_drawer_open, "Tab 0 drawer should still be open after switching");
+        assert!(tabs[active_tab].tools_drawer_open, "Tab 0 drawer should still be open after switching");
     }
 
     #[test]
@@ -435,7 +434,7 @@ mod tests {
         let mut tabs: Vec<Tab> = (0..5).map(|i| {
             let mut tab = create_test_tab(&format!("Tab {}", i));
             // Alternate drawer states
-            tab.snippet_drawer_open = i % 2 == 0;
+            tab.tools_drawer_open = i % 2 == 0;
             tab
         }).collect();
 
@@ -443,7 +442,7 @@ mod tests {
         for (i, tab) in tabs.iter().enumerate() {
             let expected_open = i % 2 == 0;
             assert_eq!(
-                tab.snippet_drawer_open,
+                tab.tools_drawer_open,
                 expected_open,
                 "Tab {} should have drawer {}",
                 i,
@@ -452,14 +451,14 @@ mod tests {
         }
 
         // Modify one tab's state
-        tabs[2].snippet_drawer_open = false;
+        tabs[2].tools_drawer_open = false;
 
         // Verify other tabs are unaffected
-        assert!(tabs[0].snippet_drawer_open, "Tab 0 should be unaffected");
-        assert!(!tabs[1].snippet_drawer_open, "Tab 1 should be unaffected");
-        assert!(!tabs[2].snippet_drawer_open, "Tab 2 should now be closed");
-        assert!(!tabs[3].snippet_drawer_open, "Tab 3 should be unaffected (was closed originally)");
-        assert!(tabs[4].snippet_drawer_open, "Tab 4 should be unaffected");
+        assert!(tabs[0].tools_drawer_open, "Tab 0 should be unaffected");
+        assert!(!tabs[1].tools_drawer_open, "Tab 1 should be unaffected");
+        assert!(!tabs[2].tools_drawer_open, "Tab 2 should now be closed");
+        assert!(!tabs[3].tools_drawer_open, "Tab 3 should be unaffected (was closed originally)");
+        assert!(tabs[4].tools_drawer_open, "Tab 4 should be unaffected");
     }
 
     // ── PaneNode lifecycle tests ──────────────────────────────────────────

@@ -94,8 +94,8 @@ impl PortalApp {
             layout: crate::ui::pane::PaneNode::Terminal(0),
             focused_session: 0,
             broadcast_enabled: false,
-            snippet_drawer_open: false,
-            metrics_drawer_open: false,
+            tools_drawer_open: false,
+            tools_tab: 0,
             pending_snippet: None,
         };
 
@@ -137,7 +137,6 @@ impl PortalApp {
             snippet_view_state: crate::ui::types::dialogs::SnippetViewState::default(),
             host_filter: crate::ui::types::dialogs::HostFilter::default(),
             confirm_delete_host: None,
-            add_tunnel_dialog: crate::ui::types::dialogs::AddTunnelDialog::default(),
             notifications: Vec::new(),
         };
 

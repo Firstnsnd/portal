@@ -414,6 +414,9 @@ pub fn render_hosts_view(
                             egui::FontId::proportional(13.0),
                             cx.theme.fg_primary,
                         );
+                        let name_w = ui.fonts(|f| f.layout_no_wrap(
+                            host.name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).rect.width());
+                        forward_badge(ui, window, host, rect.min.x + 46.0 + name_w + 8.0, rect.min.y + 18.0, &cx.theme);
                         let detail = if host.username.is_empty() {
                             format!("{}:{}", host.host, host.port)
                         } else {
@@ -512,6 +515,9 @@ pub fn render_hosts_view(
                                 egui::FontId::proportional(13.0),
                                 cx.theme.fg_primary,
                             );
+                            let name_w = ui.fonts(|f| f.layout_no_wrap(
+                                host.name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).rect.width());
+                            forward_badge(ui, window, host, rect.min.x + 46.0 + name_w + 8.0, rect.min.y + 18.0, &cx.theme);
                             let detail = if host.username.is_empty() {
                                 format!("{}:{}", host.host, host.port)
                             } else {
@@ -980,7 +986,7 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                     ui,
                                     cx.language.t("forward_local_host"), true,
                                     &mut dlg.new_forward_local_host,
-                                    "127.0.0.1", 170.0,
+                                    cx.language.t("tunnel_local_host_placeholder"), 170.0,
                                     cx.language.t("forward_local_port"), true,
                                     &mut dlg.new_forward_local_port,
                                     "8080", 80.0,
@@ -993,7 +999,7 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                     ui,
                                     cx.language.t("forward_remote_host"), true,
                                     &mut dlg.new_forward_remote_host,
-                                    "localhost", 170.0,
+                                    cx.language.t("tunnel_remote_host_placeholder"), 170.0,
                                     cx.language.t("forward_remote_port"), true,
                                     &mut dlg.new_forward_remote_port,
                                     "3306", 80.0,
@@ -1288,4 +1294,31 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
         // Note: save_hosts will be handled by the caller
         window.add_host_dialog.reset();
     }
+}
+
+/// Paint a small "↪ N" badge after the host name showing how many of the
+/// host's configured port forwards are currently active (green) vs configured
+/// but inactive (dim). No-op when the host has no forwards configured.
+fn forward_badge(ui: &egui::Ui, window: &AppWindow, host: &HostEntry, x: f32, y: f32, theme: &crate::ui::theme::ThemeColors) {
+    if host.port_forwards.is_empty() {
+        return;
+    }
+    let active = host.port_forwards.iter().filter(|f| {
+        matches!(
+            crate::ui::types::session::forward_state(
+                window.tabs.iter().flat_map(|t| t.sessions.iter()),
+                host,
+                f,
+            ),
+            Some(crate::ssh::port_forward::ForwardState::Active)
+        )
+    }).count();
+    let color = if active > 0 { theme.green } else { theme.fg_dim };
+    ui.painter().text(
+        egui::pos2(x, y),
+        egui::Align2::LEFT_CENTER,
+        format!("\u{21AA}{}", active),
+        egui::FontId::proportional(10.0),
+        color,
+    );
 }

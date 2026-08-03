@@ -124,7 +124,7 @@ impl std::fmt::Display for ForwardKind {
 }
 
 /// Persistent configuration for one port forward rule
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PortForwardConfig {
     pub kind: ForwardKind,
     pub local_host: String,
