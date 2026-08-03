@@ -178,12 +178,18 @@ fn render_tunnels_tab(ui: &mut egui::Ui, window: &mut AppWindow, active: usize, 
 
     // Use the latest config from `cx.hosts` (not the session snapshot) so
     // rules added after the connection was established are visible.
-    let configured = cx.hosts.iter()
-        .find(|h| h.host == session_host.host && h.port == session_host.port)
-        .map(|h| &h.port_forwards)
-        .unwrap_or(&session_host.port_forwards);
+    // Prefer the live config from cx.hosts, fall back to the session snapshot.
+    let matched = cx.hosts.iter().find(|h| h.host == session_host.host && h.port == session_host.port);
+    let configured = matched.map(|h| &h.port_forwards).unwrap_or(&session_host.port_forwards);
     if configured.is_empty() {
-        ui.label(egui::RichText::new("No tunnels configured for this host.\nAdd port forward rules in Host settings.").color(egui::Color32::GRAY).size(12.0));
+        ui.label(
+            egui::RichText::new(
+                format!("Host: {} ({}:{})\nFound in hosts: {}\nRules from config: {}\nRules from session: {}",
+                    session_host.name, session_host.host, session_host.port,
+                    matched.is_some(),
+                    matched.map(|h| h.port_forwards.len()).unwrap_or(0),
+                    session_host.port_forwards.len()))
+            .color(egui::Color32::GRAY).size(11.0));
         return;
     }
 

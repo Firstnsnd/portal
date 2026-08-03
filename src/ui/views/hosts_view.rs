@@ -1291,7 +1291,10 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
             cx.hosts.push(entry);
         }
 
-        // Note: save_hosts will be handled by the caller
+        // Persist immediately (the caller path through ViewActions is
+        // unreliable here because the drawer renders alongside the page,
+        // not inside the view-routing switch that collects ViewActions).
+        crate::config::save_hosts(cx.hosts_file, &cx.hosts);
         window.add_host_dialog.reset();
     }
 }
