@@ -562,57 +562,23 @@ impl SshSession {
         }
 
         // 5. Auto-start configured port forwards
-        //    Remote forwards need &mut handle, so do them first before wrapping in Arc.
+        // Remote forwards must be requested before Arc wrapping (&mut Handle)
+        // — still register them in the handler table so server-initiated
+        // channels can be accepted, but don't automatically activate them.
+        // Users start them manually via the tools drawer.
         for cfg in port_forward_configs.iter().filter(|c| c.kind == ForwardKind::Remote) {
-            let (pf, cancel_rx) = PortForward::new(cfg.clone());
-            let fwd_state = Arc::clone(&pf.state);
-            let fwd_allocated = Arc::clone(&pf.allocated_port);
-
-            // Register in handler's remote forward table
             if let Ok(mut rfwds) = remote_fwd_arc.lock() {
                 if !rfwds.iter().any(|c| c.remote_port == cfg.remote_port) {
                     rfwds.push(cfg.clone());
                 }
             }
-
-            match handle.tcpip_forward(&cfg.remote_host, cfg.remote_port as u32).await {
-                Ok(port) => {
-                    // Store the allocated port for later cancellation
-                    if let Ok(mut allocated) = fwd_allocated.lock() {
-                        *allocated = Some(port);
-                    }
-                    log::info!(
-                        "Remote forward active: {}:{} (allocated port {}) -> {}:{}",
-                        cfg.remote_host, cfg.remote_port, port,
-                        cfg.local_host, cfg.local_port
-                    );
-                    if let Ok(mut s) = fwd_state.lock() { *s = ForwardState::Active; }
-                }
-                Err(e) => {
-                    log::error!("Remote forward request failed: {}", e);
-                    if let Ok(mut s) = fwd_state.lock() {
-                        *s = ForwardState::Error(format!("tcpip_forward failed: {}", e));
-                    }
-                }
-            }
-
-            // Only add to port_forwards after tcpip_forward result is known
-            if let Ok(mut fwds) = port_forwards.lock() {
-                fwds.push(pf);
-            }
-            let _keep = cancel_rx; // keep alive for tracking
         }
 
-        //    Local forwards only need &self, so Arc is fine.
         let handle = Arc::new(handle);
-        for cfg in port_forward_configs.iter().filter(|c| c.kind == ForwardKind::Local) {
-            Self::spawn_local_forward(
-                Arc::clone(&handle),
-                cfg.clone(),
-                &port_forwards,
-                &notifications,
-            );
-        }
+
+        // Local forwards are no longer auto-started on connect — use the
+        // Tunnels tab (Start button → start_port_forward) instead.
+        // The loop that used to spawn_local_forward here has been removed.
 
         // 5b. Metrics collection loop (spawned, non-blocking)
         let metrics_handle = Arc::clone(&handle);

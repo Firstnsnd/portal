@@ -193,16 +193,37 @@ fn render_tunnels_tab(ui: &mut egui::Ui, window: &mut AppWindow, active: usize, 
         return;
     }
 
-    // Snapshot runtime state so we can precompute the state for each config rule.
-    let runtime = ssh.port_forwards.lock().unwrap();
-    let find_state = |cfg: &crate::config::PortForwardConfig| -> ForwardState {
+    // Check whether the same local port is already active in another session
+    // (same host). If so the current session can't claim it.
+    let port_remote = |cfg: &crate::config::PortForwardConfig| {
+        let runtime = ssh.port_forwards.lock().unwrap();
         runtime.iter().find(|pf| &pf.config == cfg)
             .and_then(|pf| pf.state.lock().ok().map(|g| g.clone()))
-            .unwrap_or(ForwardState::Stopped) // configured but not started
+    };
+    let elsewhere_active = |cfg: &crate::config::PortForwardConfig| -> bool {
+        for tab in window.tabs.iter() {
+            for s in tab.sessions.iter() {
+                if s.ssh_host.as_ref().map(|h| h.host == session_host.host && h.port == session_host.port).unwrap_or(false) {
+                    if let Some(SessionBackend::Ssh(other)) = &s.session {
+                        if let Ok(pfs) = other.port_forwards.lock() {
+                            for pf in pfs.iter() {
+                                if pf.config == *cfg {
+                                    if pf.state.lock().ok().map(|g| matches!(*g, ForwardState::Active)).unwrap_or(false) {
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
     };
 
     for cfg in configured {
-        let state = find_state(cfg);
+        let state = port_remote(cfg).unwrap_or(ForwardState::Stopped);
+        let in_use_elsewhere = state != ForwardState::Active && elsewhere_active(cfg);
         let kind = match cfg.kind {
             crate::config::ForwardKind::Local => "L",
             crate::config::ForwardKind::Remote => "R",
@@ -211,21 +232,25 @@ fn render_tunnels_tab(ui: &mut egui::Ui, window: &mut AppWindow, active: usize, 
             crate::config::ForwardKind::Local => format!("{}:{} → {}:{}", cfg.local_host, cfg.local_port, cfg.remote_host, cfg.remote_port),
             crate::config::ForwardKind::Remote => format!("{}:{} → {}:{}", cfg.remote_host, cfg.remote_port, cfg.local_host, cfg.local_port),
         };
-        let (status, status_color) = match &state {
+        let (status, status_color) = if in_use_elsewhere {
+            ("In use by another session", egui::Color32::from_rgb(255, 165, 0))
+        } else { match &state {
             ForwardState::Active => ("Active", egui::Color32::GREEN),
             ForwardState::Starting => ("Starting…", egui::Color32::from_rgb(100, 149, 237)),
             ForwardState::Stopped => ("Inactive", egui::Color32::GRAY),
             ForwardState::Error(_) => ("Error", egui::Color32::RED),
             ForwardState::Conflict(_) => ("Conflict", egui::Color32::RED),
-        };
+        }};
 
-        // Row 1: type + detail (mono, left-aligned)
+        // Row 1: type + detail
         ui.label(egui::RichText::new(format!("{}  {}", kind, detail)).size(12.0).monospace());
-        // Row 2: status dot + label + button (right-aligned group)
+        // Row 2: status + button
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(format!("\u{25CF}  {}", status)).size(11.0).color(status_color));
             ui.add_space(8.0);
-            match &state {
+            if in_use_elsewhere {
+                // port taken by another session — no button
+            } else { match &state {
                 ForwardState::Active => {
                     if ui.add(egui::Button::new(egui::RichText::new("Stop").size(12.0)).small()).clicked() {
                         ssh.stop_port_forward(cfg.clone());
@@ -237,7 +262,7 @@ fn render_tunnels_tab(ui: &mut egui::Ui, window: &mut AppWindow, active: usize, 
                     }
                 }
                 ForwardState::Starting => {}
-            }
+            }}
         });
         ui.add_space(4.0);
     }
