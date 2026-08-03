@@ -177,13 +177,19 @@ impl Pty for UnixPty {
             return false;
         }
 
-        // Check if the child process is still alive
+        // Use waitpid(WNOHANG) instead of kill(0, 0): kill(0) reports
+        // a zombie (<defunct>) as alive, which causes the terminal to
+        // hang since nobody is reading from the dead PTY child.
+        // waitpid(WNOHANG) reaps a zombie immediately and returns the
+        // correct status in one syscall.
         unsafe {
-            let result = libc::kill(self.child_pid, 0);
+            let mut status: i32 = 0;
+            let result = libc::waitpid(self.child_pid, &mut status, libc::WNOHANG);
             if result == 0 {
-                true // Process is alive
+                true // child still running
             } else {
-                // errno is ESRCH (No such process)
+                // result == child_pid  → zombie reaped
+                // result == -1 (ECHILD) → already gone
                 self.alive.store(false, Ordering::Relaxed);
                 false
             }
