@@ -2074,3 +2074,323 @@ mod duplicate_input_prevention_tests {
         assert!(text_chars.contains(&'b'));
     }
 }
+
+// ===========================================================================
+// Headless replay harness — replays Claude Code's REAL captured bytes through
+// the real grid+resize pipeline so resize fixes can be verified end-to-end
+// without a human driving the GUI. Bytes in tests/fixtures/ were captured from
+// an actual `claude` session (welcome frame + its SIGWINCH redraw).
+// ===========================================================================
+#[cfg(test)]
+mod replay_harness {
+    use crate::terminal::types::CellAttrs;
+    use crate::terminal::vte::VteHandler;
+    use crate::terminal::TerminalGrid;
+    use vte::Parser;
+
+    const WELCOME: &[u8] = include_bytes!("../../tests/fixtures/claude_welcome.bin");
+    const REDRAW: &[u8] = include_bytes!("../../tests/fixtures/claude_resize.bin");
+
+    /// A minimal driver: one persistent VTE parser + attrs (like the reader
+    /// thread) feeding a real TerminalGrid, with a resize() that goes through
+    /// the exact same code path the render loop uses.
+    struct Harness {
+        grid: TerminalGrid,
+        parser: Parser,
+        attrs: CellAttrs,
+    }
+    impl Harness {
+        fn new(cols: usize, rows: usize) -> Self {
+            Self {
+                grid: TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024),
+                parser: Parser::new(),
+                attrs: CellAttrs::default(),
+            }
+        }
+        fn feed(&mut self, bytes: &[u8]) {
+            for &b in bytes {
+                let mut h = VteHandler { grid: &mut self.grid, attrs: &mut self.attrs };
+                self.parser.advance(&mut h, b);
+            }
+        }
+        fn resize(&mut self, cols: usize, rows: usize) {
+            self.grid.resize(cols, rows);
+        }
+        fn row(&self, r: usize) -> String {
+            self.grid.cells[r]
+                .iter()
+                .map(|c| if c.wide_continuation || c.c == '\0' { ' ' } else { c.c })
+                .collect()
+        }
+        // char-safe previews (rows contain multi-byte box/CJK chars)
+        fn head(&self, r: usize, n: usize) -> String { self.row(r).chars().take(n).collect() }
+        fn tail(&self, r: usize, n: usize) -> String {
+            let s = self.row(r); s.chars().rev().take(n).collect::<Vec<_>>().into_iter().rev().collect()
+        }
+    }
+
+    #[test]
+    fn position_based_frame_survives_shrink() {
+        // Bug B reproducer: Claude Code draws in the MAIN buffer with absolute
+        // column positioning. Shrinking runs resize_reflow, which splits the box
+        // border across rows and relocates the cursor — scrambling the frame.
+        // After the fix the frame is resized in place: ╭ stays at row 0, row 1
+        // is still the │ border, and the cursor is only clamped (not moved).
+        let mut h = Harness::new(100, 30);
+        h.feed(WELCOME);
+        assert!(h.row(0).trim_start().starts_with('╭'), "baseline welcome top");
+        let cur_before = (h.grid.cursor_row, h.grid.cursor_col);
+
+        h.resize(80, 30); // shrink
+        assert_invariant(&h.grid);
+
+        let r0 = h.row(0);
+        assert!(r0.trim_start().starts_with('╭'),
+            "shrink scrambled the frame — row 0 must still start with ╭, got: {:?}",
+            h.head(0,20));
+        let r1 = h.row(1);
+        assert!(r1.trim_start().starts_with('│'),
+            "shrink split the top border onto row 1 — got: {:?}", h.head(1,16));
+        assert_eq!(
+            (h.grid.cursor_row, h.grid.cursor_col),
+            (cur_before.0.min(29), cur_before.1.min(79)),
+            "cursor was relocated by resize (was {:?})", cur_before,
+        );
+    }
+
+    #[test]
+    fn position_based_frame_survives_grow_without_panic() {
+        // Grow must not panic. (The resize_reflow_scrollback_only + resize_screen
+        // combo indexes out of bounds on grow because the former bumps self.cols
+        // without resizing self.cells.) The frame's top-left corner must remain.
+        let mut h = Harness::new(100, 30);
+        h.feed(WELCOME);
+        h.resize(140, 30); // grow
+        assert_invariant(&h.grid);
+        assert_eq!(h.grid.cells[0][0].c, '╭', "grow lost the top-left corner");
+        assert_eq!(h.grid.cols, 140);
+    }
+
+    #[test]
+    fn claude_redraw_after_resize_is_clean() {
+        // Idle-resize recovery: after a resize, Claude Code's SIGWINCH redraw
+        // (clear + repaint, captured in REDRAW) must land on a clean frame.
+        let mut h = Harness::new(100, 30);
+        h.feed(WELCOME);
+        h.resize(80, 24);
+        h.feed(REDRAW);
+        assert!(h.row(0).trim_start().starts_with('╭'),
+            "post-redraw top border missing — row 0: {:?}",
+            h.head(0,20));
+        assert!(h.row(0).trim_end().ends_with('╮'),
+            "post-redraw frame did not close with ╮ — row 0: {:?}",
+            h.tail(0,20));
+    }
+
+    #[test]
+    fn shell_output_still_reflows_after_fix() {
+        // Regression guard: plain sequential shell output (NO absolute
+        // positioning) must continue to reflow on resize. The fix only diverts
+        // position-based content; shell text is untouched.
+        let mut h = Harness::new(20, 6);
+        h.feed(b"abcdefghijklmnopqrstuvwxyz"); // sequential, auto-wraps
+        // no CHA/CUP used → must reflow
+        let before: String = (0..h.grid.rows)
+            .map(|r| h.row(r)).collect::<Vec<_>>().join("|");
+        h.resize(10, 6); // narrower → content should re-wrap to more rows
+        let _ = before;
+        // 'z' (last char) must still be present somewhere in the visible grid
+        let all: String = (0..h.grid.rows).map(|r| h.row(r)).collect();
+        assert!(all.contains('z'), "shell output lost chars after reflow: {:?}", all);
+        // reflow should have produced more non-empty rows (20→10 wrapping)
+        let nonempty = (0..h.grid.rows).filter(|&r| h.row(r).trim().len() > 0).count();
+        assert!(nonempty >= 3, "expected reflow into >=3 rows, got {}", nonempty);
+    }
+
+    // Core grid invariant: every row must be exactly `cols` wide after ANY
+    // resize. A grow in the old alt-screen path violated this (resize_reflow_
+    // scrollback_only bumps self.cols, then resize_screen early-returns, leaving
+    // cells rows at the old width while cols reports the new width).
+    fn assert_invariant(g: &crate::terminal::TerminalGrid) {
+        for (r, row) in g.cells.iter().enumerate() {
+            assert_eq!(row.len(), g.cols,
+                "invariant broken: row {r} is {} cells wide but grid.cols={}", row.len(), g.cols);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Full-spec TDD: REFLOW mode (shell) must preserve every character on both
+    // grow and shrink.
+    // -----------------------------------------------------------------------
+    fn all_chars(h: &Harness) -> String {
+        (0..h.grid.rows)
+            .map(|r| h.row(r).replace(' ', ""))
+            .collect::<String>()
+    }
+    const SAMPLE: &[u8] = b"the quick brown fox jumps over the lazy dog 0123456789";
+    const SAMPLE_CHARS: &str = "thequickbrownfoxjumpsoverthelazydog0123456789";
+
+    #[test]
+    fn reflow_shell_shrink_preserves_all_chars() {
+        let mut h = Harness::new(20, 6);
+        h.feed(SAMPLE);
+        h.resize(10, 8); // narrower → rewrap, nothing lost
+        let after = all_chars(&h);
+        for c in SAMPLE_CHARS.chars() {
+            assert!(after.contains(c), "reflow on shrink lost char {c}: {after}");
+        }
+    }
+
+    #[test]
+    fn reflow_shell_grow_preserves_all_chars() {
+        let mut h = Harness::new(20, 6);
+        h.feed(SAMPLE);
+        h.resize(40, 6); // wider → unwrap, nothing lost
+        let after = all_chars(&h);
+        for c in SAMPLE_CHARS.chars() {
+            assert!(after.contains(c), "reflow on grow lost char {c}: {after}");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Full-spec TDD: IN-PLACE mode (alt screen) must preserve cell positions on
+    // shrink and grow, and must NOT panic on grow (latent 0.14.4 bug).
+    // -----------------------------------------------------------------------
+    #[test]
+    fn alt_screen_shrink_preserves_positions() {
+        let mut h = Harness::new(100, 30);
+        h.grid.enter_alt_screen();
+        h.feed(b"\x1b[HX\x1b[4;6HY"); // X@(0,0), Y@(3,5)
+        h.resize(80, 30); // shrink
+        assert_invariant(&h.grid);
+        assert_eq!(h.grid.cells[0][0].c, 'X', "shrink moved (0,0)");
+        assert_eq!(h.grid.cells[3][5].c, 'Y', "shrink moved (3,5)");
+        assert_eq!(h.grid.cols, 80);
+    }
+
+    #[test]
+    fn alt_screen_grow_does_not_panic_and_preserves() {
+        let mut h = Harness::new(100, 30);
+        h.grid.enter_alt_screen();
+        h.feed(b"\x1b[HX\x1b[4;6HY");
+        h.resize(140, 30); // GROW — must not panic
+        assert_invariant(&h.grid);
+        assert_eq!(h.grid.cells[0][0].c, 'X', "grow lost (0,0)");
+        assert_eq!(h.grid.cells[3][5].c, 'Y', "grow lost (3,5)");
+        assert_eq!(h.grid.cols, 140);
+    }
+
+    // -----------------------------------------------------------------------
+    // Full-spec TDD: mode detection — CHA/CUP in the main buffer flips to
+    // InPlace; alt-screen enter/exit resets it.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn scrollback_rows_stay_cols_wide_after_resize() {
+        // Scrollback rows scrolled off at one width must be padded/truncated to
+        // the current grid width after a resize — otherwise render paths that
+        // index them by grid.cols go out of bounds (startup crash we fixed).
+        let mut h = Harness::new(79, 10);
+        // scroll 3 rows into scrollback at width 79
+        for r in 0..3 {
+            h.feed(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); // 79 wide
+            h.feed(b"\r\n");
+        }
+        h.feed(b"x"); // force content
+        // widen to 100 → in-place path (positioning not set here, but rows-only width change)
+        h.resize(100, 10);
+        assert_invariant(&h.grid);
+        for i in 0..h.grid.scrollback_len() {
+            let row = h.grid.get_scrollback_row(i).unwrap();
+            assert_eq!(row.len(), h.grid.cols,
+                "scrollback row {i} is {} wide but cols={}", row.len(), h.grid.cols);
+        }
+        // and after a shrink
+        h.resize(60, 10);
+        assert_invariant(&h.grid);
+        for i in 0..h.grid.scrollback_len() {
+            assert_eq!(h.grid.get_scrollback_row(i).unwrap().len(), h.grid.cols);
+        }
+    }
+
+    #[test]
+    fn cha_detection_sets_positioning_flag() {
+        let mut h = Harness::new(100, 30);
+        assert!(!h.grid.program_uses_positioning);
+        h.feed(b"\x1b[6Gx");
+        assert!(h.grid.program_uses_positioning, "CHA must set positioning flag");
+    }
+
+
+
+
+
+    #[test]
+    fn sync_mode_flag_toggles_on_2026() {
+        // Claude Code wraps every render batch in \e[?2026h…?2026l (synchronized
+        // output). We must record it so the renderer can defer painting until
+        // the batch ends (never showing half-drawn frames).
+        let mut h = Harness::new(100, 30);
+        assert!(!h.grid.in_sync_update);
+        h.feed(b"\x1b[?2026h");
+        assert!(h.grid.in_sync_update, "?2026h must set in_sync_update");
+        h.feed(b"partial\x1b[?2026l");
+        assert!(!h.grid.in_sync_update, "?2026l must clear in_sync_update");
+    }
+
+    #[test]
+    fn positioning_flag_resets_across_alt_screen() {
+        let mut h = Harness::new(100, 30);
+        h.feed(b"\x1b[6Gx");
+        assert!(h.grid.program_uses_positioning);
+        h.grid.enter_alt_screen();
+        assert!(!h.grid.program_uses_positioning, "flag must reset on alt enter");
+        h.grid.exit_alt_screen();
+        assert!(!h.grid.program_uses_positioning, "flag must reset on alt exit");
+        h.feed(b"\x1b[5;5Hx"); // CUP sets it again in the main buffer
+        assert!(h.grid.program_uses_positioning, "CUP must set the flag again");
+    }
+}
+
+#[cfg(test)]
+mod spinner_dump {
+    use crate::terminal::types::CellAttrs;
+    use crate::terminal::vte::VteHandler;
+    use crate::terminal::TerminalGrid;
+    use vte::Parser;
+    const SPIN: &[u8] = include_bytes!("../../tests/fixtures/claude_spin.bin");
+
+    #[test]
+    fn spinner_stream_never_stacks_at_any_byte_offset() {
+        // Regression for the live accumulation bug: when Claude Code updates its
+        // "Thought for Ns" line in place, the terminal must never expose a state
+        // with two copies of it. We replay the real capture and inspect the grid
+        // after EVERY byte — each of these is a state the renderer could paint.
+        // (Any >1 count would show as the stacked/duplicated lines seen live.)
+        let mut grid = TerminalGrid::with_scrollback_limit(100, 30, 1024 * 1024);
+        let mut p = Parser::new();
+        let mut a = CellAttrs::default();
+        let mut max_stacked = 0usize;
+        let mut stacked_offsets = 0usize;
+        for &b in SPIN {
+            let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
+            p.advance(&mut h, b);
+            let mut thoughts = 0usize;
+            for r in 0..grid.rows {
+                let row: String = grid.cells[r].iter().map(|c| c.c).collect();
+                if row.contains("Thought for") { thoughts += 1; }
+            }
+            max_stacked = max_stacked.max(thoughts);
+            if thoughts >= 2 { stacked_offsets += 1; }
+        }
+        assert_eq!(max_stacked, 1,
+            "spinner lines stacked (max {max_stacked}) at {stacked_offsets} byte-offsets — live accumulation bug");
+    }
+}
+
+
+
+
+
+
+
+

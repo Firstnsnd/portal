@@ -364,20 +364,26 @@ impl TerminalSession {
         }
 
         if cols_changed {
-            // Check if the pending PTY size is different from current
-            let current_pty_size = self.pending_pty_size.unwrap_or((cols as u16, rows as u16));
-            if current_pty_size.0 != cols as u16 || current_pty_size.1 != rows as u16 {
-                // Use longer debounce to ensure user has completely stopped dragging
-                // This prevents multiple shell redraw cycles that cause prompt duplication
-                let debounce = if self.pending_pty_size.is_some() {
-                    Duration::from_millis(2000)  // 2 seconds: wait for user to settle
-                } else {
-                    Duration::from_millis(1000)  // 1 second initial debounce
-                };
+            // Schedule a debounced PTY resize whenever the size differs from
+            // what's already pending — or when nothing is pending at all.
+            //
+            // (The old guard used `unwrap_or((cols, rows))`, which made the
+            // comparison trivially equal when nothing was pending — so the very
+            // first width-only change, height unchanged, never scheduled a PTY
+            // resize. The PTY kept its old width, the app never got SIGWINCH,
+            // never redrew, and its frame stayed truncated after narrowing.)
+            let needs_schedule = match self.pending_pty_size {
+                None => true,
+                Some((pc, pr)) => pc != cols as u16 || pr != rows as u16,
+            };
+            if needs_schedule {
+                // Short settle window: while the size keeps changing the deadline
+                // keeps resetting (so a drag coalesces into one event), yet the
+                // app redraws ~150ms after you stop — a narrowed frame recovers
+                // promptly instead of lingering truncated.
                 self.pending_pty_size = Some((cols as u16, rows as u16));
-                self.pty_resize_deadline = Instant::now() + debounce;
+                self.pty_resize_deadline = Instant::now() + Duration::from_millis(150);
             }
-            // If size hasn't changed, don't update deadline (keep existing debounce)
         } else {
             // Row-only change: send PTY resize immediately
             if let Some(ref mut session) = self.session {
@@ -424,4 +430,69 @@ pub fn forward_state<'a>(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn grid_only_session(cols: usize, rows: usize) -> TerminalSession {
+        let grid = Arc::new(Mutex::new(
+            crate::terminal::TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024),
+        ));
+        TerminalSession {
+            session: None, // no PTY — we inspect the debounce scheduling logic
+            grid,
+            last_cols: cols,
+            last_rows: rows,
+            scroll_offset: 0,
+            ssh_host: None,
+            resolved_auth: None,
+            selection: Selection::default(),
+            local_shell: String::new(),
+            created_at: Instant::now(),
+            pending_pty_size: None,
+            pty_resize_deadline: Instant::now(),
+            last_non_ascii_input: false,
+            cwd: None,
+            search_state: None,
+        }
+    }
+
+    /// If a width-ONLY change fails to schedule a PTY resize, the PTY keeps the
+    /// old width → the app never gets SIGWINCH → never redraws → its frame stays
+    /// truncated after narrowing. This must schedule a debounced resize.
+    #[test]
+    fn width_only_resize_schedules_pty_resize() {
+        let mut s = grid_only_session(148, 49);
+        s.resize(100, 49); // width only, height unchanged
+        assert_eq!(s.pending_pty_size, Some((100, 49)),
+            "width-only resize must schedule a debounced PTY resize");
+    }
+
+    #[test]
+    fn width_and_height_resize_schedules_pty_resize() {
+        let mut s = grid_only_session(148, 49);
+        s.resize(100, 40);
+        assert_eq!(s.pending_pty_size, Some((100, 40)));
+    }
+
+    #[test]
+    fn row_only_resize_resizes_pty_immediately() {
+        let mut s = grid_only_session(148, 49);
+        s.resize(148, 40); // rows only → immediate path
+        assert!(s.pending_pty_size.is_none(),
+            "row-only resize must use the immediate PTY path");
+    }
+
+    #[test]
+    fn scheduled_pty_resize_fires_after_settle_deadline() {
+        let mut s = grid_only_session(148, 49);
+        s.resize(100, 40);
+        assert_eq!(s.pending_pty_size, Some((100, 40)));
+        // deadline passes → next frame (unchanged dims) applies + clears it
+        s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
+        s.resize(100, 40);
+        assert!(s.pending_pty_size.is_none(), "pending PTY resize must fire once settled");
+    }
 }

@@ -309,7 +309,12 @@ pub fn render_terminal_session(
                 };
 
                 let col_start = if row == sr { sc } else { 0 };
-                let col_end = (if row == er { ec + 1 } else { grid.cols }).min(grid.cols);
+                // Clamp to the row's actual length: a scrollback row may have
+                // scrolled off at a narrower width than the current grid.cols,
+                // and indexing it by grid.cols goes out of bounds.
+                let col_end = (if row == er { ec + 1 } else { grid.cols })
+                    .min(grid.cols)
+                    .min(cells.len());
 
                 for col in col_start..col_end {
                     let cell = &cells[col];

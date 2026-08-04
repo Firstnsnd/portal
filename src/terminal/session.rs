@@ -132,13 +132,21 @@ impl RealPtySession {
                                 continue;
                             }
 
-                            for byte in &data {
+                            // Apply the whole read chunk under ONE grid lock so
+                            // the renderer can't interleave mid-batch and paint a
+                            // half-drawn frame. Full-screen apps wrap each render
+                            // in \e[?2026h…?2026l (synchronized output) and rely
+                            // on exactly this: the grid only ever becomes visible
+                            // at a coherent batch boundary, never in-between.
+                            {
                                 let mut grid = grid_clone.lock().unwrap();
                                 let mut handler = VteHandler {
                                     grid: &mut *grid,
                                     attrs: &mut attrs,
                                 };
-                                parser.advance(&mut handler, *byte);
+                                for byte in &data {
+                                    parser.advance(&mut handler, *byte);
+                                }
                             }
                         }
                         Err(_) => {

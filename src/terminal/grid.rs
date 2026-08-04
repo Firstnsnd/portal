@@ -43,6 +43,23 @@ pub struct TerminalGrid {
     /// ignore it and wrap anyway, our row count diverges from the app's, so its
     /// redraws erase the wrong rows and stale frames persist/overlap.
     pub autowrap: bool,
+    /// True between `\e[?2026h` (begin synchronized update) and `\e[?2026l`.
+    /// A full-screen app batches a render into this window and expects the
+    /// terminal to defer painting until the batch ends, so the user never sees
+    /// half-erased/half-drawn intermediate frames. The reader applies each read
+    /// chunk atomically (one lock), which keeps the renderer from interleaving
+    /// mid-batch; this flag records the state for the renderer.
+    pub in_sync_update: bool,
+    /// True once the program has used absolute cursor positioning (CHA/CUP/VPA)
+    /// in the main buffer. Shell output is sequential + auto-wrap, so reflowing
+    /// it on resize is safe and nice. But a program using absolute positioning
+    /// in the MAIN buffer (Claude Code, which never enters the alt screen)
+    /// composes its screen as fixed-position art — reflow splits box borders
+    /// across rows and relocates the cursor, scrambling the frame (worst while
+    /// it's mid-output and can't do a full clear+redraw). When set, the main
+    /// buffer is resized IN PLACE (like the alt screen) instead of reflowed.
+    /// Reset on alt-screen enter/exit so it tracks the live main buffer only.
+    pub program_uses_positioning: bool,
     /// Scrollback history buffer (oldest at front)
     pub scrollback: VecDeque<Vec<TerminalCell>>,
     /// Maximum scrollback memory in bytes (default: 100MB)
@@ -89,6 +106,8 @@ impl TerminalGrid {
             scroll_bottom: rows.saturating_sub(1),
             wrap_pending: false,
             autowrap: true,
+            program_uses_positioning: false,
+            in_sync_update: false,
             scrollback: VecDeque::new(),
             max_scrollback_bytes: max_bytes,
             current_scrollback_bytes: 0,
@@ -124,11 +143,25 @@ impl TerminalGrid {
             return;
         }
         if cols != self.cols {
-            // Column change: reflow scrollback (always) and grid (only if not alt screen)
-            if self.alt_screen.is_none() {
+            // Column change. Two modes:
+            //  - Reflow (main buffer + sequential writes, i.e. shell output):
+            //    re-wrap the text to fit the new width, preserving every char.
+            //  - In-place (alt screen, OR a main-buffer app using absolute
+            //    positioning like Claude Code): the screen is fixed-position art
+            //    — reflow would split box borders across rows and relocate the
+            //    cursor, scrambling the frame (worst while mid-output, when the
+            //    app can't do a full clear+redraw to recover). Resize in place:
+            //    cells keep their (row, col), out-of-bounds cells drop, the
+            //    cursor is only clamped.
+            //
+            // NOTE: do NOT call resize_reflow_scrollback_only before
+            // resize_screen — it bumps self.cols without resizing self.cells,
+            // making resize_screen early-return and leaving every row at the old
+            // width while cols reports the new width (corrupted grid, later
+            // out-of-bounds reads).
+            if self.alt_screen.is_none() && !self.program_uses_positioning {
                 self.resize_reflow(cols, rows);
             } else {
-                self.resize_reflow_scrollback_only(cols);
                 self.resize_screen(cols, rows);
             }
         } else {
@@ -142,6 +175,11 @@ impl TerminalGrid {
         if cols == self.cols && rows == self.rows {
             return;
         }
+
+        // NOTE: standard terminal behavior on a height shrink is to clip the
+        // bottom rows and clamp the cursor — NOT to scroll content into
+        // scrollback (which would push rows out of the app's coordinate space
+        // and, for a main-buffer TUI, leave stale frames in the scrollback).
         let mut new_cells = vec![vec![TerminalCell::default(); cols]; rows];
         let copy_rows = rows.min(self.rows);
         let copy_cols = cols.min(self.cols);
@@ -157,6 +195,13 @@ impl TerminalGrid {
         }
         self.line_wrapped = new_wrapped;
         self.cells = new_cells;
+        // Keep the invariant "every row == cols wide" across SCROLLBACK too:
+        // rows scrolled off at an older, narrower width must be padded (or
+        // truncated) to the new width, or any render path that indexes them by
+        // grid.cols goes out of bounds.
+        for row in self.scrollback.iter_mut() {
+            row.resize(cols, TerminalCell::default());
+        }
         self.cols = cols;
         self.rows = rows;
         self.scroll_bottom = rows.saturating_sub(1);
@@ -447,6 +492,9 @@ impl TerminalGrid {
             let saved_autowrap = self.autowrap;
             self.alt_screen = Some((saved_cells, saved_wrapped, self.cursor_col, self.cursor_row, saved_autowrap));
             self.autowrap = true;
+            // Alt buffer is a fresh surface — drop any main-buffer positioning
+            // signal so it reflects only the live main buffer (re-established on exit).
+            self.program_uses_positioning = false;
             self.clear();
         }
     }
@@ -459,6 +507,9 @@ impl TerminalGrid {
             self.cursor_col = col;
             self.cursor_row = row;
             self.autowrap = autowrap;
+            // Main buffer restored fresh — let its own writes say whether it
+            // uses positioning again.
+            self.program_uses_positioning = false;
         }
     }
 
@@ -788,6 +839,16 @@ impl TerminalGrid {
     /// This is used when in alt screen mode: the main grid should not be
     /// reflown (alt screen content is position-sensitive), but scrollback
     /// should still be reflowed to match the current pane width.
+    /// Reflow only the scrollback buffer at a new column width.
+    ///
+    /// WARNING: DO NOT call this right before `resize_screen`. It sets
+    /// `self.cols = new_cols` without resizing `self.cells`, which makes
+    /// `resize_screen` early-return and leaves every row at the old width while
+    /// `cols` reports the new width — a corrupted grid. (That bug lived in the
+    /// alt-screen resize path in 0.14.4; in-place resizes now use
+    /// `resize_screen` alone.) Kept around for the scrollback-only reflow logic
+    /// should it ever be needed safely.
+    #[allow(dead_code)]
     fn resize_reflow_scrollback_only(&mut self, new_cols: usize) {
         let old_cols = self.cols;
         if old_cols == new_cols {
