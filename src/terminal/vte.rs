@@ -330,6 +330,7 @@ impl<'a> Perform for VteHandler<'a> {
                 // SM / DECSET
                 if is_private {
                     match p1 {
+                        7 => self.grid.autowrap = true,   // DECAWM: auto-wrap ON
                         25 => self.grid.cursor_visible = true,
                         1049 => self.grid.enter_alt_screen(),
                         _ => {}
@@ -340,6 +341,7 @@ impl<'a> Perform for VteHandler<'a> {
                 // RM / DECRST
                 if is_private {
                     match p1 {
+                        7 => self.grid.autowrap = false,  // DECAWM: auto-wrap OFF
                         25 => self.grid.cursor_visible = false,
                         1049 => self.grid.exit_alt_screen(),
                         _ => {}

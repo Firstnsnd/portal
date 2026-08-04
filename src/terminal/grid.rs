@@ -29,14 +29,20 @@ pub struct TerminalGrid {
     pub cursor_visible: bool,
     /// Saved cursor position for DECSC/DECRC
     pub saved_cursor: Option<(usize, usize)>,
-    /// Alternate screen buffer state (cells, line_wrapped, cursor_col, cursor_row)
-    alt_screen: Option<(Vec<Vec<TerminalCell>>, Vec<bool>, usize, usize)>,
+    /// Alternate screen buffer state (cells, line_wrapped, cursor_col, cursor_row, autowrap)
+    alt_screen: Option<(Vec<Vec<TerminalCell>>, Vec<bool>, usize, usize, bool)>,
     /// Top row of scrolling region (inclusive)
     pub scroll_top: usize,
     /// Bottom row of scrolling region (inclusive)
     pub scroll_bottom: usize,
     /// Deferred line wrap: cursor hit last column, wrap on next printable char
     pub wrap_pending: bool,
+    /// DECAWM (auto-wrap mode, `\e[?7h`/`\e[?7l`). When false, lines longer than
+    /// `cols` are clipped at the last column instead of wrapping — TUI apps
+    /// (vim, htop, Claude Code, …) disable it to manage their own layout. If we
+    /// ignore it and wrap anyway, our row count diverges from the app's, so its
+    /// redraws erase the wrong rows and stale frames persist/overlap.
+    pub autowrap: bool,
     /// Scrollback history buffer (oldest at front)
     pub scrollback: VecDeque<Vec<TerminalCell>>,
     /// Maximum scrollback memory in bytes (default: 100MB)
@@ -82,6 +88,7 @@ impl TerminalGrid {
             scroll_top: 0,
             scroll_bottom: rows.saturating_sub(1),
             wrap_pending: false,
+            autowrap: true,
             scrollback: VecDeque::new(),
             max_scrollback_bytes: max_bytes,
             current_scrollback_bytes: 0,
@@ -167,8 +174,8 @@ impl TerminalGrid {
         // Get character width (1 or 2 for CJK)
         let char_width = c.width().unwrap_or(1);
 
-        // Handle pending wrap from hitting last column
-        if self.wrap_pending {
+        // Handle pending wrap from hitting last column (only under DECAWM)
+        if self.autowrap && self.wrap_pending {
             // Mark the previous row as wrapped
             if self.cursor_row < self.rows {
                 self.line_wrapped[self.cursor_row] = true;
@@ -213,10 +220,17 @@ impl TerminalGrid {
             self.cursor_col += 1;
         }
 
-        // At last column: don't wrap yet, set pending flag
+        // At last column: clamp to the final cell.
         if self.cursor_col >= self.cols {
             self.cursor_col = self.cols.saturating_sub(1);
-            self.wrap_pending = true;
+            if self.autowrap {
+                // DECAWM on: defer the wrap until the next printable char
+                // (xterm deferred-wrap behavior).
+                self.wrap_pending = true;
+            }
+            // DECAWM off: stay clamped here; the next printable char overwrites
+            // the last column instead of wrapping. Programs that disabled
+            // auto-wrap manage their own line layout and rely on this.
         }
     }
 
@@ -428,18 +442,23 @@ impl TerminalGrid {
         if self.alt_screen.is_none() {
             let saved_cells = std::mem::replace(&mut self.cells, vec![vec![TerminalCell::default(); self.cols]; self.rows]);
             let saved_wrapped = std::mem::replace(&mut self.line_wrapped, vec![false; self.rows]);
-            self.alt_screen = Some((saved_cells, saved_wrapped, self.cursor_col, self.cursor_row));
+            // Save DECAWM so it's restored when leaving the alt buffer, and
+            // reset it to the DEC default (on) for the fresh alt screen.
+            let saved_autowrap = self.autowrap;
+            self.alt_screen = Some((saved_cells, saved_wrapped, self.cursor_col, self.cursor_row, saved_autowrap));
+            self.autowrap = true;
             self.clear();
         }
     }
 
     /// Exit alternate screen mode (restore saved screen).
     pub fn exit_alt_screen(&mut self) {
-        if let Some((cells, wrapped, col, row)) = self.alt_screen.take() {
+        if let Some((cells, wrapped, col, row, autowrap)) = self.alt_screen.take() {
             self.cells = cells;
             self.line_wrapped = wrapped;
             self.cursor_col = col;
             self.cursor_row = row;
+            self.autowrap = autowrap;
         }
     }
 

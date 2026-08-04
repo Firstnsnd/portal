@@ -72,6 +72,39 @@ mod tests {
     }
 
     #[test]
+    fn test_decawm_off_does_not_wrap() {
+        // DECAWM off (`\e[?7l`): lines longer than `cols` must be clipped at the
+        // last column, never wrapped. TUI apps (vim, htop, Claude Code, …)
+        // disable auto-wrap to manage their own layout; if we wrap anyway our
+        // row count diverges from theirs and their redraws smear/overlap.
+        let mut grid = create_test_grid(5, 3);
+        grid.autowrap = false;
+
+        for c in "ABCDEFGH".chars() {
+            grid.write_char_with_attrs(c, &CellAttrs::default());
+        }
+
+        assert_eq!(grid.cursor_row, 0, "DECAWM off: must NOT wrap to the next row");
+        assert_eq!(grid.cursor_col, 4, "cursor clamped at the final column");
+        assert_eq!(grid.cells[0][4].c, 'H', "overflowing chars overwrite the last cell");
+        assert!(!grid.wrap_pending, "no deferred wrap when DECAWM is off");
+    }
+
+    #[test]
+    fn test_decawm_on_wraps() {
+        // DECAWM on (default `\e[?7h`): classic deferred wrap still works.
+        let mut grid = create_test_grid(5, 3);
+        assert!(grid.autowrap, "auto-wrap is on by default");
+
+        for c in "ABCDEFGH".chars() {
+            grid.write_char_with_attrs(c, &CellAttrs::default());
+        }
+
+        assert!(grid.cursor_row >= 1, "DECAWM on: should wrap to the next row");
+        assert_eq!(grid.cells[1][0].c, 'F', "6th char lands at start of wrapped row");
+    }
+
+    #[test]
     fn test_clear_all() {
         let mut grid = create_test_grid(80, 24);
 
