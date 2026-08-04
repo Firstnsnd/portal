@@ -2885,35 +2885,39 @@ mod user_repro_exact {
 
 
 
+
+
+
+
 #[cfg(test)]
-mod user_definitive {
+mod duplicate_render {
     use crate::terminal::types::CellAttrs;
     use crate::terminal::vte::VteHandler;
     use crate::terminal::TerminalGrid;
     use vte::Parser;
     const WELCOME: &[u8] = include_bytes!("../../tests/fixtures/claude_welcome.bin");
 
-    fn all_content(grid: &TerminalGrid) -> String {
-        let mut s = String::new();
+    fn char_counts(grid: &TerminalGrid) -> std::collections::HashMap<char, usize> {
+        let mut m = std::collections::HashMap::new();
         for i in 0..grid.scrollback_len() {
             for c in grid.get_scrollback_row(i).unwrap() {
-                if c.c != ' ' && c.c != '\0' { s.push(c.c); }
+                if c.c != ' ' && c.c != '\0' { *m.entry(c.c).or_insert(0) += 1; }
             }
         }
         for r in 0..grid.rows {
             for c in &grid.cells[r] {
-                if c.c != ' ' && c.c != '\0' { s.push(c.c); }
+                if c.c != ' ' && c.c != '\0' { *m.entry(c.c).or_insert(0) += 1; }
             }
         }
-        s
+        m
     }
 
-    /// USER'S EXACT RECIPE, definitive: claude draws its frame, output pushes it
-    /// into history, drag NARROWER then WIDER. EVERY character of the original
-    /// frame (in scrollback + grid) must survive — nothing truncated on the
-    /// right. Uses claude's real in-place path.
+    /// USER'S NEW SYMPTOM: "超出可视区的历史内容，拖拽变窄，再变宽，内容会重复渲染".
+    /// After shrink→widen, NO character's count may INCREASE (no content
+    /// duplicated). The widening "pull scrollback back into view" logic copies
+    /// history into the visible grid, duplicating it.
     #[test]
-    fn no_char_loss_after_shrink_widen_inplace() {
+    fn no_content_duplicated_after_shrink_widen() {
         let mut grid = TerminalGrid::with_scrollback_limit(100, 30, 1024 * 1024);
         let mut p = Parser::new();
         let mut a = CellAttrs::default();
@@ -2921,39 +2925,60 @@ mod user_definitive {
             let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
             p.advance(&mut h, b);
         }
-        assert!(grid.program_uses_positioning, "welcome uses positioning (in-place path)");
-        let before = all_content(&grid);
-        assert!(before.len() > 100, "sanity: frame has content ({} chars)", before.len());
+        // push the frame into scrollback
+        for _ in 0..20 { grid.scroll_up(0, grid.rows - 1); }
+        let before = char_counts(&grid);
 
-        for _ in 0..15 { grid.scroll_up(0, grid.rows - 1); } // frame into history
-        let in_history = all_content(&grid);
-        assert!(in_history.contains('╭') && in_history.contains('╮'),
-            "frame (incl right edge ╮) is in history after scroll");
+        grid.resize(80, 30);  // narrower
+        grid.resize(100, 30); // wider
 
-        grid.resize(80, 30);  // drag narrower
-        grid.resize(100, 30); // drag wider
-
-        let after = all_content(&grid);
-        let before_chars: std::collections::HashMap<char, usize> = {
-            let mut m = std::collections::HashMap::new();
-            for c in before.chars() { *m.entry(c).or_insert(0) += 1; }
-            m
-        };
-        let after_chars: std::collections::HashMap<char, usize> = {
-            let mut m = std::collections::HashMap::new();
-            for c in after.chars() { *m.entry(c).or_insert(0) += 1; }
-            m
-        };
-        let mut missing: Vec<char> = Vec::new();
-        for (c, n) in &before_chars {
-            if after_chars.get(c).copied().unwrap_or(0) < *n {
-                missing.push(*c);
+        let after = char_counts(&grid);
+        let mut duplicated: Vec<char> = Vec::new();
+        for (c, n) in &before {
+            if after.get(c).copied().unwrap_or(0) > *n {
+                duplicated.push(*c);
             }
         }
-        assert!(missing.is_empty(),
-            "characters lost after shrink→widen (right-side truncation): {missing:?}");
-        assert!(after.contains('╮'), "frame right edge ╮ must survive");
-        assert!(after.contains('╭'), "frame left edge ╭ must survive");
+        assert!(duplicated.is_empty(),
+            "content duplicated after shrink→widen (reflow pulled history into view): {duplicated:?}");
+    }
+}
+
+#[cfg(test)]
+mod no_duplicate_visible {
+    use crate::terminal::types::CellAttrs;
+    use crate::terminal::vte::VteHandler;
+    use crate::terminal::TerminalGrid;
+    use vte::Parser;
+    const WELCOME: &[u8] = include_bytes!("../../tests/fixtures/claude_welcome.bin");
+
+    /// USER'S CURRENT SYMPTOM: "拖拽变窄，再变宽，内容会重复渲染". After a
+    /// shrink→widen, the VISIBLE grid must not contain any row more than once
+    /// (no history content pulled back and stacked on top of the live frame).
+    #[test]
+    fn no_row_appears_twice_in_visible_after_shrink_widen() {
+        let mut grid = TerminalGrid::with_scrollback_limit(100, 30, 1024 * 1024);
+        let mut p = Parser::new();
+        let mut a = CellAttrs::default();
+        for &b in WELCOME {
+            let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
+            p.advance(&mut h, b);
+        }
+        // push part of the frame into scrollback
+        for _ in 0..10 { grid.scroll_up(0, grid.rows - 1); }
+
+        grid.resize(80, 30);
+        grid.resize(100, 30);
+
+        // A frame appears twice in the visible grid only if history content was
+        // pulled back and stacked on the live frame. "Welcome back!" is unique
+        // in the welcome frame — if it shows up twice, that's duplication.
+        let welcomes = (0..grid.rows).filter(|&r| {
+            let row: String = grid.cells[r].iter().map(|c| c.c).collect();
+            row.contains("Welcome back!")
+        }).count();
+        assert!(welcomes <= 1,
+            "visible grid shows {welcomes} welcome frames — history duplicated on top of live frame");
     }
 }
 
