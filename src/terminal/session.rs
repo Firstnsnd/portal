@@ -147,6 +147,11 @@ impl RealPtySession {
                                 for byte in &data {
                                     parser.advance(&mut handler, *byte);
                                 }
+                                // Guarantee every row is cols-wide. If any row was
+                                // built at an older/narrower width it would crash
+                                // the renderer (indexing by cols) and show as
+                                // overlapping/truncated history when scrolling.
+                                grid.normalize_row_widths();
                             }
                         }
                         Err(_) => {

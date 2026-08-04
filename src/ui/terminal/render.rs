@@ -1381,6 +1381,7 @@ pub fn render_terminal_session(
                 );
             }
         }
+
     } // end grid.lock()
 
     // ── Search bar overlay ────────────────────────────────────────────────────

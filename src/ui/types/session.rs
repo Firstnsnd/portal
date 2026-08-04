@@ -332,9 +332,12 @@ impl TerminalSession {
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) {
-        // Check pending PTY resize (called every frame from render loop)
+        // Apply any settled resize to the grid AND the PTY together.
         if let Some((pc, pr)) = self.pending_pty_size {
             if Instant::now() >= self.pty_resize_deadline {
+                if let Ok(mut grid) = self.grid.lock() {
+                    grid.resize(pc as usize, pr as usize);
+                }
                 if let Some(ref mut session) = self.session {
                     let _ = session.resize(pc, pr);
                 }
@@ -354,42 +357,24 @@ impl TerminalSession {
             return;
         }
 
-        let cols_changed = cols != self.last_cols;
         self.last_cols = cols;
         self.last_rows = rows;
 
-        // Always reflow grid immediately (for visual feedback)
-        if let Ok(mut grid) = self.grid.lock() {
-            grid.resize(cols, rows);
-        }
-
-        if cols_changed {
-            // Schedule a debounced PTY resize whenever the size differs from
-            // what's already pending — or when nothing is pending at all.
-            //
-            // (The old guard used `unwrap_or((cols, rows))`, which made the
-            // comparison trivially equal when nothing was pending — so the very
-            // first width-only change, height unchanged, never scheduled a PTY
-            // resize. The PTY kept its old width, the app never got SIGWINCH,
-            // never redrew, and its frame stayed truncated after narrowing.)
-            let needs_schedule = match self.pending_pty_size {
-                None => true,
-                Some((pc, pr)) => pc != cols as u16 || pr != rows as u16,
-            };
-            if needs_schedule {
-                // Short settle window: while the size keeps changing the deadline
-                // keeps resetting (so a drag coalesces into one event), yet the
-                // app redraws ~150ms after you stop — a narrowed frame recovers
-                // promptly instead of lingering truncated.
-                self.pending_pty_size = Some((cols as u16, rows as u16));
-                self.pty_resize_deadline = Instant::now() + Duration::from_millis(150);
-            }
-        } else {
-            // Row-only change: send PTY resize immediately
-            if let Some(ref mut session) = self.session {
-                let _ = session.resize(cols as u16, rows as u16);
-            }
-        }
+        // Schedule a debounced resize applied to grid + PTY ATOMICALLY.
+        //
+        // The grid must NEVER resize ahead of the PTY. The app redraws on its
+        // own timer at the PTY width it reads; if the grid jumps to a new width
+        // while the PTY still reports the old one, the app's absolute-column
+        // layout (Claude Code's CHA) lands on the wrong cells → frames overlap
+        // and truncate. Keeping both at the old width during the settle window
+        // means the app keeps drawing correctly; when the debounce fires they
+        // jump together and the app redraws cleanly once.
+        //
+        // (Short window: while the size keeps changing the deadline keeps
+        // resetting, so a drag coalesces; yet the app redraws ~150ms after you
+        // stop — a narrowed frame recovers promptly.)
+        self.pending_pty_size = Some((cols as u16, rows as u16));
+        self.pty_resize_deadline = Instant::now() + Duration::from_millis(150);
     }
 }
 
@@ -459,40 +444,42 @@ mod tests {
         }
     }
 
-    /// If a width-ONLY change fails to schedule a PTY resize, the PTY keeps the
-    /// old width → the app never gets SIGWINCH → never redraws → its frame stays
-    /// truncated after narrowing. This must schedule a debounced resize.
+    /// ROOT-CAUSE regression: the grid and the PTY must NEVER diverge. If the
+    /// grid resizes immediately while the PTY is debounced, the app (which
+    /// redraws on its own timer at the PTY width it reads) draws at the stale
+    /// width into the new grid → its absolute-column layout wraps/scrambles/
+    /// overlaps. So on a width change the grid must stay put (pending), exactly
+    /// like the PTY — they jump together when the debounce fires.
     #[test]
-    fn width_only_resize_schedules_pty_resize() {
+    fn width_change_keeps_grid_and_pty_in_lockstep() {
         let mut s = grid_only_session(148, 49);
-        s.resize(100, 49); // width only, height unchanged
+        s.resize(100, 49); // width change
         assert_eq!(s.pending_pty_size, Some((100, 49)),
-            "width-only resize must schedule a debounced PTY resize");
+            "must schedule a debounced resize");
+        // FIX: the grid must NOT have jumped to 100 — the app would be drawing
+        // at the PTY's still-old width (148) into a 100-wide grid → overlap.
+        assert_eq!(s.grid.lock().unwrap().cols, 148,
+            "grid must not resize ahead of the PTY (this is the overlap root cause)");
     }
 
     #[test]
-    fn width_and_height_resize_schedules_pty_resize() {
+    fn width_and_height_change_keep_grid_in_lockstep() {
         let mut s = grid_only_session(148, 49);
         s.resize(100, 40);
         assert_eq!(s.pending_pty_size, Some((100, 40)));
+        assert_eq!(s.grid.lock().unwrap().cols, 148, "grid must not jump early");
+        assert_eq!(s.grid.lock().unwrap().rows, 49, "grid rows must not jump early");
     }
 
     #[test]
-    fn row_only_resize_resizes_pty_immediately() {
-        let mut s = grid_only_session(148, 49);
-        s.resize(148, 40); // rows only → immediate path
-        assert!(s.pending_pty_size.is_none(),
-            "row-only resize must use the immediate PTY path");
-    }
-
-    #[test]
-    fn scheduled_pty_resize_fires_after_settle_deadline() {
+    fn settled_resize_applies_grid_and_pty_together() {
         let mut s = grid_only_session(148, 49);
         s.resize(100, 40);
-        assert_eq!(s.pending_pty_size, Some((100, 40)));
-        // deadline passes → next frame (unchanged dims) applies + clears it
+        // deadline passes → the pending resize is applied to BOTH together
         s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
         s.resize(100, 40);
-        assert!(s.pending_pty_size.is_none(), "pending PTY resize must fire once settled");
+        assert!(s.pending_pty_size.is_none(), "pending resize must fire once settled");
+        assert_eq!(s.grid.lock().unwrap().cols, 100, "grid must follow the PTY");
+        assert_eq!(s.grid.lock().unwrap().rows, 40, "grid rows must follow the PTY");
     }
 }

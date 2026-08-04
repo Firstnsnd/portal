@@ -912,12 +912,17 @@ mod tests {
         // Resize to half width
         grid.resize(40, 10);
 
-        // Scrollback should still exist (possibly reflowed)
-        assert!(grid.scrollback_len() > 0, "Scrollback should be preserved");
-
-        // The scrollback should contain the original text
-        let scrollback_content = get_scrollback_content(&grid);
-        assert!(scrollback_content.contains("very long line"), "Long wrapped line should be in scrollback");
+        // A wrapped line split across the scrollback/grid boundary is REJOINED
+        // into one logical line on reflow and lands in the visible grid (this is
+        // the fix for cross-boundary line truncation) — so it must be present in
+        // the COMBINED grid+scrollback content, not lost. (Previously it was
+        // left split/buried, which is the bug this guards against.)
+        let mut combined = get_scrollback_content(&grid);
+        combined.push_str(&get_visible_content(&grid));
+        assert!(combined.contains("very long line"),
+            "long wrapped line must be preserved (rejoined) after resize — got: {combined}");
+        // and the other rows must still be present too
+        assert!(combined.contains("row 4"), "later rows must survive — got: {combined}");
     }
 
     #[test]
@@ -2394,3 +2399,436 @@ mod spinner_dump {
 
 
 
+
+#[cfg(test)]
+mod reflow_rejoin {
+    use crate::terminal::types::CellAttrs;
+    use crate::terminal::vte::VteHandler;
+    use crate::terminal::TerminalGrid;
+    use vte::Parser;
+    const WELCOME: &[u8] = include_bytes!("../../tests/fixtures/claude_welcome.bin");
+
+    struct H {
+        grid: TerminalGrid,
+        p: Parser,
+        a: CellAttrs,
+    }
+    impl H {
+        fn new(cols: usize, rows: usize) -> Self {
+            Self { grid: TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024), p: Parser::new(), a: CellAttrs::default() }
+        }
+        fn feed(&mut self, b: &[u8]) {
+            for &x in b { let mut h = VteHandler { grid: &mut self.grid, attrs: &mut self.a }; self.p.advance(&mut h, x); }
+        }
+        fn reflow_resize(&mut self, cols: usize, rows: usize) {
+            self.grid.program_uses_positioning = false; // force reflow path
+            self.grid.resize(cols, rows);
+        }
+        fn row(&self, r: usize) -> String {
+            self.grid.cells[r].iter().map(|c| if c.wide_continuation { ' ' } else { c.c }).collect()
+        }
+        fn dump(&self, label: &str) {
+            println!("--- {label}: grid={}x{} cursor=({},{}) sb={} ---",
+                self.grid.cols, self.grid.rows, self.grid.cursor_row, self.grid.cursor_col, self.grid.scrollback_len());
+            for r in 0..self.grid.rows.min(20) {
+                let s = self.row(r);
+                if s.trim().len() > 0 { println!("  g{r} wrp={} {:?}", self.grid.line_wrapped[r], s.trim_end()); }
+            }
+            for i in 0..self.grid.scrollback_len() {
+                let row = self.grid.get_scrollback_row(i).unwrap();
+                let s: String = row.iter().map(|c| c.c).collect();
+                let w = self.grid.scrollback_wrapped.get(i).copied().unwrap_or(false);
+                if s.trim().len() > 0 { println!("  s{i} wrp={w} {:?}", s.trim_end()); }
+            }
+        }
+    }
+
+    #[test]
+    fn reflow_round_trip_restores_drawn_frame() {
+        // The user's truncation bug: a frame drawn at width W, reflowed to a
+        // narrower width, then back to W, must be fully restored (top-left corner
+        // back, right edge back, nothing lost to a broken logical-line split).
+        let mut h = H::new(100, 30);
+        h.feed(WELCOME);
+        assert!(h.row(0).trim_start().starts_with('╭'), "baseline");
+        assert!(h.row(0).trim_end().ends_with('╮'), "baseline right edge");
+        h.reflow_resize(79, 30); // shrink
+        h.dump("after shrink 79");
+        h.reflow_resize(100, 30); // widen back
+        h.dump("after widen 100");
+        let r0 = h.row(0);
+        assert!(r0.trim_start().starts_with('╭'),
+            "shrink→widen lost the box top-left corner. row0={:?}", &r0[..r0.trim_end().len().min(40)]);
+        assert!(r0.trim_end().ends_with('╮'),
+            "shrink→widen lost the box right edge. row0 tail={:?}", &r0[r0.trim_end().len().saturating_sub(20)..]);
+    }
+}
+
+
+
+#[cfg(test)]
+mod inplace_roundtrip {
+    use crate::terminal::types::CellAttrs;
+    use crate::terminal::vte::VteHandler;
+    use crate::terminal::TerminalGrid;
+    use vte::Parser;
+    const WELCOME: &[u8] = include_bytes!("../../tests/fixtures/claude_welcome.bin");
+    const REDRAW: &[u8] = include_bytes!("../../tests/fixtures/claude_resize.bin");
+
+    #[test]
+    fn inplace_claude_round_trip_restores_frame() {
+        // Claude Code uses the IN-PLACE path (program_uses_positioning) and
+        // never enters the alt screen. It redraws its whole frame on SIGWINCH.
+        // The realistic flow: grid stays at the OLD width during the settle
+        // window (the app keeps drawing correctly), then grid+PTY jump to the
+        // new width together and the app redraws cleanly. Here we simulate that:
+        // draw at 100, move grid to 79 (as if the debounce fired for a shrink),
+        // feed Claude Code's 80-wide redraw, then move grid to 100 (widen) and
+        // feed the redraw again — the frame must be intact (top-left + right
+        // edge) at every settled size.
+        let mut grid = TerminalGrid::with_scrollback_limit(100, 30, 1024 * 1024);
+        let mut p = Parser::new();
+        let mut a = CellAttrs::default();
+        for &b in WELCOME {
+            let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
+            p.advance(&mut h, b);
+        }
+        assert!(grid.program_uses_positioning, "welcome sets positioning");
+        assert_eq!(grid.cells[0][99].c, '╮', "baseline right edge");
+
+        // shrink: grid jumps to 80 (settle fired), claude redraws at 80
+        grid.resize(80, 30);
+        for &b in REDRAW { let mut h = VteHandler { grid: &mut grid, attrs: &mut a }; p.advance(&mut h, b); }
+        assert!(grid.cells[0][79].c == '╮' || grid.cells[0].iter().any(|c| c.c == '╮'),
+            "after shrink+redraw the box must be intact (right edge present)");
+
+        // widen: grid jumps to 100, claude redraws at 100
+        grid.resize(100, 30);
+        for &b in REDRAW { let mut h = VteHandler { grid: &mut grid, attrs: &mut a }; p.advance(&mut h, b); }
+        let r0: String = grid.cells[0].iter().map(|c| c.c).collect();
+        assert!(r0.trim_start().starts_with('╭'), "after widen+redraw top-left restored: {:?}", &r0[..r0.len().min(20)]);
+        assert!(r0.trim_end().ends_with('╮'), "after widen+redraw right edge restored");
+    }
+}
+
+#[cfg(test)]
+mod interleaved_resize {
+    use crate::terminal::types::CellAttrs;
+    use crate::terminal::vte::VteHandler;
+    use crate::terminal::TerminalGrid;
+    use vte::Parser;
+    const WELCOME: &[u8] = include_bytes!("../../tests/fixtures/claude_welcome.bin");
+    const REDRAW: &[u8] = include_bytes!("../../tests/fixtures/claude_resize.bin");
+
+    /// Reproduces the LIVE timing bug without a human: Claude Code's SIGWINCH
+    /// redraw (clear + repaint) arrives WHILE the grid is being resized by the
+    /// render thread. We interleave: feed part of the redraw, then resize the
+    /// grid, then feed the rest. If the result scrambles/truncates the frame,
+    /// we've captured the race the user sees.
+    #[test]
+    fn redraw_interleaved_with_resize_scrambles() {
+        let mut grid = TerminalGrid::with_scrollback_limit(100, 30, 1024 * 1024);
+        let mut p = Parser::new();
+        let mut a = CellAttrs::default();
+        for &b in WELCOME {
+            let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
+            p.advance(&mut h, b);
+        }
+        let mid = REDRAW.len() / 2;
+        // feed first half of the redraw
+        for &b in &REDRAW[..mid] {
+            let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
+            p.advance(&mut h, b);
+        }
+        // render thread resizes mid-redraw
+        grid.resize(80, 24);
+        // feed the rest
+        for &b in &REDRAW[mid..] {
+            let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
+            p.advance(&mut h, b);
+        }
+        // frame must be intact
+        let r0: String = grid.cells[0].iter().map(|c| c.c).collect();
+        assert!(r0.trim_start().starts_with('╭'),
+            "interleaved resize scrambled the frame top: {:?}", &r0[..r0.len().min(30)]);
+        assert!(r0.trim_end().ends_with('╮'),
+            "interleaved resize truncated the frame right edge");
+    }
+}
+
+#[cfg(test)]
+mod scrollback_truncation {
+    use crate::terminal::types::TerminalCell;
+    use crate::terminal::TerminalGrid;
+
+    /// USER REPRO (verbatim): "超出可视区的历史内容，拖拽变窄，再变宽，会截断
+    /// 历史内容右侧" — content scrolled beyond the visible area (scrollback),
+    /// drag narrower then wider, truncates the RIGHT side of the historical
+    /// content. Written on the IN-PLACE path (Claude Code is positioned).
+    #[test]
+    fn scrollback_right_side_survives_shrink_then_widen() {
+        let mut grid = TerminalGrid::with_scrollback_limit(80, 10, 1024 * 1024);
+        grid.program_uses_positioning = true; // in-place path (claude)
+
+        // Write 20 lines of 80-wide content, each with a unique marker at the
+        // RIGHT edge (col 79). Overflow pushes them into scrollback.
+        for i in 0..20 {
+            for col in 0..80 {
+                grid.cells[grid.cursor_row][col] = TerminalCell {
+                    c: if col == 79 { (b'A' + (i % 26) as u8) as char } else { 'x' },
+                    ..TerminalCell::default()
+                };
+            }
+            grid.cursor_row += 1;
+            if grid.cursor_row >= grid.rows {
+                grid.scroll_up(0, grid.rows - 1);
+                grid.cursor_row = grid.rows - 1;
+            }
+        }
+        // Confirm right-edge markers exist in scrollback before resize.
+        let markers_before: Vec<char> = (0..grid.scrollback_len())
+            .map(|i| grid.get_scrollback_row(i).unwrap().get(79).map(|c| c.c).unwrap_or(' '))
+            .collect();
+        assert!(markers_before.iter().any(|&c| c != ' '), "need scrollback with right-edge content");
+
+        grid.resize(60, 10); // drag narrower
+        grid.resize(80, 10); // drag wider back
+
+        // The right-edge markers must SURVIVE in scrollback (not become blank).
+        let markers_after: Vec<char> = (0..grid.scrollback_len())
+            .map(|i| grid.get_scrollback_row(i).unwrap().get(79).map(|c| c.c).unwrap_or(' '))
+            .collect();
+        assert!(
+            markers_after.iter().any(|&c| c != ' '),
+            "scrollback RIGHT side was truncated after shrink→widen (markers became blanks)"
+        );
+    }
+}
+
+#[cfg(test)]
+mod user_repro {
+    use crate::terminal::types::CellAttrs;
+    use crate::terminal::vte::VteHandler;
+    use crate::terminal::TerminalGrid;
+    use vte::Parser;
+    const WELCOME: &[u8] = include_bytes!("../../tests/fixtures/claude_welcome.bin");
+
+    /// USER'S EXACT REPRO: claude draws its frame, output pushes it into
+    /// scrollback, then drag NARROWER then WIDER — the historical frame's
+    /// right side must survive. Written on the IN-PLACE path (claude).
+    #[test]
+    fn claude_scrollback_frame_survives_shrink_widen() {
+        let mut grid = TerminalGrid::with_scrollback_limit(100, 30, 1024 * 1024);
+        let mut p = Parser::new();
+        let mut a = CellAttrs::default();
+        for &b in WELCOME {
+            let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
+            p.advance(&mut h, b);
+        }
+        assert!(grid.program_uses_positioning, "welcome positions");
+        assert_eq!(grid.cells[0][99].c, '╮', "frame right edge present before");
+
+        // Push several rows into scrollback (claude outputs more, frame scrolls)
+        for _ in 0..20 {
+            grid.scroll_up(0, grid.rows - 1);
+        }
+        let sb_markers: Vec<char> = (0..grid.scrollback_len())
+            .filter_map(|i| grid.get_scrollback_row(i).map(|r| r.get(99).map(|c| c.c).unwrap_or(' ')))
+            .collect();
+        assert!(sb_markers.iter().any(|&c| c != ' '), "frame top is in scrollback");
+
+        // drag NARROWER then WIDER (in-place path — claude)
+        grid.resize(80, 30);
+        grid.resize(100, 30);
+
+        // frame's right edge (col 99) must STILL be in scrollback, not blanked
+        let sb_after: Vec<char> = (0..grid.scrollback_len())
+            .filter_map(|i| grid.get_scrollback_row(i).map(|r| r.get(99).map(|c| c.c).unwrap_or(' ')))
+            .collect();
+        assert!(sb_after.iter().any(|&c| c != ' '),
+            "claude historical frame RIGHT side was truncated by shrink→widen: {:?}", sb_after);
+    }
+}
+
+
+
+#[cfg(test)]
+mod concurrency_resize {
+    use crate::terminal::types::CellAttrs;
+    use crate::terminal::vte::VteHandler;
+    use crate::terminal::TerminalGrid;
+    use std::sync::{Arc, Mutex};
+    use vte::Parser;
+    const WELCOME: &[u8] = include_bytes!("../../tests/fixtures/claude_welcome.bin");
+
+    /// Reproduces the LIVE bug with real threads: one thread keeps feeding
+    /// Claude Code's bytes (like the reader), another keeps resizing the grid
+    /// (like the render loop). The renderer must never observe a grid with two
+    /// box tops ("Welcome back!" on two rows) — that's the overlap the user
+    /// sees. This is deterministic (the WELCOME bytes contain the box).
+    #[test]
+    fn concurrent_feed_and_resize_never_duplicates_frame() {
+        let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(100, 30, 1024 * 1024)));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        // Thread A: reader — feeds WELCOME bytes repeatedly
+        let g2 = Arc::clone(&grid);
+        let s2 = Arc::clone(&stop);
+        let reader = std::thread::spawn(move || {
+            let mut parser = Parser::new();
+            let mut attrs = CellAttrs::default();
+            while !s2.load(std::sync::atomic::Ordering::Relaxed) {
+                let mut grid = g2.lock().unwrap();
+                let mut h = VteHandler { grid: &mut *grid, attrs: &mut attrs };
+                for &b in WELCOME {
+                    parser.advance(&mut h, b);
+                }
+            }
+        });
+
+        // Thread B: render — resizes the grid repeatedly (drawer drag)
+        let g3 = Arc::clone(&grid);
+        let s3 = Arc::clone(&stop);
+        let renderer = std::thread::spawn(move || {
+            let widths = [100usize, 79, 60, 85, 100, 70, 95, 100];
+            let mut i = 0usize;
+            while !s3.load(std::sync::atomic::Ordering::Relaxed) {
+                let mut grid = g3.lock().unwrap();
+                grid.resize(widths[i % widths.len()], 30);
+                i += 1;
+            }
+        });
+
+        // Run for a bounded time, then sample the grid for duplicates
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        reader.join().unwrap();
+        renderer.join().unwrap();
+
+        // Sample after settle: there must be at most one welcome top visible
+        let mut welcomes = 0usize; let mut tops = 0usize;
+        {
+            let grid = grid.lock().unwrap();
+            for r in 0..grid.rows {
+                let row: String = grid.cells[r].iter().map(|c| c.c).collect();
+                if row.contains("Welcome back!") { welcomes += 1; }
+                if row.contains("╭───") { tops += 1; }
+            }
+            println!("after concurrency: cols={} welcomes={} tops={} sb={}",
+                grid.cols, welcomes, tops, grid.scrollback_len());
+        }
+        // A clean frame has exactly one welcome/top. Duplicates = the overlap.
+        assert!(welcomes <= 1 && tops <= 1,
+            "concurrent feed+resize produced duplicate frame: welcomes={welcomes} tops={tops}");
+    }
+}
+
+#[cfg(test)]
+mod render_scan {
+    use crate::terminal::types::CellAttrs;
+    use crate::terminal::vte::VteHandler;
+    use crate::terminal::TerminalGrid;
+    use vte::Parser;
+    const WELCOME: &[u8] = include_bytes!("../../tests/fixtures/claude_welcome.bin");
+
+    /// Faithful renderer-mapping check: after claude's frame scrolls into
+    /// scrollback and we shrink→widen (reflow), every row the renderer could
+    /// reference (scrollback + grid) must be exactly grid.cols wide. A mismatch
+    /// is what makes rendering index out of bounds / draw wrong → the overlap.
+    #[test]
+    fn render_scan_rows_all_match_cols_after_shrink_widen() {
+        let mut grid = TerminalGrid::with_scrollback_limit(100, 30, 1024 * 1024);
+        let mut p = Parser::new();
+        let mut a = CellAttrs::default();
+        for &b in WELCOME {
+            let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
+            p.advance(&mut h, b);
+        }
+        // push the box into scrollback
+        for _ in 0..10 { grid.scroll_up(0, grid.rows - 1); }
+        grid.resize(80, 30);   // shrink (reflow scrollback)
+        grid.resize(100, 30);  // widen back
+
+        let cols = grid.cols;
+        for i in 0..grid.scrollback_len() {
+            let row = grid.get_scrollback_row(i).unwrap();
+            assert_eq!(row.len(), cols,
+                "scrollback row {i} is {} wide but cols={cols}", row.len());
+        }
+        for r in 0..grid.rows {
+            assert_eq!(grid.cells[r].len(), cols, "grid row {r} width mismatch");
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod mixed_width_rows {
+    use crate::terminal::types::TerminalCell;
+    use crate::terminal::TerminalGrid;
+
+    /// The user's crash: "index out of bounds: len is 79 but index is 79".
+    /// A scrollback row that is NARROWER than grid.cols makes the renderer
+    /// (and clear_row_range) index out of bounds. This must be impossible:
+    /// every row, visible or scrollback, must equal grid.cols after resize.
+    /// Reproduces by simulating a scrollback row that was NOT resized to cols.
+    #[test]
+    fn narrow_scrollback_row_never_exists() {
+        let mut grid = TerminalGrid::with_scrollback_limit(100, 30, 1024 * 1024);
+        // Simulate the crash state: a scrollback row at the OLD width (79)
+        // while grid.cols = 100. This is the invariant that must never break.
+        grid.scrollback.push_back(vec![TerminalCell::default(); 79]);
+        grid.scrollback_wrapped.push_back(false);
+        grid.normalize_row_widths(); // reader calls this after every chunk
+
+        // Every row must be resized to grid.cols — verify the invariant that
+        // prevents the out-of-bounds crash.
+        let cols = grid.cols;
+        for i in 0..grid.scrollback_len() {
+            let row = grid.get_scrollback_row(i).unwrap();
+            assert_eq!(row.len(), cols,
+                "narrow scrollback row {i} (len={}) would crash the renderer (cols={cols})",
+                row.len());
+        }
+    }
+}
+
+#[cfg(test)]
+mod claude_visible_overlap {
+    use crate::terminal::types::CellAttrs;
+    use crate::terminal::vte::VteHandler;
+    use crate::terminal::TerminalGrid;
+    use vte::Parser;
+    const WELCOME: &[u8] = include_bytes!("../../tests/fixtures/claude_welcome.bin");
+
+    /// USER'S EXACT REPRO, end-to-end: claude draws its frame at 100, the frame
+    /// scrolls into history as output follows, then drag NARROWER then WIDER.
+    /// The VISIBLE grid must show ONE clean frame — not two overlapping frames
+    /// at different widths (the user's screenshot shows two box tops).
+    #[test]
+    fn visible_grid_has_single_frame_after_shrink_widen() {
+        let mut grid = TerminalGrid::with_scrollback_limit(100, 30, 1024 * 1024);
+        let mut p = Parser::new();
+        let mut a = CellAttrs::default();
+        for &b in WELCOME {
+            let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
+            p.advance(&mut h, b);
+        }
+        // push the frame into scrollback
+        for _ in 0..12 { grid.scroll_up(0, grid.rows - 1); }
+        // drag narrower then wider
+        grid.resize(80, 30);
+        grid.resize(100, 30);
+
+        // Count box tops (╭───) in the VISIBLE grid
+        let mut tops = 0usize; let mut welcomes = 0usize;
+        for r in 0..grid.rows {
+            let row: String = grid.cells[r].iter().map(|c| c.c).collect();
+            if row.contains("╭───") { tops += 1; }
+            if row.contains("Welcome back!") { welcomes += 1; }
+        }
+        println!("visible: cols={} tops={tops} welcomes={welcomes} sb={}", grid.cols, grid.scrollback_len());
+        assert!(tops <= 1, "visible grid has {tops} box tops — overlapping frames");
+        assert!(welcomes <= 1, "visible grid has {welcomes} welcome frames — overlapping");
+    }
+}
