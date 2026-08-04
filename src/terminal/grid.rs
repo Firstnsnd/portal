@@ -158,28 +158,21 @@ impl TerminalGrid {
             return;
         }
         if cols != self.cols {
-            // Column change. Two modes:
-            //  - Reflow (main buffer + sequential writes, i.e. shell output):
-            //    re-wrap the text to fit the new width, preserving every char.
-            //  - In-place (alt screen, OR a main-buffer app using absolute
-            //    positioning like Claude Code): the screen is fixed-position art
-            //    — reflow would split box borders across rows and relocate the
-            //    cursor, scrambling the frame (worst while mid-output, when the
-            //    app can't do a full clear+redraw to recover). Resize in place:
-            //    cells keep their (row, col), out-of-bounds cells drop, the
-            //    cursor is only clamped.
+            // Column change. The MAIN buffer — shell output AND position-based
+            // apps that render in it (Claude Code never enters the alt screen) —
+            // is REFLOWED. This preserves every character: content that would be
+            // in-place-truncated on the right by a shrink (the user's "history
+            // right side cut off after drag narrower then wider") survives and
+            // rejoins on widen. A position-based app redraws its whole frame on
+            // SIGWINCH, so the transient reflow state (wrapped borders) is
+            // replaced by a clean frame.
             //
-            if self.alt_screen.is_none() && !self.program_uses_positioning {
+            // The ALT screen is resized in place: its apps (vim, htop) redraw
+            // their whole frame on SIGWINCH and reflowing position art would
+            // scramble it mid-draw.
+            if self.alt_screen.is_none() {
                 self.resize_reflow(cols, rows);
             } else {
-                // Position-based screen: the visible frame is fixed-position art
-                // and is redrawn by the app on SIGWINCH, so it's resized in
-                // place. But SCROLLBACK must never be truncated on a width
-                // change — that would permanently cut the right side of history
-                // after a shrink→widen. So reflow the scrollback first (re-wrap
-                // preserving every char), then resize the visible grid in place.
-                // (resize_reflow_scrollback_only now leaves self.cols alone, so
-                // the following resize_screen is safe.)
                 self.resize_reflow_scrollback_only(cols);
                 self.resize_screen(cols, rows);
             }
