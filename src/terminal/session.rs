@@ -118,12 +118,14 @@ impl RealPtySession {
                     match data {
                         Ok(data) => {
                             if data.is_empty() {
-                                // Check if PTY is still alive
+                                // No data: either idle, or the shell exited
+                                // (EOF → Ok(0)). Distinguish via waitpid.
                                 let is_alive = {
                                     let pty_ref = pty_clone.lock().unwrap();
                                     pty_ref.is_alive()
                                 };
                                 if !is_alive {
+                                    alive_clone.store(false, Ordering::Relaxed);
                                     break;
                                 }
                                 std::thread::sleep(std::time::Duration::from_millis(10));
@@ -140,8 +142,24 @@ impl RealPtySession {
                             }
                         }
                         Err(_) => {
-                            alive_clone.store(false, Ordering::Relaxed);
-                            break;
+                            // A non-transient read error (EIO on macOS when
+                            // the slave closes, broken master, etc.). Do NOT
+                            // blindly declare the session dead — the shell may
+                            // still be alive (e.g. a brief EIO during resize).
+                            // Confirm via waitpid: only exit if the child
+                            // actually terminated.
+                            let is_alive = {
+                                let pty_ref = pty_clone.lock().unwrap();
+                                pty_ref.is_alive()
+                            };
+                            if !is_alive {
+                                alive_clone.store(false, Ordering::Relaxed);
+                                break;
+                            }
+                            // Child still alive but read failed — transient.
+                            // Back off and retry instead of killing the PTY.
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            continue;
                         }
                     }
                 }

@@ -1,7 +1,6 @@
 //! Unix PTY implementation using pty crate
 
 use super::{Error, Pty, PtySize, Result};
-use pty::fork::Fork;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -37,75 +36,100 @@ pub struct UnixPty {
 }
 
 impl Pty for UnixPty {
-    fn spawn(command: &str, args: &[&str], _size: PtySize) -> Result<Self> {
-        // Use forkpty to create a PTY
-        let fork = Fork::from_ptmx().map_err(|e| Error::SpawnFailed(e.to_string()))?;
+    fn spawn(command: &str, args: &[&str], size: PtySize) -> Result<Self> {
+        // forkpty() opens a PTY pair, forks, and in the CHILD does:
+        //   setsid() + acquire controlling terminal (TIOCSCTTY) + dup2 the
+        //   slave onto stdin/stdout/stderr. This is the exact setup the system
+        //   Terminal uses, so a local shell behaves identically — proper job
+        //   control, /dev/tty works, no spurious SIGHUP/SIGTTIN that would
+        //   kill the shell. (The old `pty` 0.2 crate skipped TIOCSCTTY, leaving
+        //   the shell with no controlling terminal — fragile and a source of
+        //   unexplained "disconnects".)
+        let mut winsize = libc::winsize {
+            ws_row: size.rows,
+            ws_col: size.cols,
+            ws_xpixel: size.xpixel,
+            ws_ypixel: size.ypixel,
+        };
 
-        match fork {
-            Fork::Parent(child_pid, master) => {
-                // We're in the parent process
-                // child_pid is the PID of the child
-                // master is the master file descriptor
+        let mut master_fd: libc::c_int = -1;
+        let pid = unsafe {
+            libc::forkpty(
+                &mut master_fd,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut winsize,
+            )
+        };
 
-                // Duplicate the file descriptor to create a File
-                let fd = master.as_raw_fd();
-                let fd_dup = unsafe { libc::dup(fd) };
-                if fd_dup < 0 {
-                    return Err(Error::SpawnFailed("Failed to dup fd".to_string()));
+        if pid < 0 {
+            return Err(Error::SpawnFailed(
+                std::io::Error::last_os_error().to_string(),
+            ));
+        }
+
+        if pid == 0 {
+            // ── Child process ─────────────────────────────────────────────
+            // forkpty already wired up the controlling terminal + stdio.
+            // IMPORTANT: After fork(), only async-signal-safe functions can be
+            // called before exec(). Using std::process::exit() would trigger
+            // destructors and library cleanup (like CoreSpotlight/PowerLog on
+            // macOS) which causes crashes because dispatch queues are broken
+            // after fork.
+
+            // Set environment variables using libc (async-signal-safe)
+            unsafe {
+                libc::setenv(b"TERM\0".as_ptr() as *const i8, b"xterm-256color\0".as_ptr() as *const i8, 1);
+                libc::setenv(b"LANG\0".as_ptr() as *const i8, b"en_US.UTF-8\0".as_ptr() as *const i8, 1);
+                libc::setenv(b"LC_ALL\0".as_ptr() as *const i8, b"en_US.UTF-8\0".as_ptr() as *const i8, 1);
+
+                // Default to the user's home directory so new terminals open at ~
+                // instead of the app's working directory. getenv/chdir are
+                // async-signal-safe (allowed between fork and exec).
+                let home = libc::getenv(b"HOME\0".as_ptr() as *const i8);
+                if !home.is_null() {
+                    libc::chdir(home);
                 }
-
-                let master_file = unsafe { File::from_raw_fd(fd_dup) };
-
-                Ok(Self {
-                    master: master_file,
-                    child_pid,
-                    alive: Arc::new(AtomicBool::new(true)),
-                })
             }
-            Fork::Child(ref _slave) => {
-                // Child process - exec the command
-                // IMPORTANT: After fork(), only async-signal-safe functions can be called
-                // before exec(). Using std::process::exit() would trigger destructors
-                // and library cleanup (like CoreSpotlight/PowerLog on macOS) which
-                // causes crashes because dispatch queues are broken after fork.
 
-                // Set environment variables using libc (async-signal-safe)
-                unsafe {
-                    libc::setenv(b"TERM\0".as_ptr() as *const i8, b"xterm-256color\0".as_ptr() as *const i8, 1);
-                    libc::setenv(b"LANG\0".as_ptr() as *const i8, b"en_US.UTF-8\0".as_ptr() as *const i8, 1);
-                    libc::setenv(b"LC_ALL\0".as_ptr() as *const i8, b"en_US.UTF-8\0".as_ptr() as *const i8, 1);
+            // Build args for execvp (command + args + null terminator)
+            let mut exec_args: Vec<*const i8> = Vec::with_capacity(args.len() + 2);
+            let command_cstring = std::ffi::CString::new(command).unwrap_or_default();
+            exec_args.push(command_cstring.as_ptr());
 
-                    // Default to the user's home directory so new terminals open at ~
-                    // instead of the app's working directory. getenv/chdir are
-                    // async-signal-safe (allowed between fork and exec).
-                    let home = libc::getenv(b"HOME\0".as_ptr() as *const i8);
-                    if !home.is_null() {
-                        libc::chdir(home);
-                    }
-                }
+            let arg_cstrings: Vec<std::ffi::CString> = args
+                .iter()
+                .filter_map(|a| std::ffi::CString::new(*a).ok())
+                .collect();
+            for arg in &arg_cstrings {
+                exec_args.push(arg.as_ptr());
+            }
+            exec_args.push(std::ptr::null());
 
-                // Build args for execvp (command + args + null terminator)
-                let mut exec_args: Vec<*const i8> = Vec::with_capacity(args.len() + 2);
-                let command_cstring = std::ffi::CString::new(command).unwrap_or_default();
-                exec_args.push(command_cstring.as_ptr());
-
-                let arg_cstrings: Vec<std::ffi::CString> = args
-                    .iter()
-                    .filter_map(|a| std::ffi::CString::new(*a).ok())
-                    .collect();
-                for arg in &arg_cstrings {
-                    exec_args.push(arg.as_ptr());
-                }
-                exec_args.push(std::ptr::null());
-
-                // Execute the command - this replaces the current process
-                unsafe {
-                    libc::execvp(command_cstring.as_ptr(), exec_args.as_ptr());
-                    // If execvp returns, it failed - use _exit() which is async-signal-safe
-                    libc::_exit(1);
-                }
+            // Execute the command - this replaces the current process
+            unsafe {
+                libc::execvp(command_cstring.as_ptr(), exec_args.as_ptr());
+                // If execvp returns, it failed - use _exit() which is async-signal-safe
+                libc::_exit(1);
             }
         }
+
+        // ── Parent process ────────────────────────────────────────────────
+        // forkpty handed us the master fd directly. dup it so the File we
+        // store owns an independent descriptor (and closing our copy won't
+        // tear down the kernel's master while PtyWriter/session hold dupes).
+        let fd_dup = unsafe { libc::dup(master_fd) };
+        if fd_dup < 0 {
+            unsafe { libc::close(master_fd) };
+            return Err(Error::SpawnFailed("Failed to dup master fd".to_string()));
+        }
+        let master_file = unsafe { File::from_raw_fd(fd_dup) };
+
+        Ok(Self {
+            master: master_file,
+            child_pid: pid,
+            alive: Arc::new(AtomicBool::new(true)),
+        })
     }
 
     fn write(&mut self, data: &[u8]) -> Result<()> {
@@ -142,7 +166,18 @@ impl Pty for UnixPty {
                 Ok(buffer)
             }
             Ok(_) => Ok(Vec::new()),
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => Ok(Vec::new()),
+            // WouldBlock: no data available right now (non-blocking fd).
+            // Interrupted: read() was cut off by a signal (e.g. SIGCHLD when
+            // the shell forks a child to run a command). Both are transient —
+            // treat them as "no data yet" and retry on the next poll.
+            // Surfacing either as an error would let a stray signal or a
+            // momentarily-busy PTY permanently kill a perfectly alive shell.
+            Err(ref e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::Interrupted =>
+            {
+                Ok(Vec::new())
+            }
             Err(e) => Err(Error::ReadFailed(e.to_string())),
         }
     }

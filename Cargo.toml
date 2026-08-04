@@ -60,7 +60,6 @@ cocoa = "0.25"
 objc = "0.2"
 
 [target.'cfg(unix)'.dependencies]
-pty = "0.2"
 libc = "0.2"
 signal-hook = "0.3"
 

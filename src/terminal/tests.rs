@@ -1095,6 +1095,52 @@ mod pty_cleanup_tests {
 
     #[cfg(unix)]
     #[test]
+    fn test_pty_interactive_shell_stays_alive() {
+        use crate::terminal::{Pty, UnixPty};
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        // Spawn a real interactive shell. This exercises the controlling-terminal
+        // setup (forkpty → setsid + TIOCSCTTY). The whole point: a local shell
+        // must behave like the system Terminal — it runs, produces output, and
+        // stays alive, with NO spurious "disconnect".
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        let mut pty = UnixPty::spawn(&shell, &["-i"], crate::terminal::PtySize::new(24, 80))
+            .expect("shell spawn should succeed");
+
+        // Shell must be alive right after spawn.
+        thread::sleep(Duration::from_millis(200));
+        assert!(pty.is_alive(), "interactive shell must be alive after spawn");
+
+        // Run a command and confirm output flows back through the PTY.
+        pty.write(b"echo PORTAL_SMOKE_TOKEN\n").expect("write should succeed");
+
+        let mut got = Vec::new();
+        let deadline = Instant::now() + Duration::from_millis(2000);
+        while Instant::now() < deadline {
+            if let Ok(chunk) = pty.try_read() {
+                got.extend_from_slice(&chunk);
+                if got.windows(18).any(|w| w == b"PORTAL_SMOKE_TOKEN") {
+                    break;
+                }
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let s = String::from_utf8_lossy(&got);
+        assert!(
+            s.contains("PORTAL_SMOKE_TOKEN"),
+            "shell output should contain the token, got: {:?}",
+            s
+        );
+
+        // The shell must STILL be alive after running a command — this is the
+        // exact regression: the old code killed the session on a transient read
+        // error (SIGCHLD interrupting the read while the shell forked `echo`).
+        assert!(pty.is_alive(), "shell must stay alive after running a command");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn test_pty_creation_and_cleanup() {
         use crate::terminal::UnixPty;
         use std::thread;
