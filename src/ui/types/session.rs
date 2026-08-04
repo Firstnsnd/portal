@@ -332,16 +332,29 @@ impl TerminalSession {
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) {
-        // Apply any settled resize to the grid AND the PTY together.
+        // Apply any settled resize to the grid AND the PTY together — but only
+        // when the app is NOT in the middle of a synchronized redraw batch
+        // (\e[?2026h…?2026l). A full-screen app clears its OLD frame using its
+        // assumed (old) height, then redraws at the new height. If we resize
+        // mid-batch, the clear only covers rows up to the old height and the
+        // rows below it keep stale content (e.g. a duplicated status line when
+        // the window grows). Deferring until the batch ends lets the batch
+        // complete coherently at the old size, then the app's next (new-size)
+        // redraw clears everything. resize() is called every frame, so a
+        // deferred pending resize simply applies on a later frame.
         if let Some((pc, pr)) = self.pending_pty_size {
             if Instant::now() >= self.pty_resize_deadline {
-                if let Ok(mut grid) = self.grid.lock() {
-                    grid.resize(pc as usize, pr as usize);
+                let in_sync = self.grid.lock().map(|g| g.in_sync_update).unwrap_or(false);
+                if !in_sync {
+                    if let Ok(mut grid) = self.grid.lock() {
+                        grid.resize(pc as usize, pr as usize);
+                    }
+                    if let Some(ref mut session) = self.session {
+                        let _ = session.resize(pc, pr);
+                    }
+                    self.pending_pty_size = None;
                 }
-                if let Some(ref mut session) = self.session {
-                    let _ = session.resize(pc, pr);
-                }
-                self.pending_pty_size = None;
+                // else: keep pending; a later frame (after ?2026l) applies it
             }
         }
 
@@ -481,5 +494,152 @@ mod tests {
         assert!(s.pending_pty_size.is_none(), "pending resize must fire once settled");
         assert_eq!(s.grid.lock().unwrap().cols, 100, "grid must follow the PTY");
         assert_eq!(s.grid.lock().unwrap().rows, 40, "grid rows must follow the PTY");
+    }
+}
+
+
+
+#[cfg(test)]
+mod sync_defer {
+    use super::*;
+    use crate::terminal::{CellAttrs, TerminalGrid, VteHandler};
+    use vte::Parser;
+
+    fn grid_only_session(cols: usize, rows: usize) -> TerminalSession {
+        let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024)));
+        TerminalSession {
+            session: None, grid, last_cols: cols, last_rows: rows, scroll_offset: 0,
+            ssh_host: None, resolved_auth: None, selection: Selection::default(),
+            local_shell: String::new(), created_at: Instant::now(),
+            pending_pty_size: None, pty_resize_deadline: Instant::now(),
+            last_non_ascii_input: false, cwd: None, search_state: None,
+        }
+    }
+
+    fn feed(grid: &mut crate::terminal::TerminalGrid, p: &mut Parser, a: &mut CellAttrs, s: &str) {
+        for &b in s.as_bytes() {
+            let mut h = VteHandler { grid, attrs: a };
+            p.advance(&mut h, b);
+        }
+    }
+
+    /// Regression for the duplicated-status-line bug: a resize fired mid-\e[?2026
+    /// batch must be DEFERRED (not split claude's clear-then-redraw), so the old
+    /// status line is cleared by the next new-size redraw instead of surviving.
+    #[test]
+    fn resize_deferred_during_sync_batch() {
+        let mut s = grid_only_session(100, 30);
+        {
+            let mut g = s.grid.lock().unwrap();
+            let mut p = Parser::new();
+            let mut a = CellAttrs::default();
+            g.program_uses_positioning = true;
+            // status at the bottom, then start a redraw batch (clear old frame)
+            feed(&mut g, &mut p, &mut a, "\x1b[30;1HSTATUS_OLD\x1b[?2026h\x1b[H\x1b[2J");
+            assert!(g.in_sync_update, "?2026h must set sync flag");
+        }
+        // render loop wants to grow; debounce fires
+        s.resize(100, 40);
+        s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
+        s.resize(100, 40);
+        // while still in sync, the resize must NOT be applied
+        {
+            let g = s.grid.lock().unwrap();
+            assert_eq!(g.rows, 30, "resize must be deferred during a sync batch");
+            assert!(s.pending_pty_size.is_some(), "pending resize kept while in sync");
+        }
+        // batch ends (?2026l), then a later frame applies the resize
+        {
+            let mut g = s.grid.lock().unwrap();
+            let mut p = Parser::new();
+            let mut a = CellAttrs::default();
+            feed(&mut g, &mut p, &mut a, "\x1b[?2026l");
+        }
+        s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
+        s.resize(100, 40);
+        {
+            let g = s.grid.lock().unwrap();
+            assert_eq!(g.rows, 40, "deferred resize applied once sync batch ended");
+            assert!(s.pending_pty_size.is_none(), "pending cleared after apply");
+        }
+    }
+}
+
+#[cfg(test)]
+mod sync_defer_e2e {
+    use super::*;
+    use crate::terminal::{CellAttrs, TerminalGrid, VteHandler};
+    use vte::Parser;
+
+    fn grid_only_session(cols: usize, rows: usize) -> TerminalSession {
+        let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024)));
+        TerminalSession {
+            session: None, grid, last_cols: cols, last_rows: rows, scroll_offset: 0,
+            ssh_host: None, resolved_auth: None, selection: Selection::default(),
+            local_shell: String::new(), created_at: Instant::now(),
+            pending_pty_size: None, pty_resize_deadline: Instant::now(),
+            last_non_ascii_input: false, cwd: None, search_state: None,
+        }
+    }
+    fn status_count(grid: &TerminalGrid) -> usize {
+        (0..grid.rows).filter(|&r| {
+            let row: String = grid.cells[r].iter().map(|c| c.c).collect();
+            row.contains("STATUS")
+        }).count()
+    }
+
+    /// End-to-end: claude clears its OLD frame (a sync batch), the render loop
+    /// wants to grow the window mid-batch, the resize is DEFERRED until the
+    /// batch ends, then the grid grows and claude redraws at the new height —
+    /// exactly one status line survives (the duplicated one is gone).
+    #[test]
+    fn full_race_no_duplicate_status() {
+        let mut s = grid_only_session(100, 30);
+        {
+            let mut g = s.grid.lock().unwrap();
+            let mut p = Parser::new();
+            let mut a = CellAttrs::default();
+            g.program_uses_positioning = true;
+            // old status at bottom, then claude's redraw batch: clear all + redraw
+            // status at old bottom, still inside ?2026h
+            for &b in b"\x1b[30;1HSTATUS\x1b[?2026h\x1b[H\x1b[2J\x1b[30;1HSTATUS".iter() {
+                let mut h = VteHandler { grid: &mut *g, attrs: &mut a };
+                p.advance(&mut h, b);
+            }
+            assert!(g.in_sync_update);
+        }
+        // render loop grows; debounce fires but is DEFERRED (mid-sync)
+        s.resize(100, 40);
+        s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
+        s.resize(100, 40);
+        {
+            let g = s.grid.lock().unwrap();
+            assert_eq!(g.rows, 30, "must not grow mid-sync-batch");
+        }
+        // batch ends, resize applies, claude redraws status at NEW bottom
+        {
+            let mut g = s.grid.lock().unwrap();
+            let mut p = Parser::new();
+            let mut a = CellAttrs::default();
+            for &b in b"\x1b[?2026l".iter() {
+                let mut h = VteHandler { grid: &mut *g, attrs: &mut a };
+                p.advance(&mut h, b);
+            }
+        }
+        s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
+        s.resize(100, 40);
+        {
+            let mut g = s.grid.lock().unwrap();
+            assert_eq!(g.rows, 40);
+            let mut p = Parser::new();
+            let mut a = CellAttrs::default();
+            for &b in b"\x1b[H\x1b[2J\x1b[40;1HSTATUS".iter() {
+                let mut h = VteHandler { grid: &mut *g, attrs: &mut a };
+                p.advance(&mut h, b);
+            }
+        }
+        let n = status_count(&s.grid.lock().unwrap());
+        println!("end-to-end race: status_lines={n}");
+        assert!(n <= 1, "status line duplicated after grow+redraw: {n}");
     }
 }

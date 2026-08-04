@@ -2983,3 +2983,58 @@ mod no_duplicate_visible {
 }
 
 
+
+#[cfg(test)]
+mod statusline_dup {
+    use crate::terminal::types::CellAttrs;
+    use crate::terminal::vte::VteHandler;
+    use crate::terminal::TerminalGrid;
+    use vte::Parser;
+    const SPIN: &[u8] = include_bytes!("../../tests/fixtures/claude_spin.bin");
+
+    /// USER'S EXACT DUPLICATION: Claude Code's status line ("▎ Using
+    /// deepseek… · /model") and the auth warning get redrawn on every tick
+    /// (covering the same row). If a resize happens BETWEEN ticks, the 
+    /// terminal's grid moves/resizes so the next cover lands on a different
+    /// row → the status line appears MULTIPLE times. Reproduce: replay the
+    /// real session bytes with a mid-stream resize, then count status lines.
+    #[test]
+    fn statusline_not_duplicated_after_midstream_resize() {
+        let mut grid = TerminalGrid::with_scrollback_limit(100, 30, 1024 * 1024);
+        let mut p = Parser::new();
+        let mut a = CellAttrs::default();
+        let mid = SPIN.len() / 2;
+        for &b in &SPIN[..mid] {
+            let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
+            p.advance(&mut h, b);
+        }
+        // resize mid-stream: drag NARROWER (cols AND rows) then WIDER back
+        grid.resize(80, 24);
+        grid.resize(100, 30);
+        // rest of the stream (more status-line redraws)
+        for &b in &SPIN[mid..] {
+            let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
+            p.advance(&mut h, b);
+        }
+        // count status lines in the visible grid
+        let status = (0..grid.rows).filter(|&r| {
+            let row: String = grid.cells[r].iter().map(|c| c.c).collect();
+            row.contains("Using deepseek") || row.contains("· /model")
+        }).count();
+        println!("cols={} status_lines={status}", grid.cols);
+        assert!(status <= 1,
+            "status line duplicated after mid-stream resize: {status} copies in visible grid");
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
