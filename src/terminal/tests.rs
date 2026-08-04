@@ -2832,3 +2832,62 @@ mod claude_visible_overlap {
         assert!(welcomes <= 1, "visible grid has {welcomes} welcome frames — overlapping");
     }
 }
+
+#[cfg(test)]
+mod user_repro_exact {
+    use crate::terminal::types::CellAttrs;
+    use crate::terminal::vte::VteHandler;
+    use crate::terminal::TerminalGrid;
+    use vte::Parser;
+    const WELCOME: &[u8] = include_bytes!("../../tests/fixtures/claude_welcome.bin");
+
+    /// USER'S EXACT WORDS: "超出可视区的历史内容，拖拽变窄，再变宽，会截断历史内容
+    /// 右侧". Claude's frame scrolls into history, drag narrower then wider,
+    /// the RIGHT side of the historical frame must NOT be truncated — the box
+    /// top must rejoin to ONE row with ╮ at col 99.
+    #[test]
+    fn scrollback_box_top_rejoins_after_shrink_widen() {
+        let mut grid = TerminalGrid::with_scrollback_limit(100, 30, 1024 * 1024);
+        let mut p = Parser::new();
+        let mut a = CellAttrs::default();
+        for &b in WELCOME {
+            let mut h = VteHandler { grid: &mut grid, attrs: &mut a };
+            p.advance(&mut h, b);
+        }
+        // push the whole frame into scrollback
+        for _ in 0..20 { grid.scroll_up(0, grid.rows - 1); }
+        // confirm box top is in scrollback
+        let sb0: String = grid.get_scrollback_row(0).unwrap().iter().map(|c| c.c).collect();
+        println!("scrollback[0] before resize: {:?}", &sb0[..sb0.trim_end().len().min(30)]);
+
+        // drag narrower then wider
+        grid.resize(80, 30);
+        grid.resize(100, 30);
+
+        // find the box top row in scrollback and check its right edge
+        let cols = grid.cols;
+        let mut top_row: Option<String> = None;
+        for i in 0..grid.scrollback_len() {
+            let row: String = grid.get_scrollback_row(i).unwrap().iter().map(|c| c.c).collect();
+            if row.trim_start().starts_with('╭') {
+                top_row = Some(row);
+                break;
+            }
+        }
+        match top_row {
+            Some(row) => {
+                let len = row.trim_end().len();
+                let last = row.trim_end().chars().last().unwrap_or(' ');
+                println!("box top after shrink-widen: len={len} last={last:?} cols={cols} — {:?}", &row[..len.min(30)]);
+                assert_eq!(row.chars().count(), cols,
+                    "box top must be exactly {cols} wide (rejoined), got {} — right side truncated",
+                    row.chars().count());
+                assert_eq!(last, '╮',
+                    "box top right edge ╮ must survive shrink→widen, got last={last:?}");
+            }
+            None => panic!("box top lost from scrollback entirely"),
+        }
+    }
+}
+
+
