@@ -150,6 +150,14 @@ pub struct TerminalSession {
 }
 
 impl TerminalSession {
+    /// Settle window for a pending resize, in milliseconds. While the size keeps
+    /// changing this deadline keeps resetting, so a window drag coalesces into a
+    /// single resize event; once the size settles, the grid+PTY jump together
+    /// ~150ms later and the app redraws cleanly once. Short enough that a
+    /// narrowed frame recovers promptly, long enough to avoid a SIGWINCH storm
+    /// while dragging.
+    const PTY_RESIZE_SETTLE_MS: u64 = 150;
+
     pub fn new_local(id: usize, shell: &str) -> Self {
         // Load settings to get scrollback limit
         let settings = crate::config::load_settings();
@@ -387,7 +395,7 @@ impl TerminalSession {
         // resetting, so a drag coalesces; yet the app redraws ~150ms after you
         // stop — a narrowed frame recovers promptly.)
         self.pending_pty_size = Some((cols as u16, rows as u16));
-        self.pty_resize_deadline = Instant::now() + Duration::from_millis(150);
+        self.pty_resize_deadline = Instant::now() + Duration::from_millis(Self::PTY_RESIZE_SETTLE_MS);
     }
 }
 
