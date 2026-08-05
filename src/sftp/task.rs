@@ -248,7 +248,7 @@ async fn sftp_task_inner(
             Some(SftpCommand::Delete(path)) => {
                 match sftp.metadata(&path).await {
                     Ok(meta) => {
-                        let is_dir = meta.permissions.map_or(false, |p| (p & 0o170000) == 0o040000);
+                        let is_dir = meta.permissions.is_some_and(|p| (p & 0o170000) == 0o040000);
                         let result = if is_dir {
                             remove_dir_recursive(&sftp, &path).await
                         } else {

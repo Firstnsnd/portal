@@ -464,7 +464,7 @@ impl SshSession {
             .collect();
         let remote_fwd_arc = Arc::new(Mutex::new(remote_fwd_configs));
 
-        let mut handle = if let Some(ref jump) = jump_host {
+        let handle = if let Some(ref jump) = jump_host {
             match connect_via_jump(
                 jump, &host, port, &username, &auth,
                 keepalive_interval, agent_forwarding,
@@ -895,7 +895,7 @@ pub fn remove_known_hosts_key(host: &str, port: u16) -> Result<usize, String> {
             } else {
                 format!("[{}]:{}", host, port)
             };
-            clean_pattern == host || host_pattern == &expected
+            clean_pattern == host || host_pattern == expected
         };
 
         if matches {

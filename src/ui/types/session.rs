@@ -503,6 +503,71 @@ mod tests {
         assert_eq!(s.grid.lock().unwrap().cols, 100, "grid must follow the PTY");
         assert_eq!(s.grid.lock().unwrap().rows, 40, "grid rows must follow the PTY");
     }
+
+    /// A window drag issues a rapid sequence of different sizes before the
+    /// settle window passes. The pending resize must coalesce: only the FINAL
+    /// size is applied once the drag stops (no intermediate SIGWINCH storm).
+    #[test]
+    fn rapid_resizes_coalesce_to_final_size() {
+        let mut s = grid_only_session(148, 49);
+        // drag: several sizes before the deadline fires
+        s.resize(140, 49);
+        s.resize(120, 49);
+        s.resize(100, 44);
+        // all scheduled to the SAME pending slot — last write wins
+        assert_eq!(s.pending_pty_size, Some((100, 44)),
+            "pending must hold the latest drag size, not an intermediate");
+        assert_eq!(s.grid.lock().unwrap().cols, 148,
+            "grid stays at the ORIGINAL size during the drag");
+        // deadline fires → exactly ONE resize to the final size
+        s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
+        s.resize(100, 44);
+        assert!(s.pending_pty_size.is_none(), "coalesced resize must fire once");
+        assert_eq!(s.grid.lock().unwrap().cols, 100);
+        assert_eq!(s.grid.lock().unwrap().rows, 44);
+    }
+
+    /// A resize deferred during a ?2026 sync batch must STILL be applied once
+    /// the batch ends (a later frame), not lost forever.
+    #[test]
+    fn resize_deferred_in_sync_is_applied_after_batch() {
+        let mut s = grid_only_session(148, 49);
+        // enter sync batch
+        {
+            use crate::terminal::{CellAttrs, VteHandler};
+            use vte::Parser;
+            let mut g = s.grid.lock().unwrap();
+            let mut p = Parser::new();
+            let mut a = CellAttrs::default();
+            for &b in b"\x1b[?2026h".iter() {
+                let mut h = VteHandler { grid: &mut *g, attrs: &mut a };
+                p.advance(&mut h, b);
+            }
+        }
+        // deadline fires but resize is deferred (in sync)
+        s.resize(100, 40);
+        s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
+        s.resize(100, 40);
+        assert!(s.pending_pty_size.is_some(), "pending kept while in sync");
+        assert_eq!(s.grid.lock().unwrap().cols, 148, "grid not resized mid-batch");
+        // batch ends
+        {
+            use crate::terminal::{CellAttrs, VteHandler};
+            use vte::Parser;
+            let mut g = s.grid.lock().unwrap();
+            let mut p = Parser::new();
+            let mut a = CellAttrs::default();
+            for &b in b"\x1b[?2026l".iter() {
+                let mut h = VteHandler { grid: &mut *g, attrs: &mut a };
+                p.advance(&mut h, b);
+            }
+        }
+        // a later frame applies the deferred resize
+        s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
+        s.resize(100, 40);
+        assert!(s.pending_pty_size.is_none(), "deferred resize applied after batch");
+        assert_eq!(s.grid.lock().unwrap().cols, 100);
+    }
 }
 
 

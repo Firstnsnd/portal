@@ -31,7 +31,7 @@ mod e2e_tests {
 
         // Create components that would normally be in the app
         let hosts = portal::config::load_hosts(&portal::config::hosts_file_path());
-        let credentials = portal::config::load_credentials(&portal::config::credentials_file_path());
+        let _credentials = portal::config::load_credentials(&portal::config::credentials_file_path());
 
         assert!(!hosts.is_empty());
     }
@@ -99,9 +99,9 @@ mod e2e_tests {
     /// Test: Config serialization round-trip
     #[test]
     fn test_config_roundtrip() {
-        use tempfile::NamedTempFile;
+        
 
-        let (temp_file, path) = create_test_temp_file();
+        let (_temp_file, path) = create_test_temp_file();
 
         let original_hosts = vec![
             portal::config::HostEntry {

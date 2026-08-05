@@ -141,7 +141,7 @@ impl RealPtySession {
                             {
                                 let mut grid = grid_clone.lock().unwrap();
                                 let mut handler = VteHandler {
-                                    grid: &mut *grid,
+                                    grid: &mut grid,
                                     attrs: &mut attrs,
                                 };
                                 for byte in &data {
@@ -197,8 +197,8 @@ impl RealPtySession {
                     sys.refresh_memory();
                     sys.refresh_cpu_usage();
                     nets.refresh();
-                    let rx: u64 = nets.iter().map(|(_, n)| n.total_received()).sum();
-                    let tx: u64 = nets.iter().map(|(_, n)| n.total_transmitted()).sum();
+                    let rx: u64 = nets.values().map(|n| n.total_received()).sum();
+                    let tx: u64 = nets.values().map(|n| n.total_transmitted()).sum();
                     let net_rx_rate = prev_rx
                         .map(|p| ((rx.saturating_sub(p)) as f64 / 5.0) as u64)
                         .unwrap_or(0);
@@ -263,7 +263,7 @@ impl RealPtySession {
         #[cfg(unix)]
         if let Some(ref pty) = self.pty {
             let mut pty_ref = pty.lock().unwrap();
-            return pty_ref.resize(PtySize::new(rows, cols)).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()));
+            return pty_ref.resize(PtySize::new(rows, cols)).map_err(|e| io::Error::other(e.to_string()));
         }
         #[cfg(windows)]
         if let Some(ref pty) = self.pty {

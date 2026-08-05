@@ -4,8 +4,8 @@
 mod tests {
     use crate::ssh::port_forward::{PortForward, ForwardState, PortForwardConfig, ForwardKind};
     use crate::ssh::{AppNotification, NotificationLevel};
-    use std::sync::Arc;
-    use tokio::sync::watch;
+    
+    
 
     fn create_test_forward(kind: ForwardKind) -> PortForwardConfig {
         PortForwardConfig {

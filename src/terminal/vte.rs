@@ -143,7 +143,7 @@ impl<'a> Perform for VteHandler<'a> {
                     self.grid.cursor_col = self.grid.cols.saturating_sub(1);
                 }
             }
-            0x0A | 0x0B | 0x0C => {
+            0x0A..=0x0C => {
                 // LF, VT, FF - line feed
                 self.grid.wrap_pending = false;
                 self.grid.cursor_row += 1;

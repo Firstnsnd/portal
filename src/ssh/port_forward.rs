@@ -73,7 +73,11 @@ impl AppNotification {
 pub struct PortForward {
     pub config: PortForwardConfig,
     pub state: Arc<std::sync::Mutex<ForwardState>>,
-    /// Allocated port for remote forwards (returned by tcpip_forward)
+    /// Allocated port for remote forwards (returned by tcpip_forward).
+    /// Read only by tests to verify the port was stored — production reads the
+    /// value via the forward's live state, so this is intentionally
+    /// test-observable state, not dead.
+    #[allow(dead_code)]
     pub allocated_port: Arc<std::sync::Mutex<Option<u32>>>,
     cancel_tx: watch::Sender<bool>,
 }

@@ -351,6 +351,7 @@ impl CredentialDialog {
 }
 
 /// Snippet view state for Command Snippets feature
+#[derive(Default)]
 pub struct SnippetViewState {
     #[allow(dead_code)]
     pub search_query: String,
@@ -405,27 +406,6 @@ impl SnippetViewState {
     }
 }
 
-impl Default for SnippetViewState {
-    fn default() -> Self {
-        Self {
-            search_query: String::new(),
-            group_filter: String::new(),
-            editing: None,
-            edit_name: String::new(),
-            edit_command: String::new(),
-            edit_group: String::new(),
-            open: false,
-            new_name: String::new(),
-            new_command: String::new(),
-            new_group: String::new(),
-            confirm_delete: None,
-            pending_run_command: None,
-            selector_open: false,
-            selected_tab: None,
-            selected_session: None,
-        }
-    }
-}
 
 /// Host filter state for the hosts list view
 #[derive(Default, Clone)]
@@ -454,18 +434,16 @@ impl HostFilter {
         }
 
         // Apply tag filter
-        if !self.tag.is_empty() {
-            if !host.tags.iter().any(|t| t.eq_ignore_ascii_case(&self.tag)) {
+        if !self.tag.is_empty()
+            && !host.tags.iter().any(|t| t.eq_ignore_ascii_case(&self.tag)) {
                 return false;
             }
-        }
 
         // Apply group filter
-        if !self.group.is_empty() {
-            if host.group != self.group {
+        if !self.group.is_empty()
+            && host.group != self.group {
                 return false;
             }
-        }
 
         true
     }

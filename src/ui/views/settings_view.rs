@@ -249,7 +249,7 @@ impl PortalApp {
                         .find(|b| b.action == *action)
                         .cloned();
                     let display = binding.as_ref()
-                        .map(|b| ShortcutResolver::display_binding(b))
+                        .map(ShortcutResolver::display_binding)
                         .unwrap_or_else(|| "—".to_string());
 
                     let is_this_recording = self.recording_shortcut.as_ref() == Some(action);

@@ -247,7 +247,7 @@ impl Pty for UnixPty {
                     self.alive.store(false, Ordering::Relaxed);
                     return Ok(None);
                 }
-                return Err(Error::ReadFailed(format!("waitpid failed: {}", errno)));
+                Err(Error::ReadFailed(format!("waitpid failed: {}", errno)))
             } else if result == 0 {
                 // Child still alive
                 Ok(None)
@@ -359,11 +359,10 @@ impl Pty for UnixPty {
                             Err(_) => continue,
                         };
                         if let Some(comm) = ps_comm(cpid) {
-                            if KNOWN.contains(&comm.as_str()) && comm != direct_name {
-                                if best.as_ref().map_or(true, |(pid, _)| cpid > *pid) {
+                            if KNOWN.contains(&comm.as_str()) && comm != direct_name
+                                && best.as_ref().is_none_or(|(pid, _)| cpid > *pid) {
                                     best = Some((cpid, comm));
                                 }
-                            }
                         }
                     }
                     if let Some((_, name)) = best {

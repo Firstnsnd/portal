@@ -12,7 +12,7 @@ impl eframe::App for TestApp {
             let builder = egui::ViewportBuilder::default()
                 .with_title("Child Window")
                 .with_inner_size([400.0, 300.0]);
-            ctx.show_viewport_immediate(vp_id, builder, |ctx, class| {
+            ctx.show_viewport_immediate(vp_id, builder, |ctx, _class| {
                 eprintln!("viewport callback called");
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.label("Hello from child viewport!");

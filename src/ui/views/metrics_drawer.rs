@@ -135,7 +135,7 @@ pub fn render_tools_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut
                         1 => {
                             let mut selected: Option<String> = None;
                             crate::ui::views::snippets_view::render_snippet_list(
-                                ui, &cx.snippets, theme, &language,
+                                ui, cx.snippets, theme, &language,
                                 |cmd| { selected = Some(cmd.to_string()); });
                             if let Some(cmd) = selected {
                                 if let Some(t) = window.tabs.get_mut(active) { t.pending_snippet = Some(cmd); }
@@ -207,11 +207,10 @@ fn render_tunnels_tab(ui: &mut egui::Ui, window: &mut AppWindow, active: usize, 
                     if let Some(SessionBackend::Ssh(other)) = &s.session {
                         if let Ok(pfs) = other.port_forwards.lock() {
                             for pf in pfs.iter() {
-                                if pf.config == *cfg {
-                                    if pf.state.lock().ok().map(|g| matches!(*g, ForwardState::Active)).unwrap_or(false) {
+                                if pf.config == *cfg
+                                    && pf.state.lock().ok().map(|g| matches!(*g, ForwardState::Active)).unwrap_or(false) {
                                         return true;
                                     }
-                                }
                             }
                         }
                     }

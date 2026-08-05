@@ -368,7 +368,7 @@ impl TerminalGrid {
 
     /// Calculate the memory usage of a row in bytes.
     fn row_memory_usage(row: &[TerminalCell]) -> usize {
-        row.len() * std::mem::size_of::<TerminalCell>()
+        std::mem::size_of_val(row)
     }
 
     /// Clear a row to default cells.
@@ -696,7 +696,7 @@ impl TerminalGrid {
         let scrollback_row_counts: Vec<usize> = scrollback_logical_lines.iter()
             .map(|line| {
                 let line_len = line.iter().rposition(|c| c.c != ' ' && c.c != '\0').map(|p| p + 1).unwrap_or(0);
-                if line_len == 0 { 0 } else { (line_len + new_cols - 1) / new_cols }
+                if line_len == 0 { 0 } else { line_len.div_ceil(new_cols) }
             })
             .collect();
 
@@ -706,7 +706,7 @@ impl TerminalGrid {
         let grid_row_counts: Vec<usize> = grid_logical_lines.iter()
             .map(|line| {
                 let line_len = line.iter().rposition(|c| c.c != ' ' && c.c != '\0').map(|p| p + 1).unwrap_or(0);
-                if line_len == 0 { 0 } else { (line_len + new_cols - 1) / new_cols }
+                if line_len == 0 { 0 } else { line_len.div_ceil(new_cols) }
             })
             .collect();
 
@@ -739,9 +739,9 @@ impl TerminalGrid {
                 // into scrollback on a previous shrink stays buried there after
                 // widening back — a position-based frame (e.g. Claude Code's
                 // welcome box) ends up permanently truncated.
-                let mut all = new_scrollback.into_iter().chain(new_grid_content.into_iter());
+                let mut all = new_scrollback.into_iter().chain(new_grid_content);
                 let mut all_wrapped = calc_wrapped_flags(&scrollback_row_counts).into_iter()
-                    .chain(calc_wrapped_flags(&grid_row_counts).into_iter());
+                    .chain(calc_wrapped_flags(&grid_row_counts));
                 self.scrollback.clear();
                 self.scrollback_wrapped.clear();
                 self.cells = Vec::new();

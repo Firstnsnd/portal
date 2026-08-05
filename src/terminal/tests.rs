@@ -703,7 +703,7 @@ mod tests {
         write_string(&mut grid, "(base) vaniot@bogon portal % ");
 
         // Now resize to narrower width
-        let original_content = get_visible_content(&grid);
+        let _original_content = get_visible_content(&grid);
         grid.resize(40, 24);
 
         // The ls output should still be present
@@ -787,7 +787,7 @@ mod tests {
 
         // Get content before resize
         let content_before = get_visible_content(&grid);
-        let lines_before = content_before.lines().count();
+        let _lines_before = content_before.lines().count();
 
         // Resize to half width (this doubles the row count)
         grid.resize(40, 24);
@@ -1128,8 +1128,8 @@ mod tests {
 /// to prevent the "out of PTY devices" error that occurred with 500+ zombie processes
 #[cfg(test)]
 mod pty_cleanup_tests {
-    use super::*;
-    use crate::terminal::{Pty, PtySize};
+    
+    use crate::terminal::Pty;
 
     #[cfg(unix)]
     #[test]
@@ -2288,7 +2288,7 @@ mod replay_harness {
         // index them by grid.cols go out of bounds (startup crash we fixed).
         let mut h = Harness::new(79, 10);
         // scroll 3 rows into scrollback at width 79
-        for r in 0..3 {
+        for _r in 0..3 {
             h.feed(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); // 79 wide
             h.feed(b"\r\n");
         }
@@ -2859,7 +2859,7 @@ mod user_repro_exact {
 
         // The box top (╭ … ╮) must be intact in the TOTAL content and exactly
         // cols wide (rejoined on widen — nothing truncated on the right).
-        let cols = grid.cols;
+        let _cols = grid.cols;
         let total: String = {
             let mut s = String::new();
             for i in 0..grid.scrollback_len() {

@@ -255,8 +255,8 @@ pub fn render_file_panel(
 
         // Arrow keys
         let focus = selection.focus.unwrap_or(0);
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-            if focus > 0 {
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowUp))
+            && focus > 0 {
                 let new_focus = focus - 1;
                 if shift {
                     *selection_action = Some(SelectionAction::FocusExtend(new_focus));
@@ -264,9 +264,8 @@ pub fn render_file_panel(
                     *selection_action = Some(SelectionAction::FocusMove(new_focus));
                 }
             }
-        }
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-            if focus + 1 < entries.len() {
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowDown))
+            && focus + 1 < entries.len() {
                 let new_focus = focus + 1;
                 if shift {
                     *selection_action = Some(SelectionAction::FocusExtend(new_focus));
@@ -274,7 +273,6 @@ pub fn render_file_panel(
                     *selection_action = Some(SelectionAction::FocusMove(new_focus));
                 }
             }
-        }
 
         // Enter → open focused entry
         if ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -290,11 +288,10 @@ pub fn render_file_panel(
         }
 
         // Delete / Backspace → request delete
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
-            if !selection.is_empty() {
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+            && !selection.is_empty() {
                 *delete_request = true;
             }
-        }
     }
 
     // File listing scroll area
@@ -316,7 +313,7 @@ pub fn render_file_panel(
                 // Check if dragging over this directory entry (for move-to-folder)
                 let is_drop_target = is_dir && !is_selected && {
                     let ctx = ui.ctx();
-                    if let Some(payload) = egui::DragAndDrop::payload::<DragPayload>(&ctx) {
+                    if let Some(payload) = egui::DragAndDrop::payload::<DragPayload>(ctx) {
                         if payload.is_local == is_local {
                             if let Some(hover_pos) = ctx.input(|i| i.pointer.hover_pos()) {
                                 rect.contains(hover_pos)
@@ -334,7 +331,7 @@ pub fn render_file_panel(
                 // Handle drop on directory (move files to this folder)
                 if is_drop_target && ui.ctx().input(|i| i.pointer.any_released()) {
                     let ctx = ui.ctx();
-                    if let Some(payload) = egui::DragAndDrop::take_payload::<DragPayload>(&ctx) {
+                    if let Some(payload) = egui::DragAndDrop::take_payload::<DragPayload>(ctx) {
                         if payload.is_local == is_local && !payload.entries.is_empty() {
                             // Don't move if the only item being dragged is this directory itself
                             let can_move = payload.entries.len() > 1 ||
