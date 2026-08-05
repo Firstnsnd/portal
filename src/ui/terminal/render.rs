@@ -138,7 +138,7 @@ pub fn render_terminal_session(
     let mut action: Option<PaneAction> = None;
 
     let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
-    let close_btn_hovered = pointer_pos.map_or(false, |p| close_btn_rect.contains(p)) && response.hovered();
+    let close_btn_hovered = pointer_pos.is_some_and(|p| close_btn_rect.contains(p)) && response.hovered();
     let close_btn_clicked = show_close_btn && close_btn_hovered && response.clicked();
 
     if close_btn_clicked {
@@ -309,10 +309,14 @@ pub fn render_terminal_session(
                 };
 
                 let col_start = if row == sr { sc } else { 0 };
-                let col_end = (if row == er { ec + 1 } else { grid.cols }).min(grid.cols);
+                // Clamp to the row's actual length: a scrollback row may have
+                // scrolled off at a narrower width than the current grid.cols,
+                // and indexing it by grid.cols goes out of bounds.
+                let col_end = (if row == er { ec + 1 } else { grid.cols })
+                    .min(grid.cols)
+                    .min(cells.len());
 
-                for col in col_start..col_end {
-                    let cell = &cells[col];
+                for cell in &cells[col_start..col_end] {
                     if !cell.wide_continuation {
                         text.push(cell.c);
                     }
@@ -457,7 +461,7 @@ pub fn render_terminal_session(
 
         let has_non_ascii_text = events.iter().any(|e| {
             if let egui::Event::Text(text) = e {
-                !text.chars().all(|c| c.is_ascii())
+                !text.is_ascii()
             } else {
                 false
             }
@@ -493,7 +497,7 @@ pub fn render_terminal_session(
                             session.write(&safe_text);
                             input_bytes.extend_from_slice(safe_text.as_bytes());
                             ime_committed = true;
-                            session.last_non_ascii_input = !safe_text.chars().all(|c| c.is_ascii());
+                            session.last_non_ascii_input = !safe_text.is_ascii();
                             *ime_composing = false;
                         }
                         egui::ImeEvent::Disabled => {
@@ -514,16 +518,16 @@ pub fn render_terminal_session(
                         }
                         if session.last_non_ascii_input {
                             let is_single_ascii_punct = text.len() == 1 &&
-                                text.chars().next().map(|c| is_chinese_ime_punct(c)).unwrap_or(false);
+                                text.chars().next().map(is_chinese_ime_punct).unwrap_or(false);
                             if is_single_ascii_punct {
                                 continue;
                             }
                         }
 
                         let is_punct = text.len() == 1 &&
-                            text.chars().next().map(|c| is_chinese_ime_punct(c)).unwrap_or(false);
+                            text.chars().next().map(is_chinese_ime_punct).unwrap_or(false);
 
-                        if !text.chars().all(|c| c.is_ascii()) {
+                        if !text.is_ascii() {
                             // Non-ASCII text (Chinese, Japanese, Korean, etc.)
                             session.selection.clear();
                             let safe_text: String = text.chars()
@@ -746,8 +750,8 @@ pub fn render_terminal_session(
                 // Within viewport - apply offset to get absolute position
                 if offset > 0 && screen_row < offset {
                     // Viewport is showing scrollback content
-                    let sb_idx = scrollback_len.saturating_sub(offset) + screen_row;
-                    sb_idx
+                    
+                    scrollback_len.saturating_sub(offset) + screen_row
                 } else {
                     // Viewport is showing active grid content
                     let grid_row = screen_row.saturating_sub(offset);
@@ -1180,7 +1184,7 @@ pub fn render_terminal_session(
                 // period) keeps the animation alive at minimal GPU cost.
                 ctx.request_repaint_after(std::time::Duration::from_millis(250));
 
-                let blink_on = (ctx.input(|i| i.time) * 2.0) as u64 % 2 == 0;
+                let blink_on = ((ctx.input(|i| i.time) * 2.0) as u64).is_multiple_of(2);
                 if blink_on {
                     painter.line_segment(
                         [cursor_top, cursor_bottom],
@@ -1376,6 +1380,7 @@ pub fn render_terminal_session(
                 );
             }
         }
+
     } // end grid.lock()
 
     // ── Search bar overlay ────────────────────────────────────────────────────
@@ -1574,7 +1579,7 @@ pub fn render_terminal_pane(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     session_idx: usize,
-    sessions: &mut Vec<TerminalSession>,
+    sessions: &mut [TerminalSession],
     focused_session: usize,
     broadcast_state: &BroadcastState,
     ime_composing: &mut bool,
@@ -1613,7 +1618,7 @@ pub fn render_pane_tree(
     ctx: &egui::Context,
     node: &mut PaneNode,
     rect: egui::Rect,
-    sessions: &mut Vec<TerminalSession>,
+    sessions: &mut [TerminalSession],
     focused_session: usize,
     broadcast_state: &BroadcastState,
     ime_composing: &mut bool,

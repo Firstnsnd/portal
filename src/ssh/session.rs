@@ -151,12 +151,11 @@ pub async fn connect_and_authenticate(
     _keepalive_interval: u32,
     _agent_forwarding: bool,
 ) -> Result<russh::client::Handle<SshClient>, String> {
-    let mut config = russh::client::Config::default();
-    // Enable SSH keepalive: send a keepalive packet every 15 seconds
-    // This helps prevent connections from dropping due to inactivity
-    config.keepalive_interval = Some(std::time::Duration::from_secs(15));
-    // Max number of failed keepalives before disconnecting (30 = 15s * 30 = 7.5 minutes)
-    config.keepalive_max = 30;
+    let config = russh::client::Config {
+        keepalive_interval: Some(std::time::Duration::from_secs(15)),
+        keepalive_max: 30,
+        ..Default::default()
+    };
     let config = Arc::new(config);
     let addr = format!("{}:{}", host, port);
 
@@ -340,6 +339,7 @@ pub struct SshSession {
 }
 
 impl SshSession {
+    #[allow(clippy::too_many_arguments)]
     pub fn connect(
         runtime: &tokio::runtime::Runtime,
         host: String,
@@ -370,6 +370,7 @@ impl SshSession {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_scrollback_limit(
         runtime: &tokio::runtime::Runtime,
         host: String,
@@ -427,6 +428,7 @@ impl SshSession {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn ssh_task(
         host: String,
         port: u16,
@@ -464,7 +466,7 @@ impl SshSession {
             .collect();
         let remote_fwd_arc = Arc::new(Mutex::new(remote_fwd_configs));
 
-        let mut handle = if let Some(ref jump) = jump_host {
+        let handle = if let Some(ref jump) = jump_host {
             match connect_via_jump(
                 jump, &host, port, &username, &auth,
                 keepalive_interval, agent_forwarding,
@@ -895,7 +897,7 @@ pub fn remove_known_hosts_key(host: &str, port: u16) -> Result<usize, String> {
             } else {
                 format!("[{}]:{}", host, port)
             };
-            clean_pattern == host || host_pattern == &expected
+            clean_pattern == host || host_pattern == expected
         };
 
         if matches {

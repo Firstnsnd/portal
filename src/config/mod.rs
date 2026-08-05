@@ -393,7 +393,7 @@ fn security_find_password(service: &str, account: &str) -> Option<String> {
                 let hex_only: String = hex_str.chars()
                     .take_while(|c| c.is_ascii_hexdigit())
                     .collect();
-                if !hex_only.is_empty() && hex_only.len() % 2 == 0 {
+                if !hex_only.is_empty() && hex_only.len().is_multiple_of(2) {
                     let bytes: Vec<u8> = (0..hex_only.len())
                         .step_by(2)
                         .filter_map(|i| hex_only.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok()))
@@ -998,12 +998,11 @@ pub fn save_hosts(path: &Path, hosts: &[HostEntry]) {
             let mut entry = h.clone();
             match &mut entry.auth {
                 AuthMethod::Password { password } => {
-                    if !password.is_empty() {
-                        if store_host_credential(&h.host, h.port, &h.username, "password", password, &h.name) {
+                    if !password.is_empty()
+                        && store_host_credential(&h.host, h.port, &h.username, "password", password, &h.name) {
                             password.clear();
                         }
                         // If keychain store failed, keep plaintext as fallback
-                    }
                 }
                 AuthMethod::Key { key_path, key_content, passphrase, key_in_keychain } => {
                     // Import private key content into keychain (from file or pasted content)
@@ -1033,18 +1032,16 @@ pub fn save_hosts(path: &Path, hosts: &[HostEntry]) {
                             String::new()
                         };
 
-                        if !key_data.is_empty() {
-                            if store_host_credential(&h.host, h.port, &h.username, "privatekey", &key_data, &h.name) {
+                        if !key_data.is_empty()
+                            && store_host_credential(&h.host, h.port, &h.username, "privatekey", &key_data, &h.name) {
                                 *key_in_keychain = true;
                                 log::info!("Imported private key into keychain for {}@{}:{}", h.username, h.host, h.port);
                             }
-                        }
                     }
-                    if !passphrase.is_empty() {
-                        if store_host_credential(&h.host, h.port, &h.username, "passphrase", passphrase, &h.name) {
+                    if !passphrase.is_empty()
+                        && store_host_credential(&h.host, h.port, &h.username, "passphrase", passphrase, &h.name) {
                             passphrase.clear();
                         }
-                    }
                 }
                 AuthMethod::None => {}
             }

@@ -240,8 +240,10 @@ pub fn render_keychain_view(
 
     if let Some(id) = credential_to_delete {
         cx.credentials.retain(|c| c.id != id);
-        let mut actions = ViewActions::default();
-        actions.delete_credential = Some(id);
+        let actions = ViewActions {
+            delete_credential: Some(id),
+            ..Default::default()
+        };
         return actions;
     }
 
@@ -288,8 +290,8 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                                 window.credential_dialog.edit_id = None;
                             }
                             // Delete button (edit mode only)
-                            if is_editing {
-                                if ui.add(
+                            if is_editing
+                                && ui.add(
                                     egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
                                         .frame(false)
                                 ).on_hover_text(cx.language.t("delete"))
@@ -297,7 +299,6 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                                     window.credential_dialog.confirm_delete = window.credential_dialog.edit_id.clone();
                                     window.credential_dialog.open = false;
                                 }
-                            }
                         });
                     });
                 });

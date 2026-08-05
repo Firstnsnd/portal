@@ -403,11 +403,9 @@ mod tests {
     #[test]
     fn test_snippet_drawer_state_preserved_on_tab_switch() {
         // Simulate multiple tabs with independent drawer states
-        let mut tabs = vec![
-            create_test_tab("Tab 1"),
+        let mut tabs = [create_test_tab("Tab 1"),
             create_test_tab("Tab 2"),
-            create_test_tab("Tab 3"),
-        ];
+            create_test_tab("Tab 3")];
 
         // Open drawer on tabs 0 and 2, leave tab 1 closed
         tabs[0].tools_drawer_open = true;

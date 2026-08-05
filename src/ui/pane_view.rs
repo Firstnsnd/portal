@@ -66,6 +66,7 @@ pub struct WindowContext<'a> {
 
 impl<'a> WindowContext<'a> {
     /// Create a new window context
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         hosts: &'a mut Vec<HostEntry>,
         credentials: &'a mut Vec<Credential>,

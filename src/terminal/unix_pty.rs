@@ -79,14 +79,14 @@ impl Pty for UnixPty {
 
             // Set environment variables using libc (async-signal-safe)
             unsafe {
-                libc::setenv(b"TERM\0".as_ptr() as *const i8, b"xterm-256color\0".as_ptr() as *const i8, 1);
-                libc::setenv(b"LANG\0".as_ptr() as *const i8, b"en_US.UTF-8\0".as_ptr() as *const i8, 1);
-                libc::setenv(b"LC_ALL\0".as_ptr() as *const i8, b"en_US.UTF-8\0".as_ptr() as *const i8, 1);
+                libc::setenv(c"TERM".as_ptr(), c"xterm-256color".as_ptr(), 1);
+                libc::setenv(c"LANG".as_ptr(), c"en_US.UTF-8".as_ptr(), 1);
+                libc::setenv(c"LC_ALL".as_ptr(), c"en_US.UTF-8".as_ptr(), 1);
 
                 // Default to the user's home directory so new terminals open at ~
                 // instead of the app's working directory. getenv/chdir are
                 // async-signal-safe (allowed between fork and exec).
-                let home = libc::getenv(b"HOME\0".as_ptr() as *const i8);
+                let home = libc::getenv(c"HOME".as_ptr());
                 if !home.is_null() {
                     libc::chdir(home);
                 }
@@ -247,7 +247,7 @@ impl Pty for UnixPty {
                     self.alive.store(false, Ordering::Relaxed);
                     return Ok(None);
                 }
-                return Err(Error::ReadFailed(format!("waitpid failed: {}", errno)));
+                Err(Error::ReadFailed(format!("waitpid failed: {}", errno)))
             } else if result == 0 {
                 // Child still alive
                 Ok(None)
@@ -359,11 +359,10 @@ impl Pty for UnixPty {
                             Err(_) => continue,
                         };
                         if let Some(comm) = ps_comm(cpid) {
-                            if KNOWN.contains(&comm.as_str()) && comm != direct_name {
-                                if best.as_ref().map_or(true, |(pid, _)| cpid > *pid) {
+                            if KNOWN.contains(&comm.as_str()) && comm != direct_name
+                                && best.as_ref().is_none_or(|(pid, _)| cpid > *pid) {
                                     best = Some((cpid, comm));
                                 }
-                            }
                         }
                     }
                     if let Some((_, name)) = best {

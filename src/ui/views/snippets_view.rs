@@ -116,11 +116,10 @@ pub fn render_snippets_view(
 
                         ui.add_space(SPACE_SM);
 
-                        if !window.snippet_view_state.group_filter.is_empty() {
-                            if ui.add(widgets::text_button(cx.language.t("clear_history"), cx.theme.accent)).clicked() {
+                        if !window.snippet_view_state.group_filter.is_empty()
+                            && ui.add(widgets::text_button(cx.language.t("clear_history"), cx.theme.accent)).clicked() {
                                 window.snippet_view_state.group_filter.clear();
                             }
-                        }
                     });
 
                     ui.add_space(SPACE_MD);
@@ -215,7 +214,7 @@ pub fn render_snippets_view(
                                         egui::pos2(visible_right - 40.0, rect.min.y + 26.0),
                                         egui::vec2(56.0, 22.0),
                                     );
-                                    let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
+                                    let over_btn = pointer_pos.is_some_and(|p| btn_rect.contains(p));
                                     let btn_bg = if over_btn { cx.theme.accent } else { cx.theme.bg_elevated };
                                     let btn_text_color = if over_btn { cx.theme.bg_primary } else { cx.theme.accent };
                                     ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, cx.theme.accent));
@@ -293,8 +292,10 @@ pub fn render_snippets_view(
     if let Some(id) = snippet_to_delete {
         cx.snippets.retain(|s| s.id != id);
         window.snippet_view_state.confirm_delete = None;
-        let mut actions = ViewActions::default();
-        actions.save_hosts = true;
+        let actions = ViewActions {
+            save_hosts: true,
+            ..Default::default()
+        };
         return actions;
     }
 
@@ -343,8 +344,8 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                                 window.snippet_view_state.editing = None;
                             }
                             // Delete button (edit mode only)
-                            if is_editing {
-                                if ui.add(
+                            if is_editing
+                                && ui.add(
                                     egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
                                         .frame(false)
                                 ).on_hover_text(cx.language.t("delete"))
@@ -352,7 +353,6 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                                     window.snippet_view_state.confirm_delete = window.snippet_view_state.editing.clone();
                                     window.snippet_view_state.open = false;
                                 }
-                            }
                         });
                     });
                 });

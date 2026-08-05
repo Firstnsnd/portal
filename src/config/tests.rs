@@ -1,10 +1,10 @@
 /// Unit tests for configuration module
-
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use super::super::*;
-    use serde_json;
-    use std::io::Write;
+    
+    
     use tempfile::NamedTempFile;
 
     fn create_temp_file() -> (NamedTempFile, std::path::PathBuf) {
@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn test_save_and_load_snippets() {
-        let (_temp_file, path) = create_temp_file();
+        let (_temp_file, _path) = create_temp_file();
 
         let original = vec![
             Snippet {

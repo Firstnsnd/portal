@@ -9,7 +9,7 @@ use super::theme::ThemeColors;
 pub const DRAWER_WIDTH: f32 = 380.0;
 
 /// Form label width (fixed, for alignment)
-
+///
 /// Font sizes
 pub const FONT_SIZE_LABEL: f32 = 12.0;
 pub const FONT_SIZE_INPUT: f32 = 12.0;
@@ -286,6 +286,7 @@ pub fn form_field_password(
 }
 
 /// Two fields in one row: each with label above, input below
+#[allow(clippy::too_many_arguments)]
 pub fn form_field_2col(
     ui: &mut egui::Ui,
     label1: &str,
@@ -320,6 +321,7 @@ pub fn form_field_2col(
 }
 
 /// Two fields in one row: first text, second password (each with label above)
+#[allow(clippy::too_many_arguments)]
 pub fn form_field_2col_mixed(
     ui: &mut egui::Ui,
     label1: &str,
@@ -423,7 +425,7 @@ pub fn shadcn_input<'a>(
     });
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::too_many_arguments)]
 pub fn shadcn_textarea<'a>(
     ui: &mut egui::Ui,
     label: &'a str,

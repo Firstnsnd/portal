@@ -31,7 +31,7 @@ mod e2e_tests {
 
         // Create components that would normally be in the app
         let hosts = portal::config::load_hosts(&portal::config::hosts_file_path());
-        let credentials = portal::config::load_credentials(&portal::config::credentials_file_path());
+        let _credentials = portal::config::load_credentials(&portal::config::credentials_file_path());
 
         assert!(!hosts.is_empty());
     }
@@ -39,26 +39,39 @@ mod e2e_tests {
     /// Test: Terminal session can be created and written to
     #[tokio::test]
     async fn test_terminal_session_lifecycle() {
-        // Create a local terminal session
+        // Use an interactive shell so the child STAYS ALIVE (a one-shot command
+        // like /bin/echo exits immediately and is_alive() is correctly false).
         let session = portal::terminal::RealPtySession::new(
             1,
             80,
             24,
-            "/bin/echo"
+            "/bin/zsh"
         ).expect("Failed to create PTY session");
 
         // Check session is alive
-        assert!(session.is_alive());
+        assert!(session.is_alive(), "interactive shell must stay alive");
 
         // Write to the terminal
-        let result = session.write(b"test\n");
+        let result = session.write(b"echo hello\n");
         assert!(result.is_ok());
 
         // Give it a moment to process
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // Check session is still alive
-        assert!(session.is_alive());
+        assert!(session.is_alive(), "interactive shell still alive after write");
+    }
+
+    /// A one-shot command (no interactive shell) exits, so is_alive() must
+    /// correctly report false shortly after spawn.
+    #[tokio::test]
+    async fn test_one_shot_command_exits() {
+        let session = portal::terminal::RealPtySession::new(
+            2, 80, 24, "/bin/echo"
+        ).expect("Failed to create PTY session");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!session.is_alive(),
+            "a one-shot command must exit so is_alive() returns false");
     }
 
     /// Test: Terminal grid can handle basic operations
@@ -86,9 +99,9 @@ mod e2e_tests {
     /// Test: Config serialization round-trip
     #[test]
     fn test_config_roundtrip() {
-        use tempfile::NamedTempFile;
+        
 
-        let (temp_file, path) = create_test_temp_file();
+        let (_temp_file, path) = create_test_temp_file();
 
         let original_hosts = vec![
             portal::config::HostEntry {
@@ -261,6 +274,6 @@ mod ssh_integration_tests {
         let loaded_record = loaded_record.unwrap();
         assert_eq!(loaded_record.host, "example.com");
         assert_eq!(loaded_record.port, 2222);
-        assert_eq!(loaded_record.success, true);
+        assert!(loaded_record.success);
     }
 }

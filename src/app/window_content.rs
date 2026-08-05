@@ -538,9 +538,7 @@ impl PortalApp {
                 let src_tab = window.tabs.remove(src);
                 let insert_idx = if insert_before {
                     if src < dst { dst.saturating_sub(1) } else { dst }
-                } else {
-                    if src < dst { dst } else { (dst + 1).min(window.tabs.len()) }
-                };
+                } else if src < dst { dst } else { (dst + 1).min(window.tabs.len()) };
                 window.tabs.insert(insert_idx, src_tab);
                 window.active_tab = insert_idx;
             }

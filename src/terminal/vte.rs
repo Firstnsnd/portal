@@ -143,7 +143,7 @@ impl<'a> Perform for VteHandler<'a> {
                     self.grid.cursor_col = self.grid.cols.saturating_sub(1);
                 }
             }
-            0x0A | 0x0B | 0x0C => {
+            0x0A..=0x0C => {
                 // LF, VT, FF - line feed
                 self.grid.wrap_pending = false;
                 self.grid.cursor_row += 1;
@@ -229,6 +229,9 @@ impl<'a> Perform for VteHandler<'a> {
                 // CHA - Cursor Horizontal Absolute
                 let col = param_or_one_usize(p1 as usize);
                 self.grid.cursor_col = (col - 1).min(self.grid.cols.saturating_sub(1));
+                // Absolute positioning in the main buffer ⇒ the app composes
+                // fixed-position art; flag it so resize doesn't reflow (scramble) it.
+                self.grid.program_uses_positioning = true;
             }
             'H' | 'f' => {
                 // CUP/HVP - Cursor Position
@@ -236,6 +239,7 @@ impl<'a> Perform for VteHandler<'a> {
                 let col = param_or_one_usize(param_list.get(1).copied().unwrap_or(1) as usize);
                 self.grid.cursor_row = (row - 1).min(self.grid.rows.saturating_sub(1));
                 self.grid.cursor_col = (col - 1).min(self.grid.cols.saturating_sub(1));
+                self.grid.program_uses_positioning = true;
             }
             'J' => {
                 // ED - Erase in Display
@@ -296,6 +300,7 @@ impl<'a> Perform for VteHandler<'a> {
                 // VPA - Vertical Position Absolute
                 let row = param_or_one_usize(p1 as usize);
                 self.grid.cursor_row = (row - 1).min(self.grid.rows.saturating_sub(1));
+                self.grid.program_uses_positioning = true;
             }
             'm' => {
                 // SGR - Select Graphic Rendition
@@ -333,6 +338,7 @@ impl<'a> Perform for VteHandler<'a> {
                         7 => self.grid.autowrap = true,   // DECAWM: auto-wrap ON
                         25 => self.grid.cursor_visible = true,
                         1049 => self.grid.enter_alt_screen(),
+                        2026 => self.grid.in_sync_update = true, // begin synchronized update
                         _ => {}
                     }
                 }
@@ -344,6 +350,7 @@ impl<'a> Perform for VteHandler<'a> {
                         7 => self.grid.autowrap = false,  // DECAWM: auto-wrap OFF
                         25 => self.grid.cursor_visible = false,
                         1049 => self.grid.exit_alt_screen(),
+                        2026 => self.grid.in_sync_update = false, // end synchronized update
                         _ => {}
                     }
                 }

@@ -68,7 +68,7 @@ impl eframe::App for PortalApp {
         //
         let has_multiple_windows = self.windows.len() > 1;
         let first_window = self.windows.first();
-        let first_window_hidden = first_window.map_or(false, |w| w.close_requested);
+        let first_window_hidden = first_window.is_some_and(|w| w.close_requested);
 
         // Handle first window close request
         if ctx.input(|i| i.viewport().close_requested()) {
@@ -230,7 +230,7 @@ impl eframe::App for PortalApp {
             // Poll right panel SFTP browser
             if let Some(ref mut browser) = window.sftp_browser {
                 let had_transfer = browser.transfer.is_some();
-                let was_download = browser.transfer.as_ref().map_or(false, |t| !t.is_upload);
+                let was_download = browser.transfer.as_ref().is_some_and(|t| !t.is_upload);
                 browser.poll();
                 // Auto-refresh local browser after download completes
                 if had_transfer && browser.transfer.is_none() && was_download {
@@ -268,7 +268,7 @@ impl eframe::App for PortalApp {
             // Poll left panel SFTP browser
             if let Some(ref mut browser) = window.sftp_browser_left {
                 let had_transfer = browser.transfer.is_some();
-                let was_download = browser.transfer.as_ref().map_or(false, |t| !t.is_upload);
+                let was_download = browser.transfer.as_ref().is_some_and(|t| !t.is_upload);
                 browser.poll();
                 // Auto-refresh local browser after download completes
                 if had_transfer && browser.transfer.is_none() && was_download {
@@ -333,7 +333,7 @@ fn main() -> eframe::Result<()> {
             let signals = Signals::new([SIGTERM, SIGINT, SIGHUP]).ok();
 
             if let Some(mut sig) = signals {
-                for _ in sig.forever() {
+                if sig.forever().next().is_some() {
                     if !CLEANUP_DONE.swap(true, Ordering::SeqCst) {
                         // Kill all zsh -l processes spawned by portal
                         unsafe {

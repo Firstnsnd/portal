@@ -38,6 +38,12 @@ pub struct MetricsSnapshot {
     pub(crate) prev_net_tx: Option<u64>,
 }
 
+impl Default for MetricsSnapshot {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MetricsSnapshot {
     pub fn new() -> Self {
         Self {

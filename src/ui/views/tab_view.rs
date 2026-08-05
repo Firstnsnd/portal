@@ -28,6 +28,7 @@ pub enum TabBarAction {
 /// # Arguments
 /// * `window_index` - Window index for unique ID generation (0 = main window)
 /// * `show_more_menu` - State for the more menu popup
+#[allow(clippy::too_many_arguments)]
 pub fn render_tab_bar(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -77,6 +78,7 @@ pub fn render_tab_bar(
 }
 
 /// Inner function to render tabs (shared between all windows)
+#[allow(clippy::too_many_arguments)]
 fn render_tabs_inner(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -116,14 +118,12 @@ fn render_tabs_inner(
                         } else {
                             tab_drag.set_target_offset(ti, 0.0, current_time);
                         }
+                    } else if ti > target && ti < source {
+                        tab_drag.set_target_offset(ti, tab_width + 8.0, current_time);
+                    } else if ti > source && ti <= target {
+                        tab_drag.set_target_offset(ti, -(tab_width + 8.0), current_time);
                     } else {
-                        if ti > target && ti < source {
-                            tab_drag.set_target_offset(ti, tab_width + 8.0, current_time);
-                        } else if ti > source && ti <= target {
-                            tab_drag.set_target_offset(ti, -(tab_width + 8.0), current_time);
-                        } else {
-                            tab_drag.set_target_offset(ti, 0.0, current_time);
-                        }
+                        tab_drag.set_target_offset(ti, 0.0, current_time);
                     }
                 }
             }
@@ -223,7 +223,7 @@ fn render_tabs_inner(
 
             if sense_resp.clicked() {
                 let click_pos = ui.ctx().input(|inp| inp.pointer.interact_pos());
-                let on_close = close_btn_rect.map_or(false, |r| click_pos.map_or(false, |p| r.contains(p)));
+                let on_close = close_btn_rect.is_some_and(|r| click_pos.is_some_and(|p| r.contains(p)));
                 if on_close {
                     tab_to_close = Some(i);
                 } else {

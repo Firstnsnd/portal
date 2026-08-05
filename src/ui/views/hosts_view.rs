@@ -160,11 +160,10 @@ pub fn render_hosts_view(
 
                         ui.add_space(SPACE_SM);
 
-                        if window.host_filter.is_active() {
-                            if ui.add(widgets::text_button(cx.language.t("clear_history"), cx.theme.accent)).clicked() {
+                        if window.host_filter.is_active()
+                            && ui.add(widgets::text_button(cx.language.t("clear_history"), cx.theme.accent)).clicked() {
                                 window.host_filter.clear();
                             }
-                        }
                     });
 
                     ui.add_space(SPACE_SM);
@@ -270,7 +269,7 @@ pub fn render_hosts_view(
                                         egui::vec2(btn_width, 20.0),
                                     );
                                     let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
-                                    let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
+                                    let over_btn = pointer_pos.is_some_and(|p| btn_rect.contains(p));
                                     let btn_bg = if over_btn { cx.theme.accent } else { cx.theme.bg_elevated };
                                     let btn_text_color = if over_btn { cx.theme.bg_primary } else { cx.theme.accent };
                                     ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, cx.theme.accent));
@@ -374,11 +373,10 @@ pub fn render_hosts_view(
                     // Collect groups
                     let mut groups: Vec<String> = Vec::new();
                     for host in cx.hosts.iter() {
-                        if !host.is_local && !host.group.is_empty() && !groups.contains(&host.group) {
-                            if window.host_filter.matches(host) {
+                        if !host.is_local && !host.group.is_empty() && !groups.contains(&host.group)
+                            && window.host_filter.matches(host) {
                                 groups.push(host.group.clone());
                             }
-                        }
                     }
 
                     // Ungrouped SSH hosts
@@ -416,7 +414,7 @@ pub fn render_hosts_view(
                         );
                         let name_w = ui.fonts(|f| f.layout_no_wrap(
                             host.name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).rect.width());
-                        forward_badge(ui, window, host, rect.min.x + 46.0 + name_w + 8.0, rect.min.y + 18.0, &cx.theme);
+                        forward_badge(ui, window, host, rect.min.x + 46.0 + name_w + 8.0, rect.min.y + 18.0, cx.theme);
                         let detail = if host.username.is_empty() {
                             format!("{}:{}", host.host, host.port)
                         } else {
@@ -452,7 +450,7 @@ pub fn render_hosts_view(
                         );
                         if hovered {
                             let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
-                            let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
+                            let over_btn = pointer_pos.is_some_and(|p| btn_rect.contains(p));
 
                             let btn_bg = if over_btn { cx.theme.accent } else { cx.theme.bg_elevated };
                             let btn_text = if over_btn { cx.theme.bg_primary } else { cx.theme.accent };
@@ -467,7 +465,7 @@ pub fn render_hosts_view(
                         }
                         if resp.clicked() {
                             let click_pos = ui.ctx().input(|i| i.pointer.interact_pos());
-                            if click_pos.map_or(false, |p| btn_rect.contains(p)) {
+                            if click_pos.is_some_and(|p| btn_rect.contains(p)) {
                                 connect_ssh_host_idx = Some(i);
                             } else {
                                 edit_host_index = Some(i);
@@ -517,7 +515,7 @@ pub fn render_hosts_view(
                             );
                             let name_w = ui.fonts(|f| f.layout_no_wrap(
                                 host.name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).rect.width());
-                            forward_badge(ui, window, host, rect.min.x + 46.0 + name_w + 8.0, rect.min.y + 18.0, &cx.theme);
+                            forward_badge(ui, window, host, rect.min.x + 46.0 + name_w + 8.0, rect.min.y + 18.0, cx.theme);
                             let detail = if host.username.is_empty() {
                                 format!("{}:{}", host.host, host.port)
                             } else {
@@ -553,7 +551,7 @@ pub fn render_hosts_view(
                             );
                             if hovered {
                                 let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
-                                let over_btn = pointer_pos.map_or(false, |p| btn_rect.contains(p));
+                                let over_btn = pointer_pos.is_some_and(|p| btn_rect.contains(p));
 
                                 let btn_bg = if over_btn { cx.theme.accent } else { cx.theme.bg_elevated };
                                 let btn_text = if over_btn { cx.theme.bg_primary } else { cx.theme.accent };
@@ -568,7 +566,7 @@ pub fn render_hosts_view(
                             }
                             if resp.clicked() {
                                 let click_pos = ui.ctx().input(|i| i.pointer.interact_pos());
-                                if click_pos.map_or(false, |p| btn_rect.contains(p)) {
+                                if click_pos.is_some_and(|p| btn_rect.contains(p)) {
                                     connect_ssh_host_idx = Some(i);
                                 } else {
                                     edit_host_index = Some(i);
@@ -715,8 +713,8 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                 window.add_host_dialog.reset();
                             }
                             // Delete button (edit mode only)
-                            if window.add_host_dialog.edit_index.is_some() {
-                                if ui.add(
+                            if window.add_host_dialog.edit_index.is_some()
+                                && ui.add(
                                     egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
                                         .frame(false)
                                 ).on_hover_text(cx.language.t("delete"))
@@ -724,7 +722,6 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                     window.confirm_delete_host = window.add_host_dialog.edit_index;
                                     window.add_host_dialog.open = false;
                                 }
-                            }
                         });
                     });
                 });
@@ -1294,7 +1291,7 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
         // Persist immediately (the caller path through ViewActions is
         // unreliable here because the drawer renders alongside the page,
         // not inside the view-routing switch that collects ViewActions).
-        crate::config::save_hosts(cx.hosts_file, &cx.hosts);
+        crate::config::save_hosts(cx.hosts_file, cx.hosts);
         window.add_host_dialog.reset();
     }
 }
