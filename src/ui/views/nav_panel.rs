@@ -67,7 +67,56 @@ pub fn show_nav_panel(
                         available_size,
                         egui::Layout::bottom_up(egui::Align::LEFT),
                         |ui| {
-                            if nav_button(ui, "⚙", language.t("settings"), current_view == AppView::Settings, theme) {
+                            // Settings row: icon+label on left, version on right
+                            let (rect, response) = ui.allocate_exact_size(
+                                egui::vec2(ui.available_width(), 36.0),
+                                egui::Sense::click(),
+                            );
+                            let is_active = current_view == AppView::Settings;
+
+                            if is_active {
+                                ui.painter().rect_filled(
+                                    egui::Rect::from_min_size(rect.min, egui::vec2(4.0, 36.0)),
+                                    0.0,
+                                    theme.accent,
+                                );
+                            }
+                            if response.hovered() {
+                                ui.painter().rect_filled(
+                                    egui::Rect::from_min_size(rect.min, egui::vec2(ui.available_width(), 36.0)),
+                                    0.0,
+                                    theme.hover_bg,
+                                );
+                            }
+
+                            let icon_color = if is_active { theme.accent } else { theme.fg_dim };
+                            let label_color = if is_active { theme.fg_primary } else { theme.fg_dim };
+
+                            ui.painter().text(
+                                egui::pos2(rect.min.x + 16.0, rect.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                "⚙",
+                                egui::FontId::proportional(14.0),
+                                icon_color,
+                            );
+                            ui.painter().text(
+                                egui::pos2(rect.min.x + 40.0, rect.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                language.t("settings"),
+                                egui::FontId::proportional(12.0),
+                                label_color,
+                            );
+
+                            // Version on the right
+                            ui.painter().text(
+                                egui::pos2(rect.max.x - 10.0, rect.center().y),
+                                egui::Align2::RIGHT_CENTER,
+                                format!("v{}", env!("CARGO_PKG_VERSION")),
+                                egui::FontId::proportional(10.0),
+                                theme.fg_dim,
+                            );
+
+                            if response.clicked() {
                                 clicked_view = Some(AppView::Settings);
                             }
                         },
