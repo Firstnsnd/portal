@@ -10,6 +10,9 @@ use unicode_width::UnicodeWidthChar;
 use super::types::TerminalCell;
 use super::types::CellAttrs;
 
+/// Alternate screen buffer state: (cells, line_wrapped, cursor_col, cursor_row, autowrap)
+type AltScreenState = (Vec<Vec<TerminalCell>>, Vec<bool>, usize, usize, bool);
+
 /// Terminal grid state representing the visible screen content.
 ///
 /// The grid contains the current screen content as a 2D array of cells,
@@ -30,7 +33,7 @@ pub struct TerminalGrid {
     /// Saved cursor position for DECSC/DECRC
     pub saved_cursor: Option<(usize, usize)>,
     /// Alternate screen buffer state (cells, line_wrapped, cursor_col, cursor_row, autowrap)
-    alt_screen: Option<(Vec<Vec<TerminalCell>>, Vec<bool>, usize, usize, bool)>,
+    alt_screen: Option<AltScreenState>,
     /// Top row of scrolling region (inclusive)
     pub scroll_top: usize,
     /// Bottom row of scrolling region (inclusive)
@@ -202,16 +205,15 @@ impl TerminalGrid {
         let mut new_cells = vec![vec![TerminalCell::default(); cols]; rows];
         let copy_rows = rows.min(self.rows);
         let copy_cols = cols.min(self.cols);
-        for r in 0..copy_rows {
-            for c in 0..copy_cols {
-                new_cells[r][c] = self.cells[r][c].clone();
+        for (new_row, old_row) in new_cells.iter_mut().zip(self.cells.iter()).take(copy_rows) {
+            for (new_cell, old_cell) in new_row.iter_mut().zip(old_row.iter()).take(copy_cols) {
+                *new_cell = old_cell.clone();
             }
         }
         // Rebuild line_wrapped for new row count
         let mut new_wrapped = vec![false; rows];
-        for r in 0..rows.min(self.rows) {
-            new_wrapped[r] = self.line_wrapped[r];
-        }
+        let n = rows.min(self.rows);
+        new_wrapped[..n].copy_from_slice(&self.line_wrapped[..n]);
         self.line_wrapped = new_wrapped;
         self.cells = new_cells;
         // Keep the invariant "every row == cols wide" across SCROLLBACK too:

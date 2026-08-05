@@ -1,6 +1,6 @@
 /// Unit tests for SSH port forwarding
-
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::ssh::port_forward::{PortForward, ForwardState, PortForwardConfig, ForwardKind};
     use crate::ssh::{AppNotification, NotificationLevel};
@@ -102,7 +102,7 @@ mod tests {
         let (_pf, rx) = PortForward::new(config);
 
         // The channel should initially have false (no cancellation)
-        assert_eq!(*rx.borrow(), false);
+        assert!(!(*rx.borrow()));
     }
 
     #[test]
@@ -213,13 +213,11 @@ mod tests {
     #[test]
     fn test_forward_state_all_variants() {
         // Ensure all ForwardState variants can be constructed
-        let states = vec![
-            ForwardState::Starting,
+        let states = [ForwardState::Starting,
             ForwardState::Active,
             ForwardState::Stopped,
             ForwardState::Error("e".to_string()),
-            ForwardState::Conflict("c".to_string()),
-        ];
+            ForwardState::Conflict("c".to_string())];
 
         // Verify each variant is distinct
         for (i, s1) in states.iter().enumerate() {

@@ -3,9 +3,11 @@
 use std::time::Duration;
 
 /// Timeout for async operations in tests
+#[allow(dead_code)]
 pub const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Create a test tokio runtime
+#[allow(dead_code)]
 pub fn create_test_runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Runtime::new().expect("Failed to create test runtime")
 }
@@ -47,6 +49,7 @@ impl TempDir {
     }
 
     /// Keep the temp directory when dropped (for debugging)
+    #[allow(dead_code)]
     pub fn keep_on_drop(&mut self) {
         self.keep_on_drop = true;
     }

@@ -4,6 +4,9 @@
 
 use crate::config::HostEntry;
 
+/// Type alias for the async test-connection result
+pub type TestConnResult = Option<std::sync::Arc<Mutex<Option<Result<String, String>>>>>;
+
 /// Auth method choice for the dialog
 #[derive(Default, PartialEq, Clone)]
 pub enum AuthMethodChoice {
@@ -68,7 +71,7 @@ pub struct AddHostDialog {
     pub startup_commands: String,
     pub agent_forwarding: bool,
     pub test_conn_state: TestConnState,
-    pub test_conn_result: Option<std::sync::Arc<Mutex<Option<Result<String, String>>>>>,
+    pub test_conn_result: TestConnResult,
     /// Show "Remove old key" button when host key verification fails
     pub show_remove_key_button: bool,
     /// Message to display after removing a key

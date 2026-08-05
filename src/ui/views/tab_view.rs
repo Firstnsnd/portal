@@ -28,6 +28,7 @@ pub enum TabBarAction {
 /// # Arguments
 /// * `window_index` - Window index for unique ID generation (0 = main window)
 /// * `show_more_menu` - State for the more menu popup
+#[allow(clippy::too_many_arguments)]
 pub fn render_tab_bar(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -77,6 +78,7 @@ pub fn render_tab_bar(
 }
 
 /// Inner function to render tabs (shared between all windows)
+#[allow(clippy::too_many_arguments)]
 fn render_tabs_inner(
     ui: &mut egui::Ui,
     ctx: &egui::Context,

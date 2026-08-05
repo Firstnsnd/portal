@@ -26,7 +26,7 @@ pub fn show_nav_panel(
     language: &Language,
     id: Option<egui::Id>,
 ) -> Option<AppView> {
-    let nav_width = (ctx.screen_rect().width() * 0.14).min(200.0).max(150.0);
+    let nav_width = (ctx.screen_rect().width() * 0.14).clamp(150.0, 200.0);
     let mut clicked_view = None;
 
     let panel_id = id.unwrap_or_else(|| egui::Id::new("nav"));

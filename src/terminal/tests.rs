@@ -1,6 +1,6 @@
 /// Unit tests for terminal grid functionality
-
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::terminal::TerminalGrid;
     use crate::terminal::types::CellAttrs;
@@ -851,7 +851,7 @@ mod tests {
         grid.resize(40, 24);
 
         // Content should be wrapped correctly
-        let content = get_visible_content(&mut grid);
+        let content = get_visible_content(&grid);
         assert!(content.contains("abcd"), "Start should be present");
         assert!(content.contains("wxyz"), "End should be present");
         // Note: middle portion spans row boundary, check each part separately
@@ -862,7 +862,7 @@ mod tests {
         grid.resize(80, 24);
 
         // Content should be re-expanded correctly
-        let content = get_visible_content(&mut grid);
+        let content = get_visible_content(&grid);
         assert!(content.contains(long_text), "Full content should be preserved");
     }
 
@@ -885,7 +885,7 @@ mod tests {
         grid.resize(40, 24);
 
         // All lines should be preserved
-        let content = get_visible_content(&mut grid);
+        let content = get_visible_content(&grid);
         assert!(content.contains("short"), "Short line should be preserved");
         assert!(content.contains("medium"), "Medium line should be preserved");
         assert!(content.contains("long line"), "Long line should be preserved");
@@ -1318,7 +1318,7 @@ mod pty_cleanup_tests {
         use crate::terminal::session::PtyWriter;
 
         // Create a file descriptor
-        let fd = unsafe { libc::open(b"/dev/null\0".as_ptr() as *const i8, libc::O_RDWR, 0) };
+        let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDWR, 0) };
         assert!(fd >= 0, "Should be able to open /dev/null");
 
         {
@@ -1352,7 +1352,7 @@ mod pty_cleanup_tests {
             // Create several PTYs
             for _ in 0..5 {
                 let pty = UnixPty::spawn("/bin/sleep", &["0.1"], crate::terminal::PtySize::new(24, 80))
-                    .expect(&format!("PTY spawn should succeed in cycle {}", cycle));
+                    .unwrap_or_else(|_| panic!("PTY spawn should succeed in cycle {}", cycle));
                 ptys.push(pty);
             }
 
@@ -1958,9 +1958,9 @@ mod duplicate_input_prevention_tests {
         let text_chars = collect_text_chars_from_events(&text_events);
 
         // Key event for period
-        let key_char = Some('.');
+        let key_char = '.';
 
-        assert!(text_chars.contains(&key_char.unwrap()),
+        assert!(text_chars.contains(&key_char),
                 "Punctuation from Text event should prevent duplicate from Key event");
     }
 
@@ -2068,7 +2068,7 @@ mod duplicate_input_prevention_tests {
     #[test]
     fn test_hashset_property_automatic_deduplication() {
         // This test documents that HashSet automatically deduplicates
-        let text_events = vec!["a", "a", "a", "b", "b"];
+        let text_events = ["a", "a", "a", "b", "b"];
         let text_chars: HashSet<char> = text_events.iter()
             .filter_map(|e| e.chars().next())
             .collect();
@@ -2200,7 +2200,7 @@ mod replay_harness {
         let all: String = (0..h.grid.rows).map(|r| h.row(r)).collect();
         assert!(all.contains('z'), "shell output lost chars after reflow: {:?}", all);
         // reflow should have produced more non-empty rows (20→10 wrapping)
-        let nonempty = (0..h.grid.rows).filter(|&r| h.row(r).trim().len() > 0).count();
+        let nonempty = (0..h.grid.rows).filter(|&r| !h.row(r).trim().is_empty()).count();
         assert!(nonempty >= 3, "expected reflow into >=3 rows, got {}", nonempty);
     }
 
@@ -2424,13 +2424,13 @@ mod reflow_rejoin {
                 self.grid.cols, self.grid.rows, self.grid.cursor_row, self.grid.cursor_col, self.grid.scrollback_len());
             for r in 0..self.grid.rows.min(20) {
                 let s = self.row(r);
-                if s.trim().len() > 0 { println!("  g{r} wrp={} {:?}", self.grid.line_wrapped[r], s.trim_end()); }
+                if !s.trim().is_empty() { println!("  g{r} wrp={} {:?}", self.grid.line_wrapped[r], s.trim_end()); }
             }
             for i in 0..self.grid.scrollback_len() {
                 let row = self.grid.get_scrollback_row(i).unwrap();
                 let s: String = row.iter().map(|c| c.c).collect();
                 let w = self.grid.scrollback_wrapped.get(i).copied().unwrap_or(false);
-                if s.trim().len() > 0 { println!("  s{i} wrp={w} {:?}", s.trim_end()); }
+                if !s.trim().is_empty() { println!("  s{i} wrp={w} {:?}", s.trim_end()); }
             }
         }
     }
@@ -2675,7 +2675,7 @@ mod concurrency_resize {
             let mut attrs = CellAttrs::default();
             while !s2.load(std::sync::atomic::Ordering::Relaxed) {
                 let mut grid = g2.lock().unwrap();
-                let mut h = VteHandler { grid: &mut *grid, attrs: &mut attrs };
+                let mut h = VteHandler { grid: &mut grid, attrs: &mut attrs };
                 for &b in WELCOME {
                     parser.advance(&mut h, b);
                 }

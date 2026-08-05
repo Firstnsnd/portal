@@ -1,9 +1,9 @@
 /// Unit tests for configuration module
-
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use super::super::*;
-    use serde_json;
+    
     
     use tempfile::NamedTempFile;
 

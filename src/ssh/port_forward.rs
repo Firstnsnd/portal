@@ -212,9 +212,8 @@ pub async fn start_local_forward(
     }
 
     // Log completion
-    match result {
-        Ok(_) => log::info!("Local forward {} completed", bind_addr),
-        Err(_) => {} // Already logged above
+    if result.is_ok() {
+        log::info!("Local forward {} completed", bind_addr);
     }
 }
 

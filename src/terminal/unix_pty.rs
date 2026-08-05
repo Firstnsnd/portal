@@ -79,14 +79,14 @@ impl Pty for UnixPty {
 
             // Set environment variables using libc (async-signal-safe)
             unsafe {
-                libc::setenv(b"TERM\0".as_ptr() as *const i8, b"xterm-256color\0".as_ptr() as *const i8, 1);
-                libc::setenv(b"LANG\0".as_ptr() as *const i8, b"en_US.UTF-8\0".as_ptr() as *const i8, 1);
-                libc::setenv(b"LC_ALL\0".as_ptr() as *const i8, b"en_US.UTF-8\0".as_ptr() as *const i8, 1);
+                libc::setenv(c"TERM".as_ptr(), c"xterm-256color".as_ptr(), 1);
+                libc::setenv(c"LANG".as_ptr(), c"en_US.UTF-8".as_ptr(), 1);
+                libc::setenv(c"LC_ALL".as_ptr(), c"en_US.UTF-8".as_ptr(), 1);
 
                 // Default to the user's home directory so new terminals open at ~
                 // instead of the app's working directory. getenv/chdir are
                 // async-signal-safe (allowed between fork and exec).
-                let home = libc::getenv(b"HOME\0".as_ptr() as *const i8);
+                let home = libc::getenv(c"HOME".as_ptr());
                 if !home.is_null() {
                     libc::chdir(home);
                 }

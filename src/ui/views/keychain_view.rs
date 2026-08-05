@@ -240,8 +240,10 @@ pub fn render_keychain_view(
 
     if let Some(id) = credential_to_delete {
         cx.credentials.retain(|c| c.id != id);
-        let mut actions = ViewActions::default();
-        actions.delete_credential = Some(id);
+        let actions = ViewActions {
+            delete_credential: Some(id),
+            ..Default::default()
+        };
         return actions;
     }
 

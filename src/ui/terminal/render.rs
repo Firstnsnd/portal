@@ -316,8 +316,7 @@ pub fn render_terminal_session(
                     .min(grid.cols)
                     .min(cells.len());
 
-                for col in col_start..col_end {
-                    let cell = &cells[col];
+                for cell in &cells[col_start..col_end] {
                     if !cell.wide_continuation {
                         text.push(cell.c);
                     }
@@ -1580,7 +1579,7 @@ pub fn render_terminal_pane(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     session_idx: usize,
-    sessions: &mut Vec<TerminalSession>,
+    sessions: &mut [TerminalSession],
     focused_session: usize,
     broadcast_state: &BroadcastState,
     ime_composing: &mut bool,
@@ -1619,7 +1618,7 @@ pub fn render_pane_tree(
     ctx: &egui::Context,
     node: &mut PaneNode,
     rect: egui::Rect,
-    sessions: &mut Vec<TerminalSession>,
+    sessions: &mut [TerminalSession],
     focused_session: usize,
     broadcast_state: &BroadcastState,
     ime_composing: &mut bool,

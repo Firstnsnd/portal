@@ -10,6 +10,7 @@ use crate::ssh::connect_and_authenticate;
 use crate::sftp::types::{SftpEntry, SftpEntryKind, SftpCommand, SftpResponse, TransferProgress};
 
 /// Variant of sftp_task that navigates to a specific path after connecting (used for auto-reconnect).
+#[allow(clippy::too_many_arguments)]
 pub async fn sftp_task_with_initial_path(
     host: String,
     port: u16,
@@ -37,6 +38,7 @@ pub async fn sftp_task(
 }
 
 /// Inner implementation shared by sftp_task and sftp_task_with_initial_path.
+#[allow(clippy::too_many_arguments)]
 async fn sftp_task_inner(
     host: String,
     port: u16,
@@ -442,6 +444,7 @@ pub async fn download_file(
     let mut local_file = match tokio::fs::OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(true)
         .read(true)
         .open(&local_path)
         .await

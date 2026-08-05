@@ -274,6 +274,6 @@ mod ssh_integration_tests {
         let loaded_record = loaded_record.unwrap();
         assert_eq!(loaded_record.host, "example.com");
         assert_eq!(loaded_record.port, 2222);
-        assert_eq!(loaded_record.success, true);
+        assert!(loaded_record.success);
     }
 }

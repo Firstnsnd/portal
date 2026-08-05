@@ -4,6 +4,7 @@
 //! These tests ensure that double-click word selection works correctly
 //! for both visible grid rows and scrollback rows.
 
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::terminal::{TerminalGrid, TerminalCell, CellAttrs};
     use crate::ui::terminal::selection::{find_word_boundaries_in_row, find_word_boundaries};

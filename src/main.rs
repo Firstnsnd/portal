@@ -333,7 +333,7 @@ fn main() -> eframe::Result<()> {
             let signals = Signals::new([SIGTERM, SIGINT, SIGHUP]).ok();
 
             if let Some(mut sig) = signals {
-                for _ in sig.forever() {
+                if sig.forever().next().is_some() {
                     if !CLEANUP_DONE.swap(true, Ordering::SeqCst) {
                         // Kill all zsh -l processes spawned by portal
                         unsafe {

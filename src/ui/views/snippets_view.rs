@@ -292,8 +292,10 @@ pub fn render_snippets_view(
     if let Some(id) = snippet_to_delete {
         cx.snippets.retain(|s| s.id != id);
         window.snippet_view_state.confirm_delete = None;
-        let mut actions = ViewActions::default();
-        actions.save_hosts = true;
+        let actions = ViewActions {
+            save_hosts: true,
+            ..Default::default()
+        };
         return actions;
     }
 

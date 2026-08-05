@@ -540,7 +540,7 @@ mod tests {
             let mut p = Parser::new();
             let mut a = CellAttrs::default();
             for &b in b"\x1b[?2026h".iter() {
-                let mut h = VteHandler { grid: &mut *g, attrs: &mut a };
+                let mut h = VteHandler { grid: &mut g, attrs: &mut a };
                 p.advance(&mut h, b);
             }
         }
@@ -558,7 +558,7 @@ mod tests {
             let mut p = Parser::new();
             let mut a = CellAttrs::default();
             for &b in b"\x1b[?2026l".iter() {
-                let mut h = VteHandler { grid: &mut *g, attrs: &mut a };
+                let mut h = VteHandler { grid: &mut g, attrs: &mut a };
                 p.advance(&mut h, b);
             }
         }
@@ -676,7 +676,7 @@ mod sync_defer_e2e {
             // old status at bottom, then claude's redraw batch: clear all + redraw
             // status at old bottom, still inside ?2026h
             for &b in b"\x1b[30;1HSTATUS\x1b[?2026h\x1b[H\x1b[2J\x1b[30;1HSTATUS".iter() {
-                let mut h = VteHandler { grid: &mut *g, attrs: &mut a };
+                let mut h = VteHandler { grid: &mut g, attrs: &mut a };
                 p.advance(&mut h, b);
             }
             assert!(g.in_sync_update);
@@ -695,7 +695,7 @@ mod sync_defer_e2e {
             let mut p = Parser::new();
             let mut a = CellAttrs::default();
             for &b in b"\x1b[?2026l".iter() {
-                let mut h = VteHandler { grid: &mut *g, attrs: &mut a };
+                let mut h = VteHandler { grid: &mut g, attrs: &mut a };
                 p.advance(&mut h, b);
             }
         }
@@ -707,7 +707,7 @@ mod sync_defer_e2e {
             let mut p = Parser::new();
             let mut a = CellAttrs::default();
             for &b in b"\x1b[H\x1b[2J\x1b[40;1HSTATUS".iter() {
-                let mut h = VteHandler { grid: &mut *g, attrs: &mut a };
+                let mut h = VteHandler { grid: &mut g, attrs: &mut a };
                 p.advance(&mut h, b);
             }
         }

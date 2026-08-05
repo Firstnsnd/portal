@@ -210,6 +210,7 @@ pub fn apply_selection_action(selection: &mut FileSelection, action: SelectionAc
 
 /// Render a file listing panel (reused for both local and remote).
 /// Each entry is draggable via egui DnD; the caller handles drop detection.
+#[allow(clippy::too_many_arguments)]
 pub fn render_file_panel(
     ui: &mut egui::Ui,
     entries: &[SftpEntry],
