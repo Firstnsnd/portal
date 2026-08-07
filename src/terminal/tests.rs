@@ -3027,6 +3027,187 @@ mod statusline_dup {
     }
 }
 
+mod curl_cloudflare_output {
+    //! Regression: `curl -s https://vaniot.net` in the portal terminal
+    //! produces NO visible output (but `curl ... | wc -c` correctly shows ~5358).
+    //! Cloudflare Bot Fight Mode returns a ~5K single-line HTML page.
+    //! This module verifies the full pipeline: VTE parsing, auto-wrap, scrollback,
+    //! and the visible-grid state after zsh prints its next prompt.
+
+    use crate::terminal::{TerminalGrid, VteHandler};
+    use crate::terminal::types::CellAttrs;
+
+    const COLS: usize = 80;
+    const ROWS: usize = 24;
+
+    fn feed(grid: &mut TerminalGrid, data: &[u8]) {
+        let mut parser = vte::Parser::new();
+        let mut attrs = CellAttrs::default();
+        let mut handler = VteHandler { grid, attrs: &mut attrs };
+        for byte in data {
+            parser.advance(&mut handler, *byte);
+        }
+    }
+
+    /// Collect the visible grid rows that have at least one non-blank cell.
+    fn non_empty_rows(grid: &TerminalGrid) -> Vec<String> {
+        (0..grid.rows)
+            .filter(|&r| grid.cells[r].iter().any(|c| c.c != ' ' && c.c != '\0'))
+            .map(|r| {
+                grid.cells[r].iter()
+                    .filter(|c| !c.wide_continuation)
+                    .map(|c| c.c)
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    /// Bare VTE: feed the HTML (no surrounding prompt). The parser + auto-wrap
+    /// alone must produce non-empty visible rows and scrollback.
+    #[test]
+    fn html_alone_produces_visible_output() {
+        let html = std::fs::read("/tmp/cf_vanio.txt").unwrap_or_else(|_| {
+            let mut s = String::new();
+            for i in 0..5000u32 {
+                let c = ((i % 95) + 32) as u8 as char;
+                s.push(c);
+            }
+            s.into_bytes()
+        });
+        let mut grid = TerminalGrid::with_scrollback_limit(COLS, ROWS, 100 * 1024 * 1024);
+        feed(&mut grid, &html);
+
+        let visible = non_empty_rows(&grid);
+        let sb = grid.scrollback_len();
+
+        assert!(!visible.is_empty(),
+            "visible grid empty after {} bytes; sb={sb} cursor=({},{})",
+            html.len(), grid.cursor_col, grid.cursor_row);
+        // A ~5K single-line at 80 cols wraps into ~67 rows. The first ~43 go to
+        // scrollback, the last ~24 stay visible.
+        assert!(sb > 0, "expected scrollback rows, got {sb}");
+    }
+
+    /// Full simulation: zsh prompt → HTML → zsh partial-line marker + next
+    /// prompt.  This is what actually happens when you type `curl -s URL` and
+    /// hit Enter.  The visible grid MUST show content from the output.
+    #[test]
+    fn prompt_html_prompt_visible_grid_has_content() {
+        let html = std::fs::read("/tmp/cf_vanio.txt").unwrap_or_else(|_| {
+            let mut s = String::new();
+            for i in 0..5000u32 {
+                let c = ((i % 95) + 32) as u8 as char;
+                s.push(c);
+            }
+            s.into_bytes()
+        });
+        let mut grid = TerminalGrid::with_scrollback_limit(COLS, ROWS, 100 * 1024 * 1024);
+
+        // Step 1: zsh prompt
+        feed(&mut grid, b"(base) user@host ~ % ");
+
+        // Step 2: shell echoes the command (user typed "curl -s URL\r")
+        feed(&mut grid, b"curl -s https://vaniot.net\r\n");
+
+        // Step 3: curl output — single-line HTML, NO trailing newline.
+        // curl writes through the PTY as raw bytes. The VTE parser wraps them
+        // via the auto-wrap path because they are all printable ASCII.
+        feed(&mut grid, &html);
+
+        // Step 4: zsh detects no trailing newline → % marker + newline + prompt.
+        // This is standard zsh PROMPT_SP behavior (UNSET by default).
+        feed(&mut grid, b"%\r\n");
+        feed(&mut grid, b"(base) user@host ~ % ");
+
+        let visible = non_empty_rows(&grid);
+        let sb = grid.scrollback_len();
+
+        assert!(!visible.is_empty(),
+            "visible grid empty after full prompt+html+prompt cycle ({} html bytes); sb={sb} \
+             cursor=({},{})",
+            html.len(), grid.cursor_col, grid.cursor_row);
+
+        // The visible grid should contain the tail of the HTML output.
+        // Check that at least one row contains HTML-like content (angle brackets).
+        let has_html = visible.iter().any(|row| row.contains('<') || row.contains('>'));
+        assert!(has_html,
+            "no HTML content visible in grid. visible rows ({}): {:?}",
+            visible.len(),
+            visible.iter().map(|r| &r[..r.len().min(40)]).collect::<Vec<_>>());
+
+        // Scrollback must hold the bulk of the wrapped output.
+        assert!(sb > 0, "expected scrollback from wrapped HTML, got {sb}");
+
+        // The last visible row should be the zsh prompt.
+        let last = visible.last().unwrap();
+        assert!(last.contains('%') || last.contains("~"),
+            "last visible row should contain zsh prompt; got: '{}'", last);
+    }
+
+    /// After the HTML + prompt cycle, cursor_row must be within the visible
+    /// grid bounds.
+    #[test]
+    fn cursor_within_grid_after_long_output() {
+        let html = std::fs::read("/tmp/cf_vanio.txt").unwrap_or_else(|_| {
+            let mut s = String::new();
+            for i in 0..5000u32 {
+                let c = ((i % 95) + 32) as u8 as char;
+                s.push(c);
+            }
+            s.into_bytes()
+        });
+        let mut grid = TerminalGrid::with_scrollback_limit(COLS, ROWS, 100 * 1024 * 1024);
+
+        feed(&mut grid, b"(base) user@host ~ % ");
+        feed(&mut grid, b"curl -s https://vaniot.net\r\n");
+        feed(&mut grid, &html);
+        feed(&mut grid, b"%\r\n");
+        feed(&mut grid, b"(base) user@host ~ % ");
+
+        assert!(grid.cursor_row < grid.rows,
+            "cursor_row {} >= rows {} after long output", grid.cursor_row, grid.rows);
+        assert!(grid.cursor_col < grid.cols,
+            "cursor_col {} >= cols {}", grid.cursor_col, grid.cols);
+    }
+
+    /// Scrollback must be navigable: the wrapped HTML rows should contain
+    /// recognizable HTML content (DOCTYPE, html, etc.).
+    #[test]
+    fn scrollback_contains_html_content() {
+        let html = std::fs::read("/tmp/cf_vanio.txt").unwrap_or_else(|_| {
+            let mut s = String::new();
+            for i in 0..5000u32 {
+                let c = ((i % 95) + 32) as u8 as char;
+                s.push(c);
+            }
+            s.into_bytes()
+        });
+        let mut grid = TerminalGrid::with_scrollback_limit(COLS, ROWS, 100 * 1024 * 1024);
+
+        feed(&mut grid, b"(base) user@host ~ % ");
+        feed(&mut grid, b"curl -s https://vaniot.net\r\n");
+        feed(&mut grid, &html);
+        feed(&mut grid, b"%\r\n");
+        feed(&mut grid, b"(base) user@host ~ % ");
+
+        let sb = grid.scrollback_len();
+        assert!(sb > 0, "no scrollback");
+
+        // Concatenate all scrollback rows into one string and check for HTML markers.
+        let mut all_sb = String::new();
+        for i in 0..sb {
+            if let Some(row) = grid.get_scrollback_row(i) {
+                for cell in row.iter().filter(|c| !c.wide_continuation) {
+                    all_sb.push(cell.c);
+                }
+            }
+        }
+        assert!(all_sb.contains("<!DOCTYPE") || all_sb.contains("<html"),
+            "scrollback should contain HTML doctype/tag; first 200 chars: '{}'...",
+            &all_sb[..all_sb.len().min(200)]);
+    }
+}
+
 
 
 

@@ -15,7 +15,7 @@ use crate::ui::*;
 use crate::ui::views::tab_view::{TabBarAction, render_tab_bar};
 use crate::ui::types::dialogs::AppView;
 use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, Tab};
-use crate::ui::types::session::TerminalSession;
+use crate::ui::types::session::{TerminalSession, SessionKind};
 use crate::ui::types::BroadcastState;
 use crate::ui::pane_view::{WindowContext, ViewActions};
 
@@ -189,10 +189,8 @@ impl PortalApp {
             let window = &mut self.windows[window_idx];
             for tab in &window.tabs {
                 for session in &tab.sessions {
-                    if let Some(ref backend) = session.session {
-                        let new_notifications = backend.drain_notifications();
-                        window.notifications.extend(new_notifications);
-                    }
+                    let new_notifications = session.kind.drain_notifications();
+                    window.notifications.extend(new_notifications);
                 }
             }
         }
@@ -583,11 +581,9 @@ impl PortalApp {
 
         let conn_type = window.tabs.get(window.active_tab)
             .and_then(|tab| tab.sessions.get(tab.focused_session))
-            .map(|s| match &s.session {
-                Some(SessionBackend::Ssh(ssh)) => {
-                    let host = s.ssh_host.as_ref()
-                        .map(|h| format!("{}@{}:{}", h.username, h.host, h.port))
-                        .unwrap_or_else(|| "SSH".to_string());
+            .map(|s| match &s.kind {
+                SessionKind::Ssh(ssh, ssh_host, _) => {
+                    let host = format!("{}@{}:{}", ssh_host.username, ssh_host.host, ssh_host.port);
                     match ssh.connection_state() {
                         SshConnectionState::Connected => format!("SSH  {}", host),
                         SshConnectionState::Connecting => format!("SSH  {} (connecting…)", host),
@@ -596,7 +592,7 @@ impl PortalApp {
                         SshConnectionState::Error(_) => format!("SSH  {}", host),
                     }
                 }
-                _ => "Local".to_string(),
+                SessionKind::Local(_, _) => "Local".to_string(),
             })
             .unwrap_or_else(|| "Local".to_string());
 
@@ -735,10 +731,15 @@ impl PortalApp {
                     if sess_idx == idx {
                         continue;
                     }
-                    if let Some(ref mut backend) = session.session {
-                        if backend.is_connected() {
-                            let _ = backend.write(&input_bytes);
-                        }
+                    let live = match &session.kind {
+                        SessionKind::Local(pty, _) => !pty.has_exited(),
+                        SessionKind::Ssh(ssh, _, _) => matches!(
+                            ssh.connection_state(),
+                            SshConnectionState::Connected
+                        ),
+                    };
+                    if live {
+                        let _ = session.kind.write(&input_bytes);
                     }
                 }
             }
@@ -748,17 +749,17 @@ impl PortalApp {
                 PaneAction::SplitHorizontal => {
                     let window = &mut self.windows[window_idx];
                     let old_idx = idx;
-                    let ssh_host = window.tabs[active].sessions.get(old_idx).and_then(|s| s.ssh_host.clone());
-                    let resolved_auth = window.tabs[active].sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
-                    let new_session = if let Some(host) = &ssh_host {
-                        let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                        TerminalSession::new_ssh(host, auth, &self.runtime, None)
-                    } else {
-                        let default_shell = std::env::var("SHELL")
-                            .unwrap_or_else(|_| "/bin/zsh".to_string());
-                        let id = window.next_id;
-                        window.next_id += 1;
-                        TerminalSession::new_local(id, &default_shell)
+                    let new_session = match &window.tabs[active].sessions.get(old_idx).map(|s| &s.kind) {
+                        Some(SessionKind::Ssh(_, host, auth)) => {
+                            TerminalSession::new_ssh(host, auth.clone(), &self.runtime, None)
+                        }
+                        _ => {
+                            let default_shell = std::env::var("SHELL")
+                                .unwrap_or_else(|_| "/bin/zsh".to_string());
+                            let id = window.next_id;
+                            window.next_id += 1;
+                            TerminalSession::new_local(id, &default_shell)
+                        }
                     };
                     let tab = &mut window.tabs[active];
                     tab.sessions.push(new_session);
@@ -773,17 +774,17 @@ impl PortalApp {
                 PaneAction::SplitVertical => {
                     let window = &mut self.windows[window_idx];
                     let old_idx = idx;
-                    let ssh_host = window.tabs[active].sessions.get(old_idx).and_then(|s| s.ssh_host.clone());
-                    let resolved_auth = window.tabs[active].sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
-                    let new_session = if let Some(host) = &ssh_host {
-                        let auth = resolved_auth.unwrap_or(config::resolve_auth(host, &self.credentials));
-                        TerminalSession::new_ssh(host, auth, &self.runtime, None)
-                    } else {
-                        let default_shell = std::env::var("SHELL")
-                            .unwrap_or_else(|_| "/bin/zsh".to_string());
-                        let id = window.next_id;
-                        window.next_id += 1;
-                        TerminalSession::new_local(id, &default_shell)
+                    let new_session = match &window.tabs[active].sessions.get(old_idx).map(|s| &s.kind) {
+                        Some(SessionKind::Ssh(_, host, auth)) => {
+                            TerminalSession::new_ssh(host, auth.clone(), &self.runtime, None)
+                        }
+                        _ => {
+                            let default_shell = std::env::var("SHELL")
+                                .unwrap_or_else(|_| "/bin/zsh".to_string());
+                            let id = window.next_id;
+                            window.next_id += 1;
+                            TerminalSession::new_local(id, &default_shell)
+                        }
                     };
                     let tab = &mut window.tabs[active];
                     tab.sessions.push(new_session);
@@ -825,7 +826,11 @@ impl PortalApp {
                 }
                 PaneAction::RemoveHostKey => {
                     let window = &mut self.windows[window_idx];
-                    if let Some(host) = window.tabs[active].sessions.get(idx).and_then(|s| s.ssh_host.clone()) {
+                    let host_opt = match &window.tabs[active].sessions.get(idx).map(|s| &s.kind) {
+                        Some(SessionKind::Ssh(_, host, _)) => Some(host.clone()),
+                        _ => None,
+                    };
+                    if let Some(host) = host_opt {
                         let _ = crate::ssh::remove_known_hosts_key(&host.host, host.port);
                         window.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
                     }

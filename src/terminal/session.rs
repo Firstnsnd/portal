@@ -125,6 +125,14 @@ impl RealPtySession {
                                     pty_ref.is_alive()
                                 };
                                 if !is_alive {
+                                    // ── INVARIANT ────────────────────────────────
+                                    // `alive` is set false ONLY here (and in the Err
+                                    // branch below), and ONLY after `is_alive()`
+                                    // (waitpid WNOHANG) confirmed the child is gone.
+                                    // `is_connected()` reads `alive` directly, so a
+                                    // false "disconnected" report is impossible while
+                                    // the child runs. Do not add any other path that
+                                    // sets `alive=false`.
                                     alive_clone.store(false, Ordering::Relaxed);
                                     break;
                                 }
@@ -166,6 +174,8 @@ impl RealPtySession {
                                 pty_ref.is_alive()
                             };
                             if !is_alive {
+                                // Same INVARIANT as above: only flip `alive`
+                                // after waitpid confirms the child is gone.
                                 alive_clone.store(false, Ordering::Relaxed);
                                 break;
                             }
@@ -289,12 +299,30 @@ impl RealPtySession {
         false
     }
 
-    /// Check if the session is still connected (reader thread alive + PTY alive)
+    /// Whether the session is still usable.
+    #[allow(dead_code)] // used in tests; production reads has_exited()
+    ///
+    /// For a local PTY there is no "connection" that can flap — the shell
+    /// process is either running or it has exited. `alive` is a one-shot latch
+    /// flipped to `false` ONLY by the reader thread after it confirms a real
+    /// child exit (`is_alive()` returned false). Reading the flag here, without
+    /// re-poking `waitpid`, is intentional: the previous form
+    /// (`alive && is_alive()`) called `waitpid` on every render frame, and any
+    // transient signal/window during that poll could flip the state mid-frame
+    // and stick the terminal in a false "disconnected" overlay that never
+    // recovered. Now `is_connected()` is monotonic: true → false exactly once,
+    // at the moment the reader thread observes a genuine exit.
     pub fn is_connected(&self) -> bool {
-        if !self.alive.load(Ordering::Relaxed) {
-            return false;
-        }
-        self.is_alive()
+        self.alive.load(Ordering::Relaxed)
+    }
+
+    /// True once the child process has been confirmed exited by the reader
+    /// thread. This is the Local-session equivalent of SSH's "disconnected",
+    /// but framed as a one-time process-exit fact rather than a connection
+    /// state — there is no flapping, no recovery, no "reconnect". `false` for
+    /// the entire lifetime of a running shell; flips to `true` exactly once.
+    pub fn has_exited(&self) -> bool {
+        !self.alive.load(Ordering::Relaxed)
     }
 
     /// Get the shell name (cached for 1 second)
@@ -387,10 +415,40 @@ mod tests {
         assert!(!session.is_connected(), "is_connected() must return false when alive flag is false");
     }
 
-    /// Verify that is_connected() returns false when alive is true but PTY is None.
-    /// This covers the case where the session was constructed without a valid PTY.
+    /// Verify that is_connected() is a pure mirror of the `alive` flag.
+    /// A session without a PTY is constructed with `alive=false`, so
+    /// `is_connected()` must report false. (Under the new monotonic model,
+    /// `alive=true && pty=None` is unreachable — `alive` is owned solely by
+    /// the reader thread of a real PTY.)
     #[test]
     fn test_is_connected_false_when_no_pty() {
+        let grid = Arc::new(Mutex::new(
+            TerminalGrid::with_scrollback_limit(80, 24, 1024 * 1024)
+        ));
+        let session = RealPtySession {
+            #[cfg(unix)]
+            pty: None,
+            #[cfg(windows)]
+            pty: None,
+            #[cfg(unix)]
+            writer: None,
+            grid,
+            alive: Arc::new(AtomicBool::new(false)),
+            _reader_thread: None,
+            cached_shell_name: Arc::new(Mutex::new(None)),
+            last_shell_check: Arc::new(Mutex::new(Instant::now())),
+            metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
+        };
+
+        assert!(!session.is_connected(), "is_connected() must return false when alive flag is false");
+    }
+
+    /// Verify that is_connected() returns true while `alive` is true.
+    /// This pins the monotonic invariant: as long as the reader thread has not
+    /// observed a genuine child exit, the session reports connected — no matter
+    /// what transient read errors occurred.
+    #[test]
+    fn test_is_connected_true_while_alive_true() {
         let grid = Arc::new(Mutex::new(
             TerminalGrid::with_scrollback_limit(80, 24, 1024 * 1024)
         ));
@@ -409,8 +467,8 @@ mod tests {
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
         };
 
-        // alive=true but no PTY → is_alive() returns false → is_connected() returns false
-        assert!(!session.is_connected(), "is_connected() must return false when PTY is None");
+        assert!(session.is_connected(),
+            "is_connected() must return true while alive=true, regardless of PTY state");
     }
 
     /// Verify that Drop sets alive to false, ensuring is_connected() transitions correctly.

@@ -131,3 +131,4 @@ insta = "0.1"
 
 # HTTP mocking for E2E tests
 wiremock = "0.6"
+

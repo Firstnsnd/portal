@@ -55,7 +55,7 @@ pub mod formatting;
 pub use theme::{ThemeColors, ThemePreset};
 pub use i18n::Language;
 pub use types::{
-    SessionBackend, AppView, BroadcastState,
+    AppView, BroadcastState,
     AddHostDialog, CredentialDialog, SnippetViewState, HostFilter,
 };
 pub use pane::{AppWindow, TabDragState};

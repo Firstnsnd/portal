@@ -62,8 +62,7 @@ mod e2e_tests {
         assert!(session.is_alive(), "interactive shell still alive after write");
     }
 
-    /// A one-shot command (no interactive shell) exits, so is_alive() must
-    /// correctly report false shortly after spawn.
+    /// Test: One-shot command exits after completion
     #[tokio::test]
     async fn test_one_shot_command_exits() {
         let session = portal::terminal::RealPtySession::new(
@@ -72,6 +71,91 @@ mod e2e_tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert!(!session.is_alive(),
             "a one-shot command must exit so is_alive() returns false");
+    }
+
+    /// Regression: a long-lived interactive shell must NEVER report
+    /// `is_connected() == false` while it runs. The old `is_connected()`
+    /// (`alive && is_alive()`) called `waitpid` on every render frame; a
+    /// transient signal/window during that poll could flip the state mid-frame
+    /// and stick the terminal in a false "disconnected" overlay that never
+    /// recovered. The new model is monotonic: `is_connected()` reads the
+    /// `alive` flag only, and `alive` flips false exactly once when the reader
+    /// thread confirms a real child exit.
+    #[tokio::test]
+    async fn test_local_shell_never_reports_false_disconnect() {
+        let session = portal::terminal::RealPtySession::new(
+            42, 80, 24, "/bin/zsh"
+        ).expect("Failed to create PTY session");
+
+        // Immediately after spawn, before any output: must be connected.
+        assert!(session.is_connected(),
+            "freshly spawned interactive shell must report connected");
+
+        // Poll repeatedly — simulating render frames over ~1s. None may report
+        // disconnected, since the shell has not exited.
+        for _ in 0..20 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert!(session.is_connected(),
+                "interactive shell falsely reported disconnected while running");
+        }
+
+        // Sanity: the shell really is alive (so a true result is meaningful).
+        assert!(session.is_alive(), "shell must still be alive");
+    }
+
+    /// Regression: after a real child exit, `is_connected()` flips false
+    /// exactly once and never recovers — distinguishing genuine "session ended"
+    /// from the spurious flap above.
+    #[tokio::test]
+    async fn test_local_session_disconnects_only_after_real_exit() {
+        // /bin/true exits immediately with status 0.
+        let session = portal::terminal::RealPtySession::new(
+            43, 80, 24, "/bin/true"
+        ).expect("Failed to create PTY session");
+
+        // Wait long enough for the reader thread to observe EOF + reap the child.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        assert!(!session.is_connected(),
+            "after /bin/true exits, is_connected() must report false (once, permanently)");
+        // Poll again: must not flap back to true.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!session.is_connected(),
+            "is_connected() must not flap back to true after a confirmed exit");
+    }
+
+    /// Regression: `curl -s https://vaniot.net` produces ~5K of single-line
+    /// HTML (Cloudflare challenge page). The entire output wrapped into ~67
+    /// rows at 80 cols. Before the fix, `erase_below` recursively cleared
+    /// wrapped continuation rows above the cursor, so zsh's prompt emission
+    /// (which includes `\e[J` on macOS) erased all visible content — only the
+    /// prompt remained. The fix removed that recursive clear, matching
+    /// standard terminal behaviour where `\e[J` only erases downward from the
+    /// cursor.
+    #[tokio::test]
+    async fn test_long_single_line_output_visible_in_grid() {
+        let session = portal::terminal::RealPtySession::new(
+            100, 80, 24, "/bin/zsh"
+        ).expect("Failed to create PTY session");
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+
+        session.write(b"cat /tmp/cf_vanio.txt 2>&1\n").expect("write");
+        tokio::time::sleep(Duration::from_millis(2000)).await;
+
+        let g = session.get_grid();
+        let g = g.lock().unwrap();
+        let sb = g.scrollback_len();
+
+        let has_html_in_visible = (0..g.rows).any(|r| {
+            let t: String = g.cells[r].iter()
+                .filter(|c| !c.wide_continuation).map(|c| c.c).collect();
+            t.contains('<') || t.contains('>') || t.contains("DOCTYPE") || t.contains("script")
+        });
+
+        assert!(has_html_in_visible,
+            "HTML content must be visible after cat+prompt cycle. content_rows={} sb={sb}",
+            (0..g.rows).filter(|&r| g.cells[r].iter().any(|c| c.c != ' ' && c.c != '\0')).count());
+        assert!(sb > 0, "scrollback must contain wrapped HTML rows");
     }
 
     /// Test: Terminal grid can handle basic operations

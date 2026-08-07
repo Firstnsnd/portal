@@ -3,7 +3,7 @@
 use crate::config::{HostEntry, resolve_auth, ResolvedAuth};
 use crate::ssh::JumpHostInfo;
 use crate::ui::pane::{SplitDirection, PaneNode, Tab};
-use crate::ui::types::{session::TerminalSession, dialogs::AppView};
+use crate::ui::types::{session::{TerminalSession, SessionKind}, dialogs::AppView};
 use super::PortalApp;
 
 impl PortalApp {
@@ -99,14 +99,16 @@ impl PortalApp {
             let active_tab = window.active_tab;
             let tab = &window.tabs[active_tab];
             let old_idx = tab.focused_session;
-            let ssh_host = tab.sessions.get(old_idx).and_then(|s| s.ssh_host.clone());
-            let resolved_auth = tab.sessions.get(old_idx).and_then(|s| s.resolved_auth.clone());
+            let (ssh_host, resolved_auth) = match tab.sessions.get(old_idx).map(|s| &s.kind) {
+                Some(SessionKind::Ssh(_, host, auth)) => (Some(host.clone()), Some(auth.clone())),
+                _ => (None, None),
+            };
             (new_id, active_tab, old_idx, ssh_host, resolved_auth)
         };
 
         // Create new session (may need self for resolve_jump_host)
         let new_session = if let Some(host) = &ssh_host {
-            let auth = resolved_auth.unwrap_or(resolve_auth(host, &self.credentials));
+            let auth = resolved_auth.unwrap_or_else(|| resolve_auth(host, &self.credentials));
             let jump = self.resolve_jump_host(host);
             TerminalSession::new_ssh(host, auth, &self.runtime, jump)
         } else {

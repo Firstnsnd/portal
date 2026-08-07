@@ -10,53 +10,44 @@ use crate::ssh::port_forward::ForwardState;
 use crate::ssh::{SshSession, SshConnectionState, JumpHostInfo, AppNotification};
 use crate::terminal::{TerminalGrid, RealPtySession};
 
-/// Unified session backend: local PTY or SSH
-pub enum SessionBackend {
-    Local(RealPtySession),
-    Ssh(SshSession),
+/// Session kind, distinguished at the type level.
+///
+/// `Ssh` carries a connection state machine (Connecting / Authenticating /
+/// Connected / Disconnected / Error) and can be reconnected. `Local` is a
+/// spawned PTY child process — it has NO "connection" concept at all: the
+/// process is either running or has exited, and that is a one-way, one-time
+/// fact reported by [`RealPtySession::has_exited`]. There is deliberately no
+/// `is_connected` / `needs_reconnect` path for `Local`, so a local terminal can
+/// never enter a "disconnected" rendering branch.
+#[allow(clippy::large_enum_variant)] // SshSession is heavy; stored in Vecs, not copied
+pub enum SessionKind {
+    /// Local PTY. The `String` is the shell path used at spawn time, kept as a
+    /// display fallback when live process-name detection fails.
+    Local(RealPtySession, String),
+    /// SSH session plus the host config + resolved auth needed to reconnect.
+    Ssh(SshSession, HostEntry, ResolvedAuth),
 }
 
-impl SessionBackend {
+impl SessionKind {
     pub fn write(&mut self, data: &[u8]) -> std::io::Result<()> {
         match self {
-            SessionBackend::Local(s) => s.write(data),
-            SessionBackend::Ssh(s) => s.write(data),
-        }
-    }
-
-    pub fn get_grid(&self) -> Arc<Mutex<TerminalGrid>> {
-        match self {
-            SessionBackend::Local(s) => s.get_grid(),
-            SessionBackend::Ssh(s) => s.get_grid(),
+            SessionKind::Local(s, _) => s.write(data),
+            SessionKind::Ssh(s, _, _) => s.write(data),
         }
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> std::io::Result<()> {
         match self {
-            SessionBackend::Local(s) => s.resize(cols, rows),
-            SessionBackend::Ssh(s) => s.resize(cols, rows),
+            SessionKind::Local(s, _) => s.resize(cols, rows),
+            SessionKind::Ssh(s, _, _) => s.resize(cols, rows),
         }
     }
 
-    pub fn is_connected(&self) -> bool {
-        match self {
-            SessionBackend::Local(s) => s.is_connected(),
-            SessionBackend::Ssh(s) => matches!(s.connection_state(), SshConnectionState::Connected),
-        }
-    }
-
-    pub fn get_shell_name(&self) -> Option<String> {
-        match self {
-            SessionBackend::Local(s) => s.get_shell_name(),
-            SessionBackend::Ssh(_) => None,
-        }
-    }
-
-    /// Drain pending notifications from the session backend
+    /// Drain pending notifications. Local sessions never produce notifications.
     pub fn drain_notifications(&self) -> Vec<AppNotification> {
         match self {
-            SessionBackend::Local(_) => Vec::new(),
-            SessionBackend::Ssh(ssh) => ssh.drain_notifications(),
+            SessionKind::Local(_, _) => Vec::new(),
+            SessionKind::Ssh(ssh, _, _) => ssh.drain_notifications(),
         }
     }
 }
@@ -121,20 +112,14 @@ pub struct SearchState {
 
 /// Terminal session
 pub struct TerminalSession {
-    pub session: Option<SessionBackend>,
+    pub kind: SessionKind,
     pub grid: Arc<Mutex<TerminalGrid>>,
     pub last_cols: usize,
     pub last_rows: usize,
     /// Scroll offset: 0 = bottom (latest), >0 = scrolled up by N lines
     pub scroll_offset: usize,
-    /// Saved host config for SSH reconnection
-    pub ssh_host: Option<HostEntry>,
-    /// Saved resolved auth for SSH reconnection (avoids needing credentials vec)
-    pub resolved_auth: Option<ResolvedAuth>,
     /// Per-session text selection
     pub selection: Selection,
-    /// Shell path used for local sessions (e.g. "/bin/zsh")
-    pub local_shell: String,
     /// When this session was created
     pub created_at: Instant,
     /// Pending PTY resize (cols, rows) — debounced for column changes
@@ -163,25 +148,20 @@ impl TerminalSession {
         let settings = crate::config::load_settings();
         let scrollback_bytes = (settings.scrollback_limit_mb as usize) * 1024 * 1024;
 
-        let session = RealPtySession::with_scrollback_limit(id, 80, 24, shell, scrollback_bytes)
-            .ok().map(SessionBackend::Local);
-        let grid = session.as_ref().map(|s| s.get_grid()).unwrap_or_else(|| {
-            Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(80, 24, scrollback_bytes)))
-        });
+        let pty = RealPtySession::with_scrollback_limit(id, 80, 24, shell, scrollback_bytes)
+            .expect("failed to spawn local PTY");
+        let grid = pty.get_grid();
 
         // Get initial cwd
         let cwd = std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string());
 
         Self {
-            session,
+            kind: SessionKind::Local(pty, shell.to_string()),
             grid,
             last_cols: 80,
             last_rows: 24,
             scroll_offset: 0,
-            ssh_host: None,
-            resolved_auth: None,
             selection: Selection::default(),
-            local_shell: shell.to_string(),
             created_at: Instant::now(),
             pending_pty_size: None,
             pty_resize_deadline: Instant::now(),
@@ -243,15 +223,12 @@ impl TerminalSession {
         );
         let grid = ssh.get_grid();
         Self {
-            session: Some(SessionBackend::Ssh(ssh)),
+            kind: SessionKind::Ssh(ssh, host.clone(), auth),
             grid,
             last_cols: 80,
             last_rows: 24,
             scroll_offset: 0,
-            ssh_host: Some(host.clone()),
-            resolved_auth: Some(auth),
             selection: Selection::default(),
-            local_shell: String::new(),
             created_at: Instant::now(),
             pending_pty_size: None,
             pty_resize_deadline: Instant::now(),
@@ -263,35 +240,35 @@ impl TerminalSession {
 
     /// Shell display name for this session
     pub fn shell_name(&self) -> String {
-        match &self.session {
-            Some(SessionBackend::Local(_)) => {
+        match &self.kind {
+            SessionKind::Local(pty, shell_path) => {
                 // Try process-tree detection first (handles nested shells,
                 // e.g. user ran `bash` from inside zsh).
-                // Falls back to the shell path stored at session creation.
-                if let Some(name) = self.session.as_ref()
-                    .and_then(|s| s.get_shell_name())
-                {
+                if let Some(name) = pty.get_shell_name() {
                     return name;
                 }
-                if !self.local_shell.is_empty() {
-                    self.local_shell.rsplit('/').next().unwrap_or("shell").to_string()
+                if !shell_path.is_empty() {
+                    shell_path.rsplit('/').next().unwrap_or("shell").to_string()
                 } else {
                     "shell".to_string()
                 }
             }
-            Some(SessionBackend::Ssh(ssh)) => {
+            SessionKind::Ssh(ssh, _, _) => {
                 ssh.get_shell_hint()
                     .as_deref()
                     .and_then(|p| p.rsplit('/').next().map(|s| s.to_string()))
                     .unwrap_or_else(|| "…".to_string())
             }
-            None => "—".to_string(),
         }
     }
 
-    /// Reconnect a disconnected SSH session
+    /// Reconnect a disconnected SSH session. No-op for Local (Local has no
+    /// connection concept and can never be reconnected — a dead local shell
+    /// is simply closed by the user).
     pub fn reconnect_ssh(&mut self, runtime: &tokio::runtime::Runtime, jump_host: Option<JumpHostInfo>) {
-        if let (Some(ref host), Some(ref auth)) = (&self.ssh_host, &self.resolved_auth) {
+        if let SessionKind::Ssh(_, host, auth) = &self.kind {
+            let host = host.clone();
+            let auth = auth.clone();
             let settings = crate::config::load_settings();
             let ssh = SshSession::connect(
                 runtime,
@@ -307,36 +284,29 @@ impl TerminalSession {
                 jump_host,
             );
             self.grid = ssh.get_grid();
-            self.session = Some(SessionBackend::Ssh(ssh));
+            self.kind = SessionKind::Ssh(ssh, host, auth);
             self.scroll_offset = 0;
         }
     }
 
-    /// Check if this is a disconnected SSH session that can reconnect
+    /// Check if this is a disconnected SSH session that can reconnect.
+    /// Always false for Local.
     pub fn needs_reconnect(&self) -> bool {
-        if self.ssh_host.is_none() {
-            return false;
-        }
-        match &self.session {
-            Some(SessionBackend::Ssh(ssh)) => matches!(
+        match &self.kind {
+            SessionKind::Ssh(ssh, _, _) => matches!(
                 ssh.connection_state(),
                 SshConnectionState::Disconnected(_) | SshConnectionState::Error(_)
             ),
-            None => true,
-            _ => false,
+            SessionKind::Local(_, _) => false,
         }
     }
 
     pub fn write(&mut self, data: &str) {
-        if let Some(ref mut session) = self.session {
-            let _ = session.write(data.as_bytes());
-        }
+        let _ = self.kind.write(data.as_bytes());
     }
 
     pub fn write_bytes(&mut self, data: &[u8]) {
-        if let Some(ref mut session) = self.session {
-            let _ = session.write(data);
-        }
+        let _ = self.kind.write(data);
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) {
@@ -357,9 +327,7 @@ impl TerminalSession {
                     if let Ok(mut grid) = self.grid.lock() {
                         grid.resize(pc as usize, pr as usize);
                     }
-                    if let Some(ref mut session) = self.session {
-                        let _ = session.resize(pc, pr);
-                    }
+                    let _ = self.kind.resize(pc, pr);
                     self.pending_pty_size = None;
                 }
                 // else: keep pending; a later frame (after ?2026l) applies it
@@ -401,11 +369,11 @@ impl TerminalSession {
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        // Explicitly drop the session to ensure PTY is cleaned up
-        // This prevents PTY resource leaks when the app exits
-        if let Some(session) = self.session.take() {
-            drop(session);
-        }
+        // Explicitly drop the backend to ensure PTY is cleaned up.
+        // This prevents PTY resource leaks when the app exits.
+        // (`kind` owns the RealPtySession / SshSession, so a plain drop suffices;
+        //  this impl exists to make the intent explicit and catch future field
+        //  additions that might forget cleanup.)
     }
 }
 
@@ -419,10 +387,8 @@ pub fn forward_state<'a>(
     cfg: &PortForwardConfig,
 ) -> Option<ForwardState> {
     for s in sessions {
-        if let Some(SessionBackend::Ssh(ssh)) = &s.session {
-            let bound = s.ssh_host.as_ref()
-                .map(|h| h.host == host.host && h.port == host.port)
-                .unwrap_or(false);
+        if let SessionKind::Ssh(ssh, ssh_host, _) = &s.kind {
+            let bound = ssh_host.host == host.host && ssh_host.port == host.port;
             if !bound {
                 continue;
             }
@@ -443,26 +409,18 @@ mod tests {
     use super::*;
 
     fn grid_only_session(cols: usize, rows: usize) -> TerminalSession {
+        // These tests exercise the resize debounce / reflow logic on the grid,
+        // not any backend behaviour. Spawn a real local PTY (the only honest way
+        // to construct a `SessionKind::Local`) and then swap in a grid shaped
+        // to the test's requested cols/rows.
+        let mut s = TerminalSession::new_local(0, "/bin/sh");
         let grid = Arc::new(Mutex::new(
             crate::terminal::TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024),
         ));
-        TerminalSession {
-            session: None, // no PTY — we inspect the debounce scheduling logic
-            grid,
-            last_cols: cols,
-            last_rows: rows,
-            scroll_offset: 0,
-            ssh_host: None,
-            resolved_auth: None,
-            selection: Selection::default(),
-            local_shell: String::new(),
-            created_at: Instant::now(),
-            pending_pty_size: None,
-            pty_resize_deadline: Instant::now(),
-            last_non_ascii_input: false,
-            cwd: None,
-            search_state: None,
-        }
+        s.grid = grid;
+        s.last_cols = cols;
+        s.last_rows = rows;
+        s
     }
 
     /// ROOT-CAUSE regression: the grid and the PTY must NEVER diverge. If the
@@ -579,14 +537,11 @@ mod sync_defer {
     use vte::Parser;
 
     fn grid_only_session(cols: usize, rows: usize) -> TerminalSession {
-        let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024)));
-        TerminalSession {
-            session: None, grid, last_cols: cols, last_rows: rows, scroll_offset: 0,
-            ssh_host: None, resolved_auth: None, selection: Selection::default(),
-            local_shell: String::new(), created_at: Instant::now(),
-            pending_pty_size: None, pty_resize_deadline: Instant::now(),
-            last_non_ascii_input: false, cwd: None, search_state: None,
-        }
+        let mut s = TerminalSession::new_local(0, "/bin/sh");
+        s.grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024)));
+        s.last_cols = cols;
+        s.last_rows = rows;
+        s
     }
 
     fn feed(grid: &mut crate::terminal::TerminalGrid, p: &mut Parser, a: &mut CellAttrs, s: &str) {
@@ -645,14 +600,11 @@ mod sync_defer_e2e {
     use vte::Parser;
 
     fn grid_only_session(cols: usize, rows: usize) -> TerminalSession {
-        let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024)));
-        TerminalSession {
-            session: None, grid, last_cols: cols, last_rows: rows, scroll_offset: 0,
-            ssh_host: None, resolved_auth: None, selection: Selection::default(),
-            local_shell: String::new(), created_at: Instant::now(),
-            pending_pty_size: None, pty_resize_deadline: Instant::now(),
-            last_non_ascii_input: false, cwd: None, search_state: None,
-        }
+        let mut s = TerminalSession::new_local(0, "/bin/sh");
+        s.grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024)));
+        s.last_cols = cols;
+        s.last_rows = rows;
+        s
     }
     fn status_count(grid: &TerminalGrid) -> usize {
         (0..grid.rows).filter(|&r| {
