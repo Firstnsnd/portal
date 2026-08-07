@@ -16,7 +16,7 @@ use crate::terminal::metrics::MetricsSnapshot;
 use crate::ui::pane::AppWindow;
 use crate::ui::pane_view::WindowContext;
 use crate::ui::theme::ThemeColors;
-use crate::ui::types::session::{SessionBackend, TerminalSession};
+use crate::ui::types::session::{SessionKind, TerminalSession};
 use crate::ssh::port_forward::ForwardState;
 
 // ── Reusable bodies ───────────────────────────────────────────────
@@ -161,16 +161,16 @@ fn render_tunnels_tab(ui: &mut egui::Ui, window: &mut AppWindow, active: usize, 
         Some(s) => s,
         None => return,
     };
-    let session_host = match session.ssh_host.as_ref() {
-        Some(h) => h.clone(),
-        None => {
+    let session_host = match &session.kind {
+        SessionKind::Ssh(_, host, _) => host.clone(),
+        SessionKind::Local(_, _) => {
             ui.label(egui::RichText::new("No SSH session").color(egui::Color32::GRAY).size(12.0));
             return;
         }
     };
-    let ssh = match session.session.as_ref() {
-        Some(SessionBackend::Ssh(s)) => s,
-        _ => {
+    let ssh = match &session.kind {
+        SessionKind::Ssh(s, _, _) => s,
+        SessionKind::Local(_, _) => {
             ui.label(egui::RichText::new("Not an SSH session").color(egui::Color32::GRAY).size(12.0));
             return;
         }
@@ -203,8 +203,8 @@ fn render_tunnels_tab(ui: &mut egui::Ui, window: &mut AppWindow, active: usize, 
     let elsewhere_active = |cfg: &crate::config::PortForwardConfig| -> bool {
         for tab in window.tabs.iter() {
             for s in tab.sessions.iter() {
-                if s.ssh_host.as_ref().map(|h| h.host == session_host.host && h.port == session_host.port).unwrap_or(false) {
-                    if let Some(SessionBackend::Ssh(other)) = &s.session {
+                if let SessionKind::Ssh(other, ssh_host, _) = &s.kind {
+                    if ssh_host.host == session_host.host && ssh_host.port == session_host.port {
                         if let Ok(pfs) = other.port_forwards.lock() {
                             for pf in pfs.iter() {
                                 if pf.config == *cfg
@@ -497,10 +497,9 @@ fn sparkline(
 // ── Helpers ────────────────────────────────────────────────────────
 
 fn session_metrics_snapshot(s: &TerminalSession) -> Option<Arc<Mutex<MetricsSnapshot>>> {
-    match &s.session {
-        Some(crate::ui::types::session::SessionBackend::Local(pty)) => Some(Arc::clone(&pty.metrics)),
-        Some(crate::ui::types::session::SessionBackend::Ssh(ssh)) => Some(Arc::clone(&ssh.metrics)),
-        None => None,
+    match &s.kind {
+        SessionKind::Local(pty, _) => Some(Arc::clone(&pty.metrics)),
+        SessionKind::Ssh(ssh, _, _) => Some(Arc::clone(&ssh.metrics)),
     }
 }
 

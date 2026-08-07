@@ -178,13 +178,13 @@ impl PortalApp {
     }
 
     /// Clean up all terminal sessions on exit to prevent PTY leaks
-    /// This is critical because PTY devices are limited system resources
+    /// This is critical because PTY devices are limited system resources.
+    /// Dropping the sessions runs `RealPtySession`'s `Drop`, which kills the
+    /// child and reaps it.
     pub fn cleanup_sessions(&mut self) {
         for window in &mut self.windows {
             for tab in &mut window.tabs {
-                for session in &mut tab.sessions {
-                    session.session = None;
-                }
+                tab.sessions.clear();
             }
         }
     }

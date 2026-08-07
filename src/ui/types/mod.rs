@@ -4,7 +4,7 @@
 
 // Session and terminal types
 pub mod session;
-pub use session::{SessionBackend, TerminalSession};
+pub use session::TerminalSession;
 
 // Layout and window types
 pub mod layout;

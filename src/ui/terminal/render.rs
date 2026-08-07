@@ -8,7 +8,7 @@ use eframe::egui;
 use crate::config::ShortcutAction;
 use crate::ssh::SshConnectionState;
 use crate::terminal;
-use crate::ui::types::{session::{TerminalSession, SearchMatch, SessionBackend}, dialogs::BroadcastState};
+use crate::ui::types::{session::{TerminalSession, SearchMatch, SessionKind}, dialogs::BroadcastState};
 use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, split_rect};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
@@ -1156,12 +1156,14 @@ pub fn render_terminal_session(
         }
 
         // ── Cursor ───────────────────────────────────────────────────────────
-        let session_disconnected = match &session.session {
-            Some(SessionBackend::Ssh(ssh)) => {
+        // Local sessions have NO connection concept: the cursor is hidden only
+        // once the child process has actually exited (has_exited), never before.
+        // SSH hides the cursor whenever it isn't Connected.
+        let session_disconnected = match &session.kind {
+            SessionKind::Ssh(ssh, _, _) => {
                 !matches!(ssh.connection_state(), SshConnectionState::Connected)
             }
-            Some(SessionBackend::Local(local)) => !local.is_connected(),
-            None => true,
+            SessionKind::Local(pty, _) => pty.has_exited(),
         };
         if !session_disconnected && offset == 0
             && grid.cursor_visible
@@ -1252,7 +1254,7 @@ pub fn render_terminal_session(
         }
 
         // ── SSH connection state overlay ──────────────────────────────────────
-        if let Some(SessionBackend::Ssh(ssh)) = &session.session {
+        if let SessionKind::Ssh(ssh, _, _) = &session.kind {
             match ssh.connection_state() {
                 SshConnectionState::Connecting | SshConnectionState::Authenticating => {
                     painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_premultiplied(
@@ -1365,9 +1367,11 @@ pub fn render_terminal_session(
             }
         }
 
-        // ── Local session disconnected overlay ──────────────────────────────
-        if let Some(SessionBackend::Local(local)) = &session.session {
-            if !local.is_connected() {
+        // ── Local session-ended overlay ─────────────────────────────────────
+        // Shown only when the child process has actually exited. A running
+        // local shell NEVER shows this — it has no "disconnected" state.
+        if let SessionKind::Local(pty, _) = &session.kind {
+            if pty.has_exited() {
                 let galley = ui.fonts(|f| f.layout_no_wrap(
                     language.t("session_ended").to_string(),
                     egui::FontId::monospace(11.0),

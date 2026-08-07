@@ -310,20 +310,6 @@ impl TerminalGrid {
 
     /// Erase from cursor to end of display.
     pub fn erase_below(&mut self) {
-        // When erasing from column 0, also clear wrapped continuation rows above
-        // the cursor that are part of the same logical line (created by reflow).
-        if self.cursor_col == 0 {
-            let mut r = self.cursor_row;
-            while r > 0 && self.line_wrapped[r - 1] {
-                r -= 1;
-                self.clear_row(r);
-                self.line_wrapped[r] = false;
-            }
-            if r > 0 {
-                self.line_wrapped[r - 1] = false;
-            }
-        }
-
         // Erase from cursor to end of current line
         self.clear_row_range(self.cursor_row, self.cursor_col, self.cols);
         // Erase all lines below

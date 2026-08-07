@@ -6,7 +6,7 @@ use eframe::egui;
 use crate::ui::pane::{Tab, TabDragState};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
-use crate::ui::types::session::SessionBackend;
+use crate::ui::types::session::SessionKind;
 use crate::ssh::SshConnectionState;
 
 /// Tab bar action result
@@ -164,13 +164,16 @@ fn render_tabs_inner(
                     // Status dot
                     let dot_color = tab.sessions
                         .get(tab.focused_session)
-                        .map(|s| match &s.session {
-                            Some(sb) if sb.is_connected() => theme.green,
-                            Some(SessionBackend::Ssh(ssh)) => match ssh.connection_state() {
+                        .map(|s| match &s.kind {
+                            // Local: green while running, red only after the
+                            // process has actually exited. Never "disconnected".
+                            SessionKind::Local(pty, _) if !pty.has_exited() => theme.green,
+                            SessionKind::Local(_, _) => theme.red,
+                            SessionKind::Ssh(ssh, _, _) => match ssh.connection_state() {
+                                SshConnectionState::Connected => theme.green,
                                 SshConnectionState::Connecting | SshConnectionState::Authenticating => theme.accent,
                                 _ => theme.red,
                             },
-                            _ => theme.red,
                         })
                         .unwrap_or(theme.fg_dim);
                     ui.label(egui::RichText::new("●").color(dot_color).size(8.0));
