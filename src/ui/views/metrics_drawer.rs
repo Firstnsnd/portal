@@ -98,94 +98,81 @@ pub fn render_tools_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut
                     }
                     ui.add_space(6.0);
 
-                    // Tab buttons — shadcn/ui TabsList: a muted pill holding
-                    // equal-width triggers. The active trigger is a raised
-                    // card (elevated surface + subtle border + drop shadow);
-                    // inactive triggers are transparent with muted text and a
-                    // hover wash.
+                    // Tab buttons — underline indicator style: a row of
+                    // equal-width text labels over a full-width hairline
+                    // divider. The active label is primary-colored with a 2px
+                    // accent underline that sits on top of the divider;
+                    // inactive labels are muted and brighten on hover.
                     let tab = window.tabs.get(active).map(|t| t.tools_tab).unwrap_or(0);
                     let tabs: [(u8, &str); 3] = [
                         (0, language.t("metrics")),
                         (1, language.t("snippets")),
                         (2, language.t("tunnels")),
                     ];
-                    let pill_h = 32.0;
-                    let gap = 2.0;
-                    let pad = tokens::SPACE_XS;
-                    let pill_r = tokens::DIALOG_ROUNDING;
-                    let trig_r = crate::ui::widgets::INPUT_ROUNDING;
 
-                    let pill_rect = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), pill_h),
+                    let row_h = 30.0;
+                    let row_rect = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), row_h),
                         egui::Sense::hover(),
                     ).0;
                     let painter = ui.painter();
-                    painter.rect_filled(
-                        pill_rect,
-                        egui::Rounding::same(pill_r),
-                        theme.bg_secondary,
-                    );
+                    let seg_w = row_rect.width() / tabs.len() as f32;
 
-                    let inner_x = pill_rect.min.x + pad;
-                    let inner_w = (pill_rect.width() - pad * 2.0).max(1.0);
-                    let trigger_w = (inner_w - gap * (tabs.len() - 1) as f32) / tabs.len() as f32;
+                    // Hairline divider along the bottom of the row; the active
+                    // underline is painted over it inside the loop below.
+                    let div_y = row_rect.max.y - 0.5;
+                    painter.line_segment(
+                        [egui::pos2(row_rect.min.x, div_y), egui::pos2(row_rect.max.x, div_y)],
+                        egui::Stroke::new(1.0, theme.divider),
+                    );
 
                     for (i, (tid, label)) in tabs.iter().enumerate() {
                         let is_selected = tab == *tid;
-                        let trig_x = inner_x + i as f32 * (trigger_w + gap);
-                        let trig_rect = egui::Rect::from_min_size(
-                            egui::pos2(trig_x, pill_rect.min.y),
-                            egui::vec2(trigger_w, pill_h),
+                        let seg_rect = egui::Rect::from_min_size(
+                            egui::pos2(row_rect.min.x + i as f32 * seg_w, row_rect.min.y),
+                            egui::vec2(seg_w, row_h),
                         );
                         let resp = ui.interact(
-                            trig_rect,
+                            seg_rect,
                             ui.id().with(("tools_tab_trigger", tid)),
                             egui::Sense::click(),
                         );
 
-                        if is_selected {
-                            // Raised card: elevated surface + 1px border +
-                            // subtle drop shadow beneath it (shadow-sm feel).
-                            painter.rect_filled(
-                                trig_rect,
-                                egui::Rounding::same(trig_r),
-                                theme.bg_elevated,
-                            );
-                            painter.rect_filled(
-                                egui::Rect::from_min_size(
-                                    egui::pos2(trig_rect.min.x, trig_rect.max.y),
-                                    egui::vec2(trig_rect.width(), 2.0),
-                                ),
-                                0.0,
-                                egui::Color32::from_black_alpha(20),
-                            );
-                            painter.rect_stroke(
-                                trig_rect,
-                                egui::Rounding::same(trig_r),
-                                egui::Stroke::new(1.0, theme.border),
-                            );
-                        } else if resp.hovered() {
-                            painter.rect_filled(
-                                trig_rect,
-                                egui::Rounding::same(trig_r),
-                                theme.hover_bg,
-                            );
-                        }
-
-                        let text_color = if is_selected { theme.fg_primary } else { theme.fg_dim };
+                        // Active = primary; inactive = dim, brightening on hover.
+                        let text_color = if is_selected || resp.hovered() {
+                            theme.fg_primary
+                        } else {
+                            theme.fg_dim
+                        };
                         let galley = ui.fonts(|f| f.layout_no_wrap(
                             (*label).to_string(),
                             egui::FontId::proportional(tokens::FONT_BASE),
                             text_color,
                         ));
-                        painter.galley(
-                            egui::pos2(
-                                trig_rect.center().x - galley.rect.width() / 2.0,
-                                trig_rect.center().y - galley.rect.height() / 2.0,
-                            ),
-                            galley,
-                            egui::Color32::TRANSPARENT,
+                        let (text_w, text_h) = (galley.rect.width(), galley.rect.height());
+                        // Center the text, nudged up 1px so the underline has
+                        // breathing room beneath it.
+                        let text_pos = egui::pos2(
+                            seg_rect.center().x - text_w / 2.0,
+                            seg_rect.center().y - text_h / 2.0 - 1.0,
                         );
+                        painter.galley(text_pos, galley, egui::Color32::TRANSPARENT);
+
+                        // Active underline: 2px accent bar centered under the
+                        // text, painted over the divider.
+                        if is_selected {
+                            let uw = (text_w + tokens::SPACE_MD)
+                                .min(seg_w - 2.0 * tokens::SPACE_SM);
+                            let ux = seg_rect.center().x - uw / 2.0;
+                            painter.rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::pos2(ux, row_rect.max.y - 2.0),
+                                    egui::vec2(uw, 2.0),
+                                ),
+                                0.0,
+                                theme.accent,
+                            );
+                        }
 
                         if resp.clicked() {
                             if let Some(t) = window.tabs.get_mut(active) { t.tools_tab = *tid; }
