@@ -230,7 +230,7 @@ pub fn render_file_panel(
     move_to_dir_request: &mut Option<MoveToDirRequest>,
 ) {
     let row_height = 26.0;
-    let status_bar_height = 24.0;
+    let status_bar_height = crate::ui::tokens::STATUS_BAR_HEIGHT;
 
     // Reserve space for the status bar at the bottom
     let available = ui.available_rect_before_wrap();

@@ -226,7 +226,7 @@ impl PortalApp {
                                         ("\u{2139}", theme.accent, theme.accent)
                                     }
                                     NotificationLevel::Warning => {
-                                        ("\u{26A0}", egui::Color32::from_rgb(234, 179, 8), egui::Color32::from_rgb(234, 179, 8))
+                                        ("\u{26A0}", self.theme.warning, self.theme.warning)
                                     }
                                     NotificationLevel::Error => {
                                         ("\u{274C}", theme.red, theme.red)
@@ -500,7 +500,11 @@ impl PortalApp {
             TabBarAction::ReconnectTab(ti) => {
                 let window = &mut self.windows[window_idx];
                 let si = window.tabs[ti].focused_session;
-                window.tabs[ti].sessions[si].reconnect_ssh(&self.runtime, None);
+                // Only SSH sessions support reconnection; Local sessions have no
+                // connection concept and must never reach reconnect_ssh.
+                if matches!(&window.tabs[ti].sessions[si].kind, SessionKind::Ssh(_, _, _)) {
+                    window.tabs[ti].sessions[si].reconnect_ssh(&self.runtime, None);
+                }
             }
             TabBarAction::DetachTab(ti) => {
                 if self.windows[window_idx].tabs.len() > 1 {
@@ -837,7 +841,10 @@ impl PortalApp {
                 }
                 PaneAction::Reconnect => {
                     let window = &mut self.windows[window_idx];
-                    window.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
+                    // Only SSH sessions support reconnection.
+                    if matches!(&window.tabs[active].sessions[idx].kind, SessionKind::Ssh(_, _, _)) {
+                        window.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
+                    }
                 }
             }
         }

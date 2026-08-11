@@ -13,8 +13,6 @@ pub const LIST_ROW_HEIGHT: f32 = 52.0;
 #[allow(dead_code)]
 pub const TABLE_ROW_HEIGHT: f32 = 36.0;
 #[allow(dead_code)]
-pub const DRAWER_WIDTH: f32 = 340.0;
-#[allow(dead_code)]
 pub const DIALOG_WIDTH_SM: f32 = 300.0;
 #[allow(dead_code)]
 pub const DIALOG_WIDTH_MD: f32 = 340.0;
@@ -24,6 +22,7 @@ pub const STATUS_BAR_HEIGHT: f32 = 24.0;
 
 // Border radius
 pub const RADIUS_SM: f32 = 4.0;
+pub const DIALOG_ROUNDING: f32 = 8.0;
 
 // Typography
 pub const FONT_XS: f32 = 10.0;

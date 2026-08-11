@@ -164,14 +164,14 @@ fn render_tunnels_tab(ui: &mut egui::Ui, window: &mut AppWindow, active: usize, 
     let session_host = match &session.kind {
         SessionKind::Ssh(_, host, _) => host.clone(),
         SessionKind::Local(_, _) => {
-            ui.label(egui::RichText::new("No SSH session").color(egui::Color32::GRAY).size(12.0));
+            ui.label(egui::RichText::new("No SSH session").color(cx.theme.fg_dim).size(12.0));
             return;
         }
     };
     let ssh = match &session.kind {
         SessionKind::Ssh(s, _, _) => s,
         SessionKind::Local(_, _) => {
-            ui.label(egui::RichText::new("Not an SSH session").color(egui::Color32::GRAY).size(12.0));
+            ui.label(egui::RichText::new("Not an SSH session").color(cx.theme.fg_dim).size(12.0));
             return;
         }
     };
@@ -189,7 +189,7 @@ fn render_tunnels_tab(ui: &mut egui::Ui, window: &mut AppWindow, active: usize, 
                     matched.is_some(),
                     matched.map(|h| h.port_forwards.len()).unwrap_or(0),
                     session_host.port_forwards.len()))
-            .color(egui::Color32::GRAY).size(11.0));
+            .color(cx.theme.fg_dim).size(11.0));
         return;
     }
 
@@ -232,13 +232,13 @@ fn render_tunnels_tab(ui: &mut egui::Ui, window: &mut AppWindow, active: usize, 
             crate::config::ForwardKind::Remote => format!("{}:{} → {}:{}", cfg.remote_host, cfg.remote_port, cfg.local_host, cfg.local_port),
         };
         let (status, status_color) = if in_use_elsewhere {
-            ("In use by another session", egui::Color32::from_rgb(255, 165, 0))
+            ("In use by another session", cx.theme.warning)
         } else { match &state {
-            ForwardState::Active => ("Active", egui::Color32::GREEN),
-            ForwardState::Starting => ("Starting…", egui::Color32::from_rgb(100, 149, 237)),
-            ForwardState::Stopped => ("Inactive", egui::Color32::GRAY),
-            ForwardState::Error(_) => ("Error", egui::Color32::RED),
-            ForwardState::Conflict(_) => ("Conflict", egui::Color32::RED),
+            ForwardState::Active => ("Active", cx.theme.green),
+            ForwardState::Starting => ("Starting…", cx.theme.accent),
+            ForwardState::Stopped => ("Inactive", cx.theme.fg_dim),
+            ForwardState::Error(_) => ("Error", cx.theme.red),
+            ForwardState::Conflict(_) => ("Conflict", cx.theme.red),
         }};
 
         // Row 1: type + detail
@@ -295,7 +295,7 @@ fn row(
         egui::vec2(ui.available_width(), 46.0),
     );
     let (_, resp) = ui.allocate_at_least(rect.size(), egui::Sense::hover());
-    sparkline(ui, rect, history, theme.accent, &resp);
+    sparkline(ui, rect, history, theme.accent, &resp, theme);
     ui.add_space(10.0);
 }
 
@@ -326,10 +326,11 @@ fn network_row(
     ui.add_space(6.0);
     let rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), 46.0));
     let (_, resp) = ui.allocate_at_least(rect.size(), egui::Sense::hover());
-    dual_sparkline(ui, rect, rx, tx, theme.accent, theme.green, &resp);
+    dual_sparkline(ui, rect, rx, tx, theme.accent, theme.green, &resp, theme);
     ui.add_space(10.0);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dual_sparkline(
     ui: &egui::Ui,
     rect: egui::Rect,
@@ -338,6 +339,7 @@ fn dual_sparkline(
     rx_color: egui::Color32,
     tx_color: egui::Color32,
     resp: &egui::Response,
+    theme: &ThemeColors,
 ) {
     let nr = rx.len();
     let nt = tx.len();
@@ -389,28 +391,30 @@ fn dual_sparkline(
         let idx = ((hp.x - rect.min.x) / w).clamp(0.0, 1.0).mul_add(nr as f32 - 1.0, 0.0).round() as usize;
         let idx = idx.min(nr - 1);
         let cx = rp[idx].x;
-        let dim = egui::Color32::from_rgba_premultiplied(255, 255, 255, 80);
+        let dim = theme.fg_primary.gamma_multiply(0.31);
         ui.painter().line_segment([egui::pos2(cx, rect.min.y), egui::pos2(cx, rect.max.y)], PathStroke::new(1.0, dim));
         let label = format!("\u{2193}{}  \u{2191}{}", rate(rx[idx].round() as u64), rate(tx[idx].round() as u64));
-        let txt_color = egui::Color32::WHITE;
+        let txt_color = theme.fg_primary;
         let g = ui.fonts(|f| f.layout_no_wrap(label.clone(), egui::FontId::monospace(11.0), txt_color));
         let pad = egui::vec2(6.0, 3.0);
         let mut lbl = egui::Rect::from_center_size(egui::pos2(cx, rect.min.y + g.rect.height()/2.0 + 6.0), g.rect.size()+pad*2.0);
         if lbl.right() > rect.right() { lbl = lbl.translate(egui::vec2(rect.right()-lbl.right()-2.0, 0.0)); }
         if lbl.left()  < rect.left()  { lbl = lbl.translate(egui::vec2(rect.left()-lbl.left()+2.0, 0.0)); }
-        ui.painter().rect_filled(lbl, 4.0, egui::Color32::from_black_alpha(200));
+        ui.painter().rect_filled(lbl, 4.0, theme.overlay_bg);
         ui.painter().text(lbl.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::monospace(11.0), txt_color);
     }
 }
 
 // ── Grafana-style sparkline (hand-drawn) ───────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn sparkline(
     ui: &egui::Ui,
     rect: egui::Rect,
     data: &std::collections::VecDeque<f32>,
     color: egui::Color32,
     resp: &egui::Response,
+    theme: &ThemeColors,
 ) {
     let n = data.len();
     if n < 2 {
@@ -489,7 +493,7 @@ fn sparkline(
         if lbl.right() > rect.right() { lbl = lbl.translate(egui::vec2(rect.right() - lbl.right() - 2.0, 0.0)); }
         if lbl.left()  < rect.left()  { lbl = lbl.translate(egui::vec2(rect.left()  - lbl.left()  + 2.0, 0.0)); }
         if lbl.top()   < 0.0          { lbl = lbl.translate(egui::vec2(0.0, -lbl.top() + 2.0)); }
-        ui.painter().rect_filled(lbl, 4.0, egui::Color32::from_black_alpha(200));
+        ui.painter().rect_filled(lbl, 4.0, theme.overlay_bg);
         ui.painter().text(lbl.center(), egui::Align2::CENTER_CENTER, txt, egui::FontId::monospace(11.0), color);
     }
 }

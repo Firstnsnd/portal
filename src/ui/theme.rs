@@ -36,6 +36,12 @@ pub struct ThemeColors {
     pub success_dim: egui::Color32,     // Dimmed success (for backgrounds)
     #[allow(dead_code)]
     pub error_dim: egui::Color32,       // Dimmed error (for backgrounds)
+    #[allow(dead_code)]
+    pub warning: egui::Color32,         // Warning/attention (notifications, in-use state)
+    pub search_match: egui::Color32,     // Search match highlight (non-current)
+    pub search_match_current: egui::Color32, // Search match highlight (current)
+    pub button_text: egui::Color32,     // Contrast text on filled buttons (primary/danger)
+    pub broadcast_bg: egui::Color32,    // Broadcast-enabled tab fill
 }
 
 impl ThemeColors {
@@ -95,6 +101,11 @@ impl ThemePreset {
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(26, 27, 38, 220),
                 success_dim: egui::Color32::from_rgba_unmultiplied(115, 218, 202, 30),
                 error_dim: egui::Color32::from_rgba_unmultiplied(247, 118, 142, 30),
+                warning: egui::Color32::from_rgb(234, 179, 8),
+                search_match: egui::Color32::from_rgb(255, 215, 0),
+                search_match_current: egui::Color32::from_rgb(255, 140, 0),
+                button_text: egui::Color32::from_rgb(255, 255, 255),
+                broadcast_bg: egui::Color32::from_rgba_unmultiplied(60, 40, 100, 255),
             },
             ThemePreset::Dracula => ThemeColors {
                 bg_primary: egui::Color32::from_rgb(40, 42, 54),
@@ -122,6 +133,11 @@ impl ThemePreset {
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(40, 42, 54, 220),
                 success_dim: egui::Color32::from_rgba_unmultiplied(80, 250, 123, 30),
                 error_dim: egui::Color32::from_rgba_unmultiplied(255, 85, 85, 30),
+                warning: egui::Color32::from_rgb(241, 250, 140),
+                search_match: egui::Color32::from_rgb(255, 215, 0),
+                search_match_current: egui::Color32::from_rgb(255, 140, 0),
+                button_text: egui::Color32::from_rgb(248, 248, 242),
+                broadcast_bg: egui::Color32::from_rgba_unmultiplied(80, 50, 120, 255),
             },
             ThemePreset::OneDark => ThemeColors {
                 bg_primary: egui::Color32::from_rgb(40, 44, 52),
@@ -149,6 +165,11 @@ impl ThemePreset {
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(40, 44, 52, 220),
                 success_dim: egui::Color32::from_rgba_unmultiplied(152, 195, 121, 30),
                 error_dim: egui::Color32::from_rgba_unmultiplied(224, 108, 117, 30),
+                warning: egui::Color32::from_rgb(229, 181, 103),
+                search_match: egui::Color32::from_rgb(255, 215, 0),
+                search_match_current: egui::Color32::from_rgb(255, 140, 0),
+                button_text: egui::Color32::from_rgb(255, 255, 255),
+                broadcast_bg: egui::Color32::from_rgba_unmultiplied(60, 50, 100, 255),
             },
             ThemePreset::SolarizedDark => ThemeColors {
                 bg_primary: egui::Color32::from_rgb(0, 43, 54),
@@ -176,6 +197,11 @@ impl ThemePreset {
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(0, 43, 54, 220),
                 success_dim: egui::Color32::from_rgba_unmultiplied(133, 153, 0, 30),
                 error_dim: egui::Color32::from_rgba_unmultiplied(220, 50, 47, 30),
+                warning: egui::Color32::from_rgb(181, 137, 0),
+                search_match: egui::Color32::from_rgb(220, 180, 0),
+                search_match_current: egui::Color32::from_rgb(220, 120, 0),
+                button_text: egui::Color32::from_rgb(253, 246, 227),
+                broadcast_bg: egui::Color32::from_rgba_unmultiplied(40, 30, 80, 255),
             },
             ThemePreset::Nord => ThemeColors {
                 bg_primary: egui::Color32::from_rgb(46, 52, 64),
@@ -203,6 +229,11 @@ impl ThemePreset {
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(46, 52, 64, 220),
                 success_dim: egui::Color32::from_rgba_unmultiplied(163, 190, 140, 30),
                 error_dim: egui::Color32::from_rgba_unmultiplied(191, 97, 106, 30),
+                warning: egui::Color32::from_rgb(208, 135, 0),
+                search_match: egui::Color32::from_rgb(220, 180, 0),
+                search_match_current: egui::Color32::from_rgb(220, 120, 0),
+                button_text: egui::Color32::from_rgb(236, 239, 244),
+                broadcast_bg: egui::Color32::from_rgba_unmultiplied(80, 70, 130, 255),
             },
             ThemePreset::SolarizedLight => ThemeColors {
                 bg_primary: egui::Color32::from_rgb(253, 246, 227),
@@ -230,6 +261,11 @@ impl ThemePreset {
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(253, 246, 227, 240),
                 success_dim: egui::Color32::from_rgba_unmultiplied(133, 153, 0, 50),
                 error_dim: egui::Color32::from_rgba_unmultiplied(220, 50, 47, 50),
+                warning: egui::Color32::from_rgb(180, 130, 0),
+                search_match: egui::Color32::from_rgb(255, 210, 0),
+                search_match_current: egui::Color32::from_rgb(255, 140, 0),
+                button_text: egui::Color32::from_rgb(255, 255, 255),
+                broadcast_bg: egui::Color32::from_rgba_unmultiplied(80, 60, 140, 255),
             },
             ThemePreset::GitHubLight => ThemeColors {
                 bg_primary: egui::Color32::from_rgb(255, 255, 255),
@@ -257,6 +293,11 @@ impl ThemePreset {
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 240),
                 success_dim: egui::Color32::from_rgba_unmultiplied(31, 136, 61, 50),
                 error_dim: egui::Color32::from_rgba_unmultiplied(218, 54, 51, 50),
+                warning: egui::Color32::from_rgb(210, 150, 0),
+                search_match: egui::Color32::from_rgb(255, 215, 0),
+                search_match_current: egui::Color32::from_rgb(255, 140, 0),
+                button_text: egui::Color32::from_rgb(255, 255, 255),
+                broadcast_bg: egui::Color32::from_rgba_unmultiplied(70, 50, 130, 255),
             },
             ThemePreset::OneLight => ThemeColors {
                 bg_primary: egui::Color32::from_rgb(255, 255, 255),
@@ -284,6 +325,11 @@ impl ThemePreset {
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 240),
                 success_dim: egui::Color32::from_rgba_unmultiplied(88, 175, 115, 50),
                 error_dim: egui::Color32::from_rgba_unmultiplied(225, 109, 112, 50),
+                warning: egui::Color32::from_rgb(210, 150, 0),
+                search_match: egui::Color32::from_rgb(255, 215, 0),
+                search_match_current: egui::Color32::from_rgb(255, 140, 0),
+                button_text: egui::Color32::from_rgb(255, 255, 255),
+                broadcast_bg: egui::Color32::from_rgba_unmultiplied(70, 50, 130, 255),
             },
         }
     }

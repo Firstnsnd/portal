@@ -145,7 +145,7 @@ fn render_tabs_inner(
             let tab_fill = if is_active {
                 theme.bg_elevated
             } else if is_broadcasting {
-                egui::Color32::from_rgba_unmultiplied(60, 40, 100, 255)
+                theme.broadcast_bg
             } else {
                 egui::Color32::TRANSPARENT
             };
@@ -321,12 +321,14 @@ fn render_tabs_inner(
                 painter.rect_filled(
                     ghost_rect,
                     egui::Rounding::same(8.0),
-                    egui::Color32::from_rgba_unmultiplied(40, 40, 50, 200)
+                    egui::Color32::from_rgba_unmultiplied(
+                        theme.bg_elevated.r(), theme.bg_elevated.g(), theme.bg_elevated.b(), 200)
                 );
                 painter.rect_stroke(
                     ghost_rect,
                     egui::Rounding::same(8.0),
-                    egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(150, 150, 170, 150))
+                    egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(
+                        theme.border.r(), theme.border.g(), theme.border.b(), 150))
                 );
 
                 // Draw ghost text
@@ -336,7 +338,8 @@ fn render_tabs_inner(
                     egui::Align2::LEFT_CENTER,
                     &tab_drag.ghost_title,
                     egui::FontId::new(13.0, egui::FontFamily::Monospace),
-                    egui::Color32::from_rgba_unmultiplied(220, 228, 255, 180)
+                    egui::Color32::from_rgba_unmultiplied(
+                        theme.fg_primary.r(), theme.fg_primary.g(), theme.fg_primary.b(), 180)
                 );
 
                 // Draw insertion indicator

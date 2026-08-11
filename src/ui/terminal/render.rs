@@ -1056,8 +1056,10 @@ pub fn render_terminal_session(
 
         // ── Search match highlighting ─────────────────────────────────────────
         if let Some(ref search_state) = session.search_state {
-            let match_color   = egui::Color32::from_rgba_premultiplied(255, 220,  50,  80);
-            let current_color = egui::Color32::from_rgba_premultiplied(255, 140,   0, 120);
+            let match_color   = egui::Color32::from_rgba_unmultiplied(
+                theme.search_match.r(), theme.search_match.g(), theme.search_match.b(), 80);
+            let current_color = egui::Color32::from_rgba_unmultiplied(
+                theme.search_match_current.r(), theme.search_match_current.g(), theme.search_match_current.b(), 120);
 
             for (match_idx, m) in search_state.matches.iter().enumerate() {
                 let is_current = match_idx == search_state.current_index;
@@ -1560,9 +1562,10 @@ pub fn render_terminal_session(
     // ── Close button (×) ──────────────────────────────────────────────────────
     if show_close_btn && response.hovered() {
         let btn_bg = if close_btn_hovered {
-            egui::Color32::from_rgb(192, 77, 77)
+            theme.error_dim
         } else {
-            egui::Color32::from_rgba_premultiplied(60, 62, 80, 220)
+            egui::Color32::from_rgba_unmultiplied(
+                theme.bg_elevated.r(), theme.bg_elevated.g(), theme.bg_elevated.b(), 220)
         };
         painter.rect_filled(close_btn_rect, 4.0, btn_bg);
         painter.text(
@@ -1570,7 +1573,7 @@ pub fn render_terminal_session(
             egui::Align2::CENTER_CENTER,
             "\u{00d7}",
             egui::FontId::proportional(13.0),
-            egui::Color32::WHITE,
+            theme.fg_primary,
         );
     }
 

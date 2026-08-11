@@ -37,7 +37,7 @@ pub const FORM_LEFT_MARGIN: f32 = 12.0;   // Left margin for form content
 pub fn primary_button<'a>(text: &'a str, theme: &'a ThemeColors) -> egui::Button<'a> {
     egui::Button::new(
         egui::RichText::new(text)
-            .color(egui::Color32::WHITE)
+            .color(theme.button_text)
             .size(13.0),
     )
     .fill(theme.accent)
@@ -61,7 +61,7 @@ pub fn secondary_button<'a>(text: &'a str, theme: &'a ThemeColors) -> egui::Butt
 pub fn danger_button<'a>(text: &'a str, theme: &'a ThemeColors) -> egui::Button<'a> {
     egui::Button::new(
         egui::RichText::new(text)
-            .color(egui::Color32::WHITE)
+            .color(theme.button_text)
             .size(13.0),
     )
     .fill(theme.red)
@@ -87,7 +87,7 @@ pub fn text_button(text: &str, color: egui::Color32) -> egui::Button<'_> {
 pub fn dialog_frame(theme: &ThemeColors) -> egui::Frame {
     egui::Frame {
         fill: theme.bg_secondary,
-        rounding: egui::Rounding::same(10.0),
+        rounding: egui::Rounding::same(crate::ui::tokens::DIALOG_ROUNDING),
         inner_margin: egui::Margin::same(20.0),
         stroke: egui::Stroke::new(1.0, theme.border),
         shadow: egui::epaint::Shadow {
