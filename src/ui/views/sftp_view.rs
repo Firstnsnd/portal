@@ -1051,7 +1051,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                         egui::Frame {
                             fill: cx.theme.bg_elevated,
                             inner_margin: egui::Margin::symmetric(8.0, 4.0),
-                            rounding: egui::Rounding::same(8.0),
+                            rounding: egui::Rounding::same(crate::ui::widgets::INPUT_ROUNDING),
                             stroke: egui::Stroke::new(1.0, cx.theme.accent),
                             ..Default::default()
                         }
@@ -2091,7 +2091,7 @@ pub fn render_editor_dialog(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut 
             .title_bar(false)
             .frame(egui::Frame {
                 fill: cx.theme.bg_primary,
-                rounding: egui::Rounding::same(10.0),
+                rounding: egui::Rounding::same(crate::ui::tokens::DIALOG_ROUNDING),
                 inner_margin: egui::Margin::ZERO,
                 stroke: egui::Stroke::new(1.0, cx.theme.border),
                 shadow: egui::epaint::Shadow {
@@ -2110,7 +2110,7 @@ pub fn render_editor_dialog(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut 
                     let title_frame = egui::Frame {
                         fill: cx.theme.bg_secondary,
                         inner_margin: egui::Margin { left: 16.0, right: 16.0, top: 12.0, bottom: 12.0 },
-                        rounding: egui::Rounding { nw: 10.0, ne: 10.0, sw: 0.0, se: 0.0 },
+                        rounding: egui::Rounding { nw: crate::ui::tokens::DIALOG_ROUNDING, ne: crate::ui::tokens::DIALOG_ROUNDING, sw: 0.0, se: 0.0 },
                         ..Default::default()
                     };
                     title_frame.show(ui, |ui| {
@@ -2260,7 +2260,7 @@ pub fn render_editor_dialog(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut 
                     let bar_frame = egui::Frame {
                         fill: cx.theme.bg_secondary,
                         inner_margin: egui::Margin { left: 16.0, right: 16.0, top: 8.0, bottom: 8.0 },
-                        rounding: egui::Rounding { nw: 0.0, ne: 0.0, sw: 10.0, se: 10.0 },
+                        rounding: egui::Rounding { nw: 0.0, ne: 0.0, sw: crate::ui::tokens::DIALOG_ROUNDING, se: crate::ui::tokens::DIALOG_ROUNDING },
                         ..Default::default()
                     };
                     bar_frame.show(ui, |ui| {
@@ -2275,7 +2275,7 @@ pub fn render_editor_dialog(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui.add(
                                     egui::Button::new(
-                                        egui::RichText::new(cx.language.t("save")).color(egui::Color32::WHITE).size(12.0)
+                                        egui::RichText::new(cx.language.t("save")).color(cx.theme.button_text).size(12.0)
                                     )
                                     .fill(cx.theme.accent)
                                     .rounding(6.0)

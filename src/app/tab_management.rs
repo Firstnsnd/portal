@@ -108,7 +108,7 @@ impl PortalApp {
 
         // Create new session (may need self for resolve_jump_host)
         let new_session = if let Some(host) = &ssh_host {
-            let auth = resolved_auth.unwrap_or_else(|| resolve_auth(host, &self.credentials));
+            let auth = resolved_auth.expect("SSH session must have resolved auth");
             let jump = self.resolve_jump_host(host);
             TerminalSession::new_ssh(host, auth, &self.runtime, jump)
         } else {
