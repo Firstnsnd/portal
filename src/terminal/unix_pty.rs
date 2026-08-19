@@ -219,14 +219,46 @@ impl Pty for UnixPty {
         // correct status in one syscall.
         unsafe {
             let mut status: i32 = 0;
-            let result = libc::waitpid(self.child_pid, &mut status, libc::WNOHANG);
-            if result == 0 {
-                true // child still running
-            } else {
-                // result == child_pid  → zombie reaped
-                // result == -1 (ECHILD) → already gone
-                self.alive.store(false, Ordering::Relaxed);
-                false
+            match libc::waitpid(self.child_pid, &mut status, libc::WNOHANG) {
+                0 => true, // child still running
+                pid if pid == self.child_pid => {
+                    // State changed. Only a true termination (exited or
+                    // killed by a signal) means the shell is gone. A STOPPED
+                    // child (Ctrl-Z / job control / SIGTTOU) returns its pid
+                    // with WIFSTOPPED — it is suspended, NOT dead. Treating a
+                    // stop as an exit would flip `alive=false` and surface the
+                    // "[会话已结束]" overlay on a shell that's still running.
+                    if libc::WIFEXITED(status) || libc::WIFSIGNALED(status) {
+                        log::warn!(
+                            "[pty] child {} terminated (exited={}, signaled={}) — marking local session dead",
+                            self.child_pid,
+                            libc::WIFEXITED(status),
+                            libc::WIFSIGNALED(status),
+                        );
+                        self.alive.store(false, Ordering::Relaxed);
+                        false
+                    } else {
+                        log::debug!(
+                            "[pty] child {} stopped (not exited) — keeping session alive",
+                            self.child_pid,
+                        );
+                        true
+                    }
+                }
+                _ => {
+                    // waitpid returned -1 (error). Only ECHILD ("no child
+                    // process" — already reaped elsewhere) proves the child is
+                    // truly gone. Any other errno — notably EINTR when a signal
+                    // (SIGCHLD from the shell forking a subcommand) is caught
+                    // mid-syscall — is transient and MUST NOT be treated as
+                    // death, or a live shell gets falsely marked exited.
+                    let gone = std::io::Error::last_os_error().raw_os_error()
+                        == Some(libc::ECHILD);
+                    if gone {
+                        self.alive.store(false, Ordering::Relaxed);
+                    }
+                    !gone
+                }
             }
         }
     }
