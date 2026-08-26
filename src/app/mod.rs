@@ -141,7 +141,7 @@ impl PortalApp {
         };
 
         let connection_history = crate::config::load_history();
-        let snippets = crate::config::load_snippets();
+        let snippets = crate::config::load_snippets(&crate::config::snippets_file_path());
 
         let hosts_file = crate::config::hosts_file_path();
         let mut hosts = crate::config::load_hosts(&hosts_file);

@@ -102,15 +102,16 @@ mod tests {
 
     #[test]
     fn test_load_snippets_returns_vec() {
-        // load_snippets() returns a Vec (may be empty or contain existing snippets)
-        let snippets = load_snippets();
+        let (_temp_file, path) = create_temp_file();
+        // load_snippets() returns a Vec (may be empty for a fresh file)
+        let snippets = load_snippets(&path);
         // Just verify it returns a vector without panicking
         let _snippet_count = snippets.len();
     }
 
     #[test]
     fn test_save_and_load_snippets() {
-        let (_temp_file, _path) = create_temp_file();
+        let (_temp_file, path) = create_temp_file();
 
         let original = vec![
             Snippet {
@@ -121,8 +122,8 @@ mod tests {
             },
         ];
 
-        save_snippets(&original);
-        let loaded = load_snippets();
+        save_snippets(&path, &original);
+        let loaded = load_snippets(&path);
 
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].name, "Test Snippet");

@@ -239,6 +239,8 @@ mod e2e_tests {
     /// Test: Snippet save and load
     #[test]
     fn test_snippet_save_load() {
+        let (_temp_file, path) = create_test_temp_file();
+
         // Save some snippets
         let snippets = vec![
             portal::config::Snippet {
@@ -249,8 +251,8 @@ mod e2e_tests {
             },
         ];
 
-        portal::config::save_snippets(&snippets);
-        let loaded = portal::config::load_snippets();
+        portal::config::save_snippets(&path, &snippets);
+        let loaded = portal::config::load_snippets(&path);
 
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].name, "Test Snippet");
