@@ -737,9 +737,8 @@ pub fn snippets_file_path() -> PathBuf {
 }
 
 /// Load snippets from JSON file. Returns empty vec on error.
-pub fn load_snippets() -> Vec<Snippet> {
-    let path = snippets_file_path();
-    if let Ok(data) = std::fs::read_to_string(&path) {
+pub fn load_snippets(path: &Path) -> Vec<Snippet> {
+    if let Ok(data) = std::fs::read_to_string(path) {
         serde_json::from_str(&data).unwrap_or_default()
     } else {
         Vec::new()
@@ -747,8 +746,7 @@ pub fn load_snippets() -> Vec<Snippet> {
 }
 
 /// Save snippets to JSON file.
-pub fn save_snippets(snippets: &[Snippet]) {
-    let path = snippets_file_path();
+pub fn save_snippets(path: &Path, snippets: &[Snippet]) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
