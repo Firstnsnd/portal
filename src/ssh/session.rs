@@ -336,6 +336,9 @@ pub struct SshSession {
     pub notifications: Arc<Mutex<Vec<AppNotification>>>,
     /// Live system metrics collected from the remote host
     pub metrics: Arc<Mutex<MetricsSnapshot>>,
+    /// Gate for remote metrics polling — true only while the Metrics tab
+    /// of the tools drawer is visible (synced by the UI every frame).
+    metrics_enabled: Arc<AtomicBool>,
 }
 
 impl SshSession {
@@ -398,6 +401,7 @@ impl SshSession {
         let port_forwards = Arc::new(Mutex::new(Vec::<PortForward>::new()));
         let notifications = Arc::new(Mutex::new(Vec::<AppNotification>::new()));
         let metrics = Arc::new(Mutex::new(MetricsSnapshot::new()));
+        let metrics_enabled = Arc::new(AtomicBool::new(false));
 
         let grid_clone = Arc::clone(&grid);
         let state_clone = Arc::clone(&state);
@@ -406,13 +410,15 @@ impl SshSession {
         let port_forwards_clone = Arc::clone(&port_forwards);
         let notifications_clone = Arc::clone(&notifications);
         let metrics_clone = Arc::clone(&metrics);
+        let metrics_enabled_clone = Arc::clone(&metrics_enabled);
 
         runtime.spawn(async move {
             Self::ssh_task(
                 host, port, username, auth, cols, rows, grid_clone, cmd_rx,
                 state_clone, alive_clone, shell_hint_clone, startup_commands,
                 keepalive_interval, agent_forwarding, port_forward_configs,
-                port_forwards_clone, notifications_clone, metrics_clone, jump_host,
+                port_forwards_clone, notifications_clone, metrics_clone,
+                metrics_enabled_clone, jump_host,
             )
             .await;
         });
@@ -425,6 +431,7 @@ impl SshSession {
             port_forwards,
             notifications,
             metrics,
+            metrics_enabled,
         }
     }
 
@@ -448,6 +455,7 @@ impl SshSession {
         port_forwards: Arc<Mutex<Vec<PortForward>>>,
         notifications: Arc<Mutex<Vec<AppNotification>>>,
         metrics: Arc<Mutex<MetricsSnapshot>>,
+        metrics_enabled: Arc<AtomicBool>,
         jump_host: Option<JumpHostInfo>,
     ) {
         let set_state = |s: SshConnectionState| {
@@ -582,18 +590,34 @@ impl SshSession {
         // Tunnels tab (Start button → start_port_forward) instead.
         // The loop that used to spawn_local_forward here has been removed.
 
-        // 5b. Metrics collection loop (spawned, non-blocking)
+        // 5b. Metrics collection loop (spawned, non-blocking).
+        // Gated by `metrics_enabled` — the UI only raises it while the
+        // Metrics tab of the tools drawer is visible. A disabled session
+        // costs zero remote execs: no channel opens, no traffic competing
+        // with interactive I/O (a standing 5 s exec loop head-of-line
+        // blocks a slow link and makes the terminal feel stuck). The 1 s
+        // tick keeps enable→first-sample latency ~1 s at no network cost.
         let metrics_handle = Arc::clone(&handle);
         let metrics_arc = Arc::clone(&metrics);
+        let metrics_gate = Arc::clone(&metrics_enabled);
         tokio::spawn(async move {
+            let mut last_poll: Option<std::time::Instant> = None;
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                if !metrics_gate.load(Ordering::Relaxed) {
+                    continue;
+                }
+                if last_poll.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(5)) {
+                    continue;
+                }
+                last_poll = Some(std::time::Instant::now());
                 let cmd = "echo =M=; grep -E 'MemTotal|MemAvailable' /proc/meminfo; \
                            echo =N=; cat /proc/net/dev; echo =L=; cat /proc/loadavg; \
                            echo =C=; head -n1 /proc/stat";
                 if let Ok(out) = exec_command(&metrics_handle, cmd).await {
-                    let mut snap = metrics_arc.lock().unwrap();
-                    crate::terminal::metrics::parse_remote(&out, &mut snap);
+                    if let Ok(mut snap) = metrics_arc.lock() {
+                        crate::terminal::metrics::parse_remote(&out, &mut snap);
+                    }
                 }
             }
         });
@@ -778,6 +802,13 @@ impl SshSession {
 
     pub fn get_shell_hint(&self) -> Option<String> {
         self.shell_hint.lock().ok().and_then(|h| h.clone())
+    }
+
+    /// Enable/disable remote metrics polling. Called by the UI every
+    /// frame — enabled only while the Metrics tab of the tools drawer is
+    /// the visible view for this session.
+    pub fn set_metrics_enabled(&self, enabled: bool) {
+        self.metrics_enabled.store(enabled, Ordering::Relaxed);
     }
 
     pub fn connection_state(&self) -> SshConnectionState {
