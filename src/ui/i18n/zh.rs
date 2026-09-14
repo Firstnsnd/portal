@@ -100,6 +100,8 @@ pub fn t(key: &str) -> &'static str {
         "batch_failed" => "失败",
         "switch_to_remote" => "切换到远程",
         "stop_transfer" => "停止传输",
+        "drop_to_upload" => "松开以上传",
+        "drop_not_connected" => "远程面板未连接",
         "loading" => "加载中...",
         "show_hidden_files" => "显示隐藏",
         "hide_hidden_files" => "隐藏隐藏",

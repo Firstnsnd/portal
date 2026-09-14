@@ -225,6 +225,20 @@ impl SftpBrowser {
         });
     }
 
+    /// Seed an immediate "preparing" transfer state so the progress bar shows
+    /// at once, before the first `Progress` message arrives from the task.
+    /// `filename` is the display name; `is_upload` picks the label direction.
+    pub fn mark_transfer_preparing(&mut self, filename: &str, is_upload: bool) {
+        self.transfer = Some(TransferProgress::preparing(filename, is_upload));
+    }
+
+    /// Clone of the command channel sender, for callers that need to issue
+    /// commands directly (the native drag-out promise delegate sends
+    /// `DownloadSync`/`DownloadDirSync` this way and blocks on the ack).
+    pub fn command_sender(&self) -> mpsc::UnboundedSender<SftpCommand> {
+        self.cmd_tx.clone()
+    }
+
     /// Rename a remote file or directory.
     pub fn rename(&self, from: &str, to: &str) {
         let _ = self.cmd_tx.send(SftpCommand::Rename {

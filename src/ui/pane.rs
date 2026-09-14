@@ -345,6 +345,8 @@ pub struct AppWindow {
     pub sftp_remote_refresh_start: Option<std::time::Instant>,
     pub sftp_left_remote_refresh_start: Option<std::time::Instant>,
     pub sftp_active_panel_is_local: bool,
+    pub sftp_active_side_left: bool,            // last-clicked SFTP panel side (drop fallback hint)
+    pub sftp_os_drag_active: bool,              // native file-promise drag session in flight
 
     // Page-related dialog states (per-window)
     pub add_host_dialog: AddHostDialog,

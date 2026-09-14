@@ -100,6 +100,8 @@ pub fn t(key: &str) -> &'static str {
         "batch_failed" => "Fallido",
         "switch_to_remote" => "Cambiar a Remoto",
         "stop_transfer" => "Detener transferencia",
+        "drop_to_upload" => "Soltar para subir",
+        "drop_not_connected" => "No conectado",
         "loading" => "Cargando...",
         "show_hidden_files" => "Mostrar Ocultos",
         "hide_hidden_files" => "Ocultar Ocultos",

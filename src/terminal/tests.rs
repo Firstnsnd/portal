@@ -3062,18 +3062,31 @@ mod curl_cloudflare_output {
             .collect()
     }
 
+    /// The captured Cloudflare response if available on this machine, else a
+    /// deterministic synthetic single-line HTML of a similar size. The
+    /// synthetic fallback must contain HTML markers (`<!DOCTYPE` / `<html>`)
+    /// because sibling tests assert on them, and must stay single-line to
+    /// reproduce curl's no-trailing-newline output shape.
+    fn load_html() -> Vec<u8> {
+        if let Ok(bytes) = std::fs::read("/tmp/cf_vanio.txt") {
+            return bytes;
+        }
+        let mut s = String::from(
+            "<!DOCTYPE html><html lang=\"en\"><head><title>Example Domain</title></head><body>",
+        );
+        let filler = "<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore.</p>";
+        while s.len() < 5000 {
+            s.push_str(filler);
+        }
+        s.push_str("</body></html>");
+        s.into_bytes()
+    }
+
     /// Bare VTE: feed the HTML (no surrounding prompt). The parser + auto-wrap
     /// alone must produce non-empty visible rows and scrollback.
     #[test]
     fn html_alone_produces_visible_output() {
-        let html = std::fs::read("/tmp/cf_vanio.txt").unwrap_or_else(|_| {
-            let mut s = String::new();
-            for i in 0..5000u32 {
-                let c = ((i % 95) + 32) as u8 as char;
-                s.push(c);
-            }
-            s.into_bytes()
-        });
+        let html = load_html();
         let mut grid = TerminalGrid::with_scrollback_limit(COLS, ROWS, 100 * 1024 * 1024);
         feed(&mut grid, &html);
 
@@ -3093,14 +3106,7 @@ mod curl_cloudflare_output {
     /// hit Enter.  The visible grid MUST show content from the output.
     #[test]
     fn prompt_html_prompt_visible_grid_has_content() {
-        let html = std::fs::read("/tmp/cf_vanio.txt").unwrap_or_else(|_| {
-            let mut s = String::new();
-            for i in 0..5000u32 {
-                let c = ((i % 95) + 32) as u8 as char;
-                s.push(c);
-            }
-            s.into_bytes()
-        });
+        let html = load_html();
         let mut grid = TerminalGrid::with_scrollback_limit(COLS, ROWS, 100 * 1024 * 1024);
 
         // Step 1: zsh prompt
@@ -3148,14 +3154,7 @@ mod curl_cloudflare_output {
     /// grid bounds.
     #[test]
     fn cursor_within_grid_after_long_output() {
-        let html = std::fs::read("/tmp/cf_vanio.txt").unwrap_or_else(|_| {
-            let mut s = String::new();
-            for i in 0..5000u32 {
-                let c = ((i % 95) + 32) as u8 as char;
-                s.push(c);
-            }
-            s.into_bytes()
-        });
+        let html = load_html();
         let mut grid = TerminalGrid::with_scrollback_limit(COLS, ROWS, 100 * 1024 * 1024);
 
         feed(&mut grid, b"(base) user@host ~ % ");
@@ -3174,14 +3173,7 @@ mod curl_cloudflare_output {
     /// recognizable HTML content (DOCTYPE, html, etc.).
     #[test]
     fn scrollback_contains_html_content() {
-        let html = std::fs::read("/tmp/cf_vanio.txt").unwrap_or_else(|_| {
-            let mut s = String::new();
-            for i in 0..5000u32 {
-                let c = ((i % 95) + 32) as u8 as char;
-                s.push(c);
-            }
-            s.into_bytes()
-        });
+        let html = load_html();
         let mut grid = TerminalGrid::with_scrollback_limit(COLS, ROWS, 100 * 1024 * 1024);
 
         feed(&mut grid, b"(base) user@host ~ % ");

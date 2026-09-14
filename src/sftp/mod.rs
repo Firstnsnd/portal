@@ -12,6 +12,8 @@ mod selection;
 mod local;
 mod browser;
 mod task;
+pub(crate) mod drop_planner;
+pub(crate) mod drag_out;
 
 // Re-export public types
 pub use types::{SftpEntry, SftpEntryKind, SftpConnectionState, TransferProgress};

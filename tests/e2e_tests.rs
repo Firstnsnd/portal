@@ -134,12 +134,26 @@ mod e2e_tests {
     /// cursor.
     #[tokio::test]
     async fn test_long_single_line_output_visible_in_grid() {
+        // Deterministic fixture: ~5K of single-line HTML (the original test
+        // catted a machine-local capture that does not exist on CI machines).
+        let fixture = std::env::temp_dir().join("portal_e2e_long_output.html");
+        let mut html = String::from(
+            "<!DOCTYPE html><html lang=\"en\"><head><title>Example</title></head><body>",
+        );
+        let filler = "<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore.</p>";
+        while html.len() < 5000 {
+            html.push_str(filler);
+        }
+        html.push_str("</body></html>");
+        std::fs::write(&fixture, html.as_bytes()).expect("write fixture");
+
         let session = portal::terminal::RealPtySession::new(
             100, 80, 24, "/bin/zsh"
         ).expect("Failed to create PTY session");
         tokio::time::sleep(Duration::from_millis(2500)).await;
 
-        session.write(b"cat /tmp/cf_vanio.txt 2>&1\n").expect("write");
+        let cmd = format!("cat '{}' 2>&1\n", fixture.display());
+        session.write(cmd.as_bytes()).expect("write");
         tokio::time::sleep(Duration::from_millis(2000)).await;
 
         let g = session.get_grid();

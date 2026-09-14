@@ -211,6 +211,8 @@ impl eframe::App for PortalApp {
                         sftp_remote_refresh_start: None,
                         sftp_left_remote_refresh_start: None,
                         sftp_active_panel_is_local: true,
+                        sftp_active_side_left: true,
+                        sftp_os_drag_active: false,
                         // Page-related dialogs (new window starts with fresh state)
                         add_host_dialog: AddHostDialog::default(),
                         credential_dialog: CredentialDialog::default(),

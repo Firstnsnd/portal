@@ -3,6 +3,8 @@
 //! This module contains types specific to the SFTP view,
 //! including drag-and-drop payloads and selection actions.
 
+use crate::ui::types::sftp_types::SftpPanel;
+
 /// A single entry in a drag payload.
 #[derive(Clone)]
 pub struct DragEntry {
@@ -15,6 +17,10 @@ pub struct DragEntry {
 #[derive(Clone)]
 pub struct DragPayload {
     pub is_local: bool,
+    /// Panel the drag started from; drops route transfers through the
+    /// connection of the remote side involved (origin for downloads, target
+    /// for uploads).
+    pub origin: SftpPanel,
     pub entries: Vec<DragEntry>,
 }
 

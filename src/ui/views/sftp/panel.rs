@@ -9,6 +9,7 @@ use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
 use crate::ui::views::sftp::{DragEntry, DragPayload, SelectionAction, MoveToDirRequest};
 use crate::ui::views::sftp::format::{format_file_size, format_modified, format_permissions};
+use crate::ui::types::sftp_types::SftpPanel;
 
 /// Maximum characters shown for a single breadcrumb segment before it is
 /// middle-truncated. Keeps long segments (e.g. UUIDs) from blowing out the
@@ -218,6 +219,7 @@ pub fn render_file_panel(
     navigate_to: &mut Option<String>,
     selection_action: &mut Option<SelectionAction>,
     is_local: bool,
+    panel: SftpPanel,
     current_path: &str,
     theme: &ThemeColors,
     context_menu_request: &mut Option<(egui::Pos2, Option<usize>)>,
@@ -467,6 +469,7 @@ pub fn render_file_panel(
                             .collect();
                         resp.dnd_set_drag_payload(DragPayload {
                             is_local,
+                            origin: panel,
                             entries: drag_entries,
                         });
                     } else {
@@ -478,6 +481,7 @@ pub fn render_file_panel(
                         );
                         resp.dnd_set_drag_payload(DragPayload {
                             is_local,
+                            origin: panel,
                             entries: vec![DragEntry {
                                 full_path,
                                 entry_name: entry.name.clone(),
