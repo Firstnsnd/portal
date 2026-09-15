@@ -864,10 +864,20 @@ pub struct PortalSettings {
     pub ssh_keepalive_interval: u32,
     #[serde(default = "default_shortcuts")]
     pub keyboard_shortcuts: Vec<KeyBinding>,
+    /// Whether to check GitHub for newer Portal versions (launch + daily).
+    #[serde(default = "default_check_for_updates")]
+    pub check_for_updates: bool,
+    /// Last version the user dismissed, so the prompt is not re-shown for it.
+    #[serde(default)]
+    pub last_dismissed_update_version: Option<String>,
 }
 
 fn default_keepalive_interval() -> u32 {
     30
+}
+
+fn default_check_for_updates() -> bool {
+    true
 }
 
 impl PortalSettings {
@@ -887,6 +897,8 @@ impl Default for PortalSettings {
             scrollback_limit_mb: 100,
             ssh_keepalive_interval: default_keepalive_interval(),
             keyboard_shortcuts: default_shortcuts(),
+            check_for_updates: true,
+            last_dismissed_update_version: None,
         }
     }
 }

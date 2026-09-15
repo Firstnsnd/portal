@@ -47,6 +47,11 @@ pub struct PortalApp {
     pub connection_history: Vec<ConnectionRecord>,
     pub shortcut_resolver: ShortcutResolver,
     pub recording_shortcut: Option<ShortcutAction>,
+    // Update checking
+    pub update_state: std::sync::Arc<std::sync::Mutex<crate::update::UpdateState>>,
+    pub next_update_check: std::time::Instant,
+    pub check_for_updates: bool,
+    pub last_dismissed_update_version: Option<String>,
 }
 
 impl PortalApp {
@@ -74,6 +79,8 @@ impl PortalApp {
         let scrollback_limit_mb = settings.scrollback_limit_mb;
         let ssh_keepalive_interval = settings.ssh_keepalive_interval;
         let shortcut_resolver = ShortcutResolver::new(settings.keyboard_shortcuts.clone());
+        let check_for_updates = settings.check_for_updates;
+        let last_dismissed_update_version = settings.last_dismissed_update_version.clone();
         // Use default theme preset (Tokyo Night)
         let theme_preset = ThemePreset::TokyoNight;
         let theme = theme_preset.colors();
@@ -176,6 +183,96 @@ impl PortalApp {
             shortcut_resolver,
             recording_shortcut: None,
             snippets,
+            update_state: std::sync::Arc::new(std::sync::Mutex::new(crate::update::UpdateState::Idle)),
+            next_update_check: std::time::Instant::now(),
+            check_for_updates,
+            last_dismissed_update_version,
+        }
+    }
+
+    /// Called once per frame. When the toggle is on and enough time has passed
+    /// since the last check, kick off a background GitHub check — but never
+    /// while a check/download is in flight or a dialog is showing.
+    pub fn maybe_check_for_updates(&mut self) {
+        if !self.check_for_updates {
+            return;
+        }
+        if std::time::Instant::now() < self.next_update_check {
+            return;
+        }
+        {
+            let guard = self.update_state.lock().expect("update_state lock");
+            if !matches!(*guard, crate::update::UpdateState::Idle | crate::update::UpdateState::Error(_)) {
+                return;
+            }
+        }
+        self.next_update_check = std::time::Instant::now() + std::time::Duration::from_secs(24 * 3600);
+        if let Ok(mut guard) = self.update_state.lock() {
+            *guard = crate::update::UpdateState::Checking;
+        }
+        let arc = std::sync::Arc::clone(&self.update_state);
+        std::thread::spawn(move || {
+            let next = crate::update::check_latest(env!("CARGO_PKG_VERSION"));
+            if let Ok(mut g) = arc.lock() {
+                *g = next;
+            }
+        });
+    }
+
+    /// Transition from `Available` to `Downloading` and spawn the download +
+    /// reveal on a background thread.
+    pub fn begin_update_download(&mut self) {
+        let (version, url, asset_name) = {
+            let guard = self.update_state.lock().expect("update_state lock");
+            match &*guard {
+                crate::update::UpdateState::Available { version, url, asset_name } => {
+                    (version.clone(), url.clone(), asset_name.clone())
+                }
+                _ => return,
+            }
+        };
+        if let Ok(mut guard) = self.update_state.lock() {
+            *guard = crate::update::UpdateState::Downloading {
+                version: version.clone(),
+                asset_name: asset_name.clone(),
+                received: 0,
+                total: None,
+            };
+        }
+        let arc = std::sync::Arc::clone(&self.update_state);
+        let v = version.clone();
+        let a = asset_name.clone();
+        std::thread::spawn(move || {
+            let result = crate::update::download_and_reveal(
+                &version,
+                &asset_name,
+                &url,
+                |received, total| {
+                    if let Ok(mut g) = arc.lock() {
+                        *g = crate::update::UpdateState::Downloading {
+                            version: v.clone(),
+                            asset_name: a.clone(),
+                            received,
+                            total,
+                        };
+                    }
+                },
+            );
+            if let Ok(mut g) = arc.lock() {
+                *g = match result {
+                    Ok(path) => crate::update::UpdateState::Ready { version, path },
+                    Err(e) => crate::update::UpdateState::Error(e),
+                };
+            }
+        });
+    }
+
+    /// Record a dismissed version and return the update state to `Idle`.
+    pub fn dismiss_update(&mut self, version: &str) {
+        self.last_dismissed_update_version = Some(version.to_string());
+        self.save_settings_to_disk();
+        if let Ok(mut guard) = self.update_state.lock() {
+            *guard = crate::update::UpdateState::Idle;
         }
     }
 

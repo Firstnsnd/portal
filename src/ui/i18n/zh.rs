@@ -214,6 +214,16 @@ pub fn t(key: &str) -> &'static str {
         "key_path_hint" => "~/.ssh/id_rsa",
         "key_content_hint" => "-----BEGIN PRIVATE KEY-----",
         "key_passphrase_hint" => "无密码请留空",
+        // Updates
+        "updates" => "更新",
+        "check_for_updates" => "检查更新",
+        "check_for_updates_desc" => "在启动时及每天检查 Portal 是否有新版本。",
+        "update_download" => "下载",
+        "update_dismiss" => "忽略",
+        "update_downloading" => "下载中…",
+        "update_open" => "打开",
+        "update_close" => "关闭",
+        "update_check_error" => "检查更新失败",
         _ => "???",
     }
 }
@@ -231,6 +241,8 @@ pub fn tf(key: &str, arg: &str) -> String {
         "lines_above" => format!(" ↑ {} 行在上方 ", arg),
         "uploading" => format!("正在上传 {}", arg),
         "downloading" => format!("正在下载 {}", arg),
+        "update_available" => format!("v{} 可用 — 是否升级？", arg),
+        "update_ready" => format!("已下载 v{} — 请跟随安装窗口操作。", arg),
         _ => format!("{}: {}", key, arg),
     }
 }

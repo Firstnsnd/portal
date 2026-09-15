@@ -486,7 +486,171 @@ impl PortalApp {
                 }
             });
 
+        // Update-available dialog is app-global: render it only in the root
+        // window so detached windows never duplicate it.
+        if window_idx == 0 {
+            self.render_update_dialog(ctx);
+        }
+
         result
+    }
+
+    /// Render the update-check prompt/download progress dialog, dispatching on
+    /// the shared `update_state`. Non-modal: it does not block input elsewhere.
+    fn render_update_dialog(&mut self, ctx: &egui::Context) {
+        use crate::update::UpdateState;
+        use crate::ui::widgets;
+
+        // Snapshot the state; all mutations go through methods that take &mut
+        // self (which also manage persisted dismissals and thread spawns).
+        let state = self.update_state.lock().expect("update_state lock").clone();
+
+        match state {
+            UpdateState::Idle => {}
+            UpdateState::Checking => {
+                egui::Window::new("update_checking")
+                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .title_bar(false)
+                    .resizable(false)
+                    .collapsible(false)
+                    .frame(widgets::dialog_frame(&self.theme))
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Spinner::new());
+                            ui.add_space(8.0);
+                            ui.label(self.language.t("update_downloading"));
+                        });
+                    });
+            }
+            UpdateState::Available { version, .. } => {
+                // Never re-prompt for a version the user already dismissed.
+                if self.last_dismissed_update_version.as_deref() == Some(version.as_str()) {
+                    if let Ok(mut g) = self.update_state.lock() {
+                        *g = UpdateState::Idle;
+                    }
+                    return;
+                }
+                let mut act = None;
+                egui::Window::new("update_available")
+                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .title_bar(false)
+                    .resizable(false)
+                    .collapsible(false)
+                    .frame(widgets::dialog_frame(&self.theme))
+                    .show(ctx, |ui| {
+                        ui.label(egui::RichText::new(self.language.tf("update_available", &version))
+                            .size(15.0).strong().color(self.theme.fg_primary));
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new(format!("{} → {}", env!("CARGO_PKG_VERSION"), version))
+                            .size(12.0).color(self.theme.fg_dim));
+                        ui.add_space(16.0);
+                        ui.horizontal(|ui| {
+                            if ui.add(widgets::primary_button(self.language.t("update_download"), &self.theme)).clicked() {
+                                act = Some(true);
+                            }
+                            if ui.add(widgets::secondary_button(self.language.t("update_dismiss"), &self.theme)).clicked() {
+                                act = Some(false);
+                            }
+                        });
+                    });
+                match act {
+                    Some(true) => self.begin_update_download(),
+                    Some(false) => self.dismiss_update(&version),
+                    None => {}
+                }
+            }
+            UpdateState::Downloading { version, asset_name, received, total } => {
+                egui::Window::new("update_downloading")
+                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .title_bar(false)
+                    .resizable(false)
+                    .collapsible(false)
+                    .frame(widgets::dialog_frame(&self.theme))
+                    .show(ctx, |ui| {
+                        ui.label(egui::RichText::new(format!("{} v{}", self.language.t("update_downloading"), version))
+                            .size(14.0).strong().color(self.theme.fg_primary));
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new(&asset_name).size(12.0).color(self.theme.fg_dim));
+                        ui.add_space(12.0);
+                        match total {
+                            Some(t) if t > 0 => {
+                                let pct = received as f32 / t as f32;
+                                ui.add(egui::ProgressBar::new(pct).text(format!("{:.0}%", pct * 100.0)));
+                            }
+                            _ => {
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::Spinner::new());
+                                    ui.add_space(8.0);
+                                    ui.label(self.language.t("update_downloading"));
+                                });
+                            }
+                        }
+                    });
+            }
+            UpdateState::Ready { version, path } => {
+                let mut act = None;
+                egui::Window::new("update_ready")
+                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .title_bar(false)
+                    .resizable(false)
+                    .collapsible(false)
+                    .frame(widgets::dialog_frame(&self.theme))
+                    .show(ctx, |ui| {
+                        ui.label(egui::RichText::new(self.language.tf("update_ready", &version))
+                            .size(14.0).strong().color(self.theme.fg_primary));
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new(path.display().to_string()).size(12.0).color(self.theme.fg_dim));
+                        ui.add_space(16.0);
+                        ui.horizontal(|ui| {
+                            if ui.add(widgets::primary_button(self.language.t("update_open"), &self.theme)).clicked() {
+                                act = Some(true);
+                            }
+                            if ui.add(widgets::secondary_button(self.language.t("update_close"), &self.theme)).clicked() {
+                                act = Some(false);
+                            }
+                        });
+                    });
+                if let Some(true) = act {
+                    // Re-open the already-revealed path (background, non-blocking).
+                    let arc = std::sync::Arc::clone(&self.update_state);
+                    let p = path.clone();
+                    std::thread::spawn(move || {
+                        let _ = crate::update::open_revealed(&p);
+                        if let Ok(mut g) = arc.lock() {
+                            *g = UpdateState::Idle;
+                        }
+                    });
+                } else if let Some(false) = act {
+                    if let Ok(mut g) = self.update_state.lock() {
+                        *g = UpdateState::Idle;
+                    }
+                }
+            }
+            UpdateState::Error(e) => {
+                let mut close = false;
+                egui::Window::new("update_error")
+                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .title_bar(false)
+                    .resizable(false)
+                    .collapsible(false)
+                    .frame(widgets::dialog_frame(&self.theme))
+                    .show(ctx, |ui| {
+                        ui.label(egui::RichText::new(self.language.t("update_check_error"))
+                            .size(14.0).strong().color(self.theme.fg_primary));
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new(&e).size(12.0).color(self.theme.fg_dim));
+                        ui.add_space(16.0);
+                        if ui.add(widgets::secondary_button(self.language.t("update_close"), &self.theme)).clicked() {
+                            close = true;
+                        }
+                    });
+                if close {
+                    if let Ok(mut g) = self.update_state.lock() {
+                        *g = UpdateState::Idle;
+                    }
+                }
+            }
+        }
     }
 
     /// Handle tab bar actions

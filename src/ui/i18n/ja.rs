@@ -194,6 +194,16 @@ pub fn t(key: &str) -> &'static str {
         "key_path_hint" => "~/.ssh/id_rsa",
         "key_content_hint" => "-----BEGIN PRIVATE KEY-----",
         "key_passphrase_hint" => "なしの場合は空欄",
+        // Updates
+        "updates" => "更新",
+        "check_for_updates" => "更新を確認",
+        "check_for_updates_desc" => "起動時および毎日、Portal の新バージョンを確認します。",
+        "update_download" => "ダウンロード",
+        "update_dismiss" => "無視",
+        "update_downloading" => "ダウンロード中…",
+        "update_open" => "開く",
+        "update_close" => "閉じる",
+        "update_check_error" => "更新確認に失敗しました",
         _ => "???",
     }
 }
@@ -211,6 +221,8 @@ pub fn tf(key: &str, arg: &str) -> String {
         "lines_above" => format!(" ↑ {} 行上 ", arg),
         "uploading" => format!("アップロード中 {}", arg),
         "downloading" => format!("ダウンロード中 {}", arg),
+        "update_available" => format!("v{} が利用可能です — アップグレードしますか？", arg),
+        "update_ready" => format!("v{} をダウンロードしました — インストーラーの指示に従ってください。", arg),
         _ => format!("{}: {}", key, arg),
     }
 }
