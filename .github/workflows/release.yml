@@ -26,6 +26,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -40,7 +42,7 @@ jobs:
 
       - name: Build DMG
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          export VERSION="${GITHUB_REF#refs/tags/v}"
           ./scripts/build-dmg.sh
           DMG_FILE=$(ls target/release/Portal-*.dmg | head -1)
           cp "$DMG_FILE" "Portal-macos-${{ matrix.name }}.dmg"
@@ -62,6 +64,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -97,6 +101,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download macOS x86_64 artifact
         uses: actions/download-artifact@v4

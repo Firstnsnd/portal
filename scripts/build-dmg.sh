@@ -27,9 +27,11 @@ set -euo pipefail
 #   APPLE_ID="you@example.com" APPLE_TEAM_ID="XXXX" APPLE_PASSWORD="xxxx-xxxx-xxxx-xxxx" \
 #   ./scripts/build-dmg.sh
 
-# Get version from git tag (falls back to "0.0.0" if no tags exist)
+# Get version from $VERSION (set by the CI workflow from the release tag),
+# falling back to the latest git tag, then "0.0.0" if no tags exist.
 # Remove 'v' prefix if present (e.g., "v0.10.0" -> "0.10.0")
-VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.0")"
+VERSION="${VERSION:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')}"
+VERSION="${VERSION:-0.0.0}"
 ARCH="$(uname -m)"
 APP_NAME="Portal"
 DMG_NAME="${APP_NAME}-${VERSION}-${ARCH}.dmg"
