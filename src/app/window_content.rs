@@ -1055,9 +1055,6 @@ impl PortalApp {
         if actions.save_credentials {
             config::save_credentials(&self.credentials_file, &self.credentials);
         }
-        if actions.save_snippets {
-            config::save_snippets(&config::snippets_file_path(), &self.snippets);
-        }
         if let Some(idx) = actions.delete_host {
             if idx < self.hosts.len() && !self.hosts[idx].is_local {
                 config::delete_host_credentials(&self.hosts[idx]);
@@ -1069,10 +1066,6 @@ impl PortalApp {
             self.credentials.retain(|c| c.id != **id);
             config::delete_credential_secrets(id, id.as_str());
             config::save_credentials(&self.credentials_file, &self.credentials);
-        }
-        if let Some(id) = &actions.delete_snippet {
-            self.snippets.retain(|s| s.id != **id);
-            config::save_snippets(&config::snippets_file_path(), &self.snippets);
         }
     }
 }

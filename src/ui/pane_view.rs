@@ -28,14 +28,10 @@ pub struct ViewActions {
     pub save_hosts: bool,
     /// Request to save credentials to file
     pub save_credentials: bool,
-    /// Request to save snippets to file
-    pub save_snippets: bool,
     /// Request to delete a host (index into hosts)
     pub delete_host: Option<usize>,
     /// Request to delete a credential (id)
     pub delete_credential: Option<String>,
-    /// Request to delete a snippet (id)
-    pub delete_snippet: Option<String>,
 }
 
 /// Shared context passed to window view methods.

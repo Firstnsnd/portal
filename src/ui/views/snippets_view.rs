@@ -292,11 +292,8 @@ pub fn render_snippets_view(
     if let Some(id) = snippet_to_delete {
         cx.snippets.retain(|s| s.id != id);
         window.snippet_view_state.confirm_delete = None;
-        let actions = ViewActions {
-            save_hosts: true,
-            ..Default::default()
-        };
-        return actions;
+        // Persist immediately, mirroring the drawer save path.
+        crate::config::save_snippets(&crate::config::snippets_file_path(), cx.snippets);
     }
 
     ViewActions::default()
@@ -420,6 +417,14 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                             };
                             cx.snippets.push(snippet);
                         }
+                        // Persist immediately: the drawer did not previously
+                        // signal the top level to save, so edited/added snippets
+                        // lived only in memory and were lost on the next process
+                        // restart (e.g. after an in-place upgrade).
+                        crate::config::save_snippets(
+                            &crate::config::snippets_file_path(),
+                            cx.snippets,
+                        );
                         window.snippet_view_state.open = false;
                         window.snippet_view_state.editing = None;
                     }
