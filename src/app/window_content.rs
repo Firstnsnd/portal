@@ -509,7 +509,7 @@ impl PortalApp {
             UpdateState::Idle => {}
             UpdateState::Checking => {
                 egui::Window::new("update_checking")
-                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
                     .title_bar(false)
                     .resizable(false)
                     .collapsible(false)
@@ -532,7 +532,7 @@ impl PortalApp {
                 }
                 let mut act = None;
                 egui::Window::new("update_available")
-                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
                     .title_bar(false)
                     .resizable(false)
                     .collapsible(false)
@@ -561,7 +561,7 @@ impl PortalApp {
             }
             UpdateState::Downloading { version, asset_name, received, total } => {
                 egui::Window::new("update_downloading")
-                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
                     .title_bar(false)
                     .resizable(false)
                     .collapsible(false)
@@ -590,7 +590,7 @@ impl PortalApp {
             UpdateState::Ready { version, path } => {
                 let mut act = None;
                 egui::Window::new("update_ready")
-                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
                     .title_bar(false)
                     .resizable(false)
                     .collapsible(false)
@@ -629,7 +629,7 @@ impl PortalApp {
             UpdateState::Error(e) => {
                 let mut close = false;
                 egui::Window::new("update_error")
-                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
                     .title_bar(false)
                     .resizable(false)
                     .collapsible(false)
