@@ -507,21 +507,9 @@ impl PortalApp {
 
         match state {
             UpdateState::Idle => {}
-            UpdateState::Checking => {
-                egui::Window::new("update_checking")
-                    .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
-                    .title_bar(false)
-                    .resizable(false)
-                    .collapsible(false)
-                    .frame(widgets::dialog_frame(&self.theme))
-                    .show(ctx, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.add(egui::Spinner::new());
-                            ui.add_space(8.0);
-                            ui.label(self.language.t("update_downloading"));
-                        });
-                    });
-            }
+            // Version check runs silently in the background — no UI. The user
+            // only sees anything once a newer version is actually found.
+            UpdateState::Checking => {}
             UpdateState::Available { version, .. } => {
                 // Never re-prompt for a version the user already dismissed.
                 if self.last_dismissed_update_version.as_deref() == Some(version.as_str()) {
