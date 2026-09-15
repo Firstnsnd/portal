@@ -10,6 +10,7 @@ pub mod types;
 pub mod format;
 pub mod panel;
 pub mod progress;
+pub mod drop_logic;
 
 // Re-export commonly used types
 pub use types::{DragEntry, DragPayload, SelectionAction, MoveToDirRequest};

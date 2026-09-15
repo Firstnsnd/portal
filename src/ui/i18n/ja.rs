@@ -100,6 +100,8 @@ pub fn t(key: &str) -> &'static str {
         "batch_failed" => "失敗",
         "switch_to_remote" => "リモートに切り替え",
         "stop_transfer" => "転送を停止",
+        "drop_to_upload" => "ドロップしてアップロード",
+        "drop_not_connected" => "接続されていません",
         "loading" => "読み込み中...",
         "show_hidden_files" => "非表示を表示",
         "hide_hidden_files" => "非表示を隠す",

@@ -131,6 +131,8 @@ impl PortalApp {
             sftp_remote_refresh_start: None,
             sftp_left_remote_refresh_start: None,
             sftp_active_panel_is_local: true,
+            sftp_active_side_left: true,
+            sftp_os_drag_active: false,
             // Page-related dialog states (per-window)
             add_host_dialog: crate::ui::types::dialogs::AddHostDialog::default(),
             credential_dialog: crate::ui::types::dialogs::CredentialDialog::default(),

@@ -45,6 +45,20 @@ pub struct TransferProgress {
 }
 
 impl TransferProgress {
+    /// An immediate "transfer is starting" placeholder, seeded the moment a
+    /// transfer is kicked off so the progress bar renders at once (0% with a
+    /// fresh clock) instead of remaining blank until the first real
+    /// `Progress` message arrives from the SFTP task.
+    pub fn preparing(filename: impl Into<String>, is_upload: bool) -> Self {
+        TransferProgress {
+            filename: filename.into(),
+            bytes_transferred: 0,
+            total_bytes: 0,
+            is_upload,
+            started_at: std::time::Instant::now(),
+        }
+    }
+
     /// Bytes per second based on elapsed time.
     pub fn speed_bps(&self) -> f64 {
         let elapsed = self.started_at.elapsed().as_secs_f64();
@@ -91,6 +105,20 @@ pub enum SftpCommand {
     Upload { local: String, remote: String },
     UploadDir { local_dir: String, remote_dir: String },
     DownloadDir { remote_dir: String, local_dir: String },
+    /// Like `Download`, but the task acks the result through `done`. Used by
+    /// the macOS file-promise drag-out, whose delegate must block until the
+    /// file exists locally.
+    DownloadSync {
+        remote: String,
+        local: String,
+        done: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    /// Like `DownloadDir`, with a completion ack through `done`.
+    DownloadDirSync {
+        remote_dir: String,
+        local_dir: String,
+        done: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
     Rename { from: String, to: String },
     Delete(String),
     CreateDir(String),

@@ -8,6 +8,12 @@ use eframe::egui;
 use crate::ui::views::sftp::{DragPayload, SelectionAction, MoveToDirRequest};
 use crate::ui::views::sftp::{render_breadcrumbs, render_file_panel, apply_selection_action};
 use crate::ui::views::sftp::render_transfer_progress;
+use crate::ui::views::sftp::drop_logic::{
+    execute_transfer_plan, os_drop_target_for, panel_dirs_for, plan_in_app_drop,
+    resolve_os_drop_target, should_start_os_drag, OsDropResolution,
+};
+use crate::sftp::drag_out::{begin_file_promise_drag, PromiseSpec};
+use crate::sftp::drop_planner::{plan_os_drop, DropSide};
 use crate::ui::pane_view::{ViewActions, WindowContext};
 use crate::ui::pane::AppWindow;
 use crate::ui::types::sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog, SftpPanel};
@@ -15,7 +21,7 @@ use crate::ui::types::TerminalSession;
 use crate::sftp::{SftpConnectionState, SftpEntryKind};
 use crate::config;
 use crate::ui::widgets;
-use crate::ui::tokens::DIALOG_WIDTH_SM;
+use crate::ui::tokens::{self, DIALOG_WIDTH_SM};
 
 /// Render SFTP view for this window
 pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut WindowContext) -> ViewActions {
@@ -83,8 +89,46 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
             if left_panel_rect.contains(pos) {
                 window.sftp_active_panel_is_local = true;
+                window.sftp_active_side_left = true;
             } else if right_panel_rect.contains(pos) {
                 window.sftp_active_panel_is_local = false;
+                window.sftp_active_side_left = false;
+            }
+        }
+    }
+
+    // ── OS-level drop intake (Finder → panel) ──
+    // DroppedFile events are a one-frame pulse from egui-winit; take them
+    // once here. Skipped while the editor dialog is open (it swallows focus).
+    if window.sftp_editor_dialog.is_none() {
+        let dropped: Vec<std::path::PathBuf> = ui.ctx().input(|i| {
+            i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect()
+        });
+        if !dropped.is_empty() {
+            if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
+                let active_hint = if window.sftp_active_side_left { DropSide::Left } else { DropSide::Right };
+                let side = resolve_os_drop_target(pos, left_panel_rect, right_panel_rect, active_hint);
+                match os_drop_target_for(window, side) {
+                    OsDropResolution::Target(target) => {
+                        let plan = plan_os_drop(&dropped, &target, |p: &std::path::Path| p.is_dir());
+                        if let Some(detail) = execute_transfer_plan(window, &plan) {
+                            window.sftp_error_dialog = Some(SftpErrorDialog {
+                                title: cx.language.t("drop_not_connected").to_string(),
+                                message: detail,
+                            });
+                        }
+                    }
+                    OsDropResolution::DisconnectedRemote => {
+                        let names: Vec<String> = dropped
+                            .iter()
+                            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                            .collect();
+                        window.sftp_error_dialog = Some(SftpErrorDialog {
+                            title: cx.language.t("drop_not_connected").to_string(),
+                            message: names.join(", "),
+                        });
+                    }
+                }
             }
         }
     }
@@ -180,6 +224,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                 &mut local_left_navigate_to,
                 &mut local_left_selection_action,
                 true,
+                SftpPanel::LeftLocal,
                 &window.local_browser_left.current_path,
                 cx.theme,
                 &mut local_left_ctx_menu_req,
@@ -460,6 +505,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                                 &mut left_remote_navigate_to,
                                 &mut left_remote_selection_action,
                                 false,
+                                SftpPanel::LeftRemote,
                                 &current_path,
                                 cx.theme,
                                 &mut left_remote_ctx_menu_req,
@@ -589,6 +635,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                 &mut local_right_navigate_to,
                 &mut local_right_selection_action,
                 true,
+                SftpPanel::RightLocal,
                 &window.local_browser_right.current_path,
                 cx.theme,
                 &mut local_right_ctx_menu_req,
@@ -861,6 +908,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                                 &mut remote_navigate_to,
                                 &mut remote_selection_action,
                                 false,
+                                SftpPanel::RightRemote,
                                 &current_path,
                                 cx.theme,
                                 &mut remote_ctx_menu_req,
@@ -1021,8 +1069,50 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         }
     }
 
-    // ── Drag-and-drop (only when connected) ──
-    if is_connected {
+    // ── Native drag-out escalation (remote rows → Finder) ──
+    // One gesture: dragging remote entries beyond any app window hands the
+    // drag to macOS as file promises; the in-app payload is cleared so the
+    // release can never trigger an in-app transfer.
+    {
+        let ctx = ui.ctx().clone();
+        if window.sftp_os_drag_active {
+            if ctx.input(|i| i.pointer.any_released()) {
+                window.sftp_os_drag_active = false;
+                egui::DragAndDrop::clear_payload(&ctx);
+            }
+        } else if let Some(payload) = egui::DragAndDrop::payload::<DragPayload>(&ctx) {
+            if !payload.is_local {
+                let primary_down = ctx.input(|i| i.pointer.primary_down());
+                let outside = crate::sftp::drag_out::pointer_outside_app_windows();
+                if should_start_os_drag(true, outside, primary_down, window.sftp_os_drag_active) {
+                    let origin_browser = match payload.origin {
+                        SftpPanel::LeftRemote => window.sftp_browser_left.as_ref(),
+                        SftpPanel::RightRemote => window.sftp_browser.as_ref(),
+                        _ => None,
+                    };
+                    if let Some(browser) = origin_browser {
+                        let specs: Vec<PromiseSpec> = payload
+                            .entries
+                            .iter()
+                            .map(|e| PromiseSpec {
+                                file_name: e.entry_name.clone(),
+                                remote_path: e.full_path.clone(),
+                                is_dir: e.is_dir,
+                            })
+                            .collect();
+                        if begin_file_promise_drag(&specs, browser.command_sender()) {
+                            window.sftp_os_drag_active = true;
+                            egui::DragAndDrop::clear_payload(&ctx);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Drag-and-drop (only when connected; suppressed while a native
+    // drag-out session owns the gesture) ──
+    if is_connected && !window.sftp_os_drag_active {
         let ctx = ui.ctx().clone();
         if let Some(payload) = egui::DragAndDrop::payload::<DragPayload>(&ctx) {
             if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
@@ -1062,36 +1152,61 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
             }
         }
 
-        // Handle drop
+        // ── OS drag hover highlight (Finder → panel) ──
+        if ui.ctx().input(|i| !i.raw.hovered_files.is_empty()) {
+            if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
+                let active_hint = if window.sftp_active_side_left { DropSide::Left } else { DropSide::Right };
+                let side = resolve_os_drop_target(pos, left_panel_rect, right_panel_rect, active_hint);
+                let panel_rect = match side {
+                    DropSide::Left => left_panel_rect,
+                    DropSide::Right => right_panel_rect,
+                };
+                let inner = panel_rect.shrink(2.0);
+                ui.painter().rect_filled(inner, tokens::RADIUS_SM, cx.theme.accent_alpha(24));
+                ui.painter().rect_stroke(inner, tokens::RADIUS_SM, egui::Stroke::new(2.0, cx.theme.accent));
+
+                // "⤓ Drop to Upload" badge at the top of the target panel
+                let badge_text = format!("\u{2913} {}", cx.language.t("drop_to_upload"));
+                let galley = ui.painter().layout_no_wrap(
+                    badge_text,
+                    egui::FontId::proportional(tokens::FONT_SM),
+                    cx.theme.accent,
+                );
+                let padding = egui::vec2(tokens::SPACE_MD, tokens::SPACE_XS);
+                let badge_rect = egui::Rect::from_min_size(
+                    egui::pos2(
+                        panel_rect.center().x - (galley.size().x + padding.x * 2.0) / 2.0,
+                        panel_rect.top() + tokens::SPACE_LG,
+                    ),
+                    galley.size() + padding * 2.0,
+                );
+                ui.painter().rect_filled(badge_rect, tokens::RADIUS_SM, cx.theme.bg_elevated);
+                ui.painter().rect_stroke(badge_rect, tokens::RADIUS_SM, egui::Stroke::new(1.0, cx.theme.accent));
+                ui.painter().galley(badge_rect.min + padding, galley, cx.theme.fg_primary);
+            }
+        }
+
+        // Handle in-app panel-to-panel drop. Dir-row drops were already
+        // consumed by render_file_panel (move-to-folder); anything left here
+        // is a cross-panel background drop, planned by origin → target.
         if ctx.input(|i| i.pointer.any_released()) {
             if let Some(payload) = egui::DragAndDrop::take_payload::<DragPayload>(&ctx) {
                 if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                    if let Some(browser) = window.sftp_browser.as_ref() {
-                        for entry in &payload.entries {
-                            if left_panel_rect.contains(pos) && !payload.is_local {
-                                let local_dest = format!(
-                                    "{}/{}",
-                                    window.local_browser_left.current_path.trim_end_matches('/'),
-                                    entry.entry_name,
-                                );
-                                if entry.is_dir {
-                                    browser.download_dir(&entry.full_path, &local_dest);
-                                } else {
-                                    browser.download(&entry.full_path, &local_dest);
-                                }
-                            } else if right_panel_rect.contains(pos) && payload.is_local {
-                                let remote_dest = format!(
-                                    "{}/{}",
-                                    browser.current_path.trim_end_matches('/'),
-                                    entry.entry_name,
-                                );
-                                if entry.is_dir {
-                                    browser.upload_dir(&entry.full_path, &remote_dest);
-                                } else {
-                                    browser.upload(&entry.full_path, &remote_dest);
-                                }
-                            }
-                        }
+                    let active_hint = if window.sftp_active_side_left { DropSide::Left } else { DropSide::Right };
+                    let side = resolve_os_drop_target(pos, left_panel_rect, right_panel_rect, active_hint);
+                    let target = match side {
+                        DropSide::Left if window.left_panel_is_local => SftpPanel::LeftLocal,
+                        DropSide::Left => SftpPanel::LeftRemote,
+                        DropSide::Right if window.right_panel_is_local => SftpPanel::RightLocal,
+                        DropSide::Right => SftpPanel::RightRemote,
+                    };
+                    let dirs = panel_dirs_for(window);
+                    let plan = plan_in_app_drop(&payload, payload.origin, target, &dirs);
+                    if let Some(detail) = execute_transfer_plan(window, &plan) {
+                        window.sftp_error_dialog = Some(SftpErrorDialog {
+                            title: cx.language.t("drop_not_connected").to_string(),
+                            message: detail,
+                        });
                     }
                 }
             }

@@ -100,6 +100,8 @@ pub fn t(key: &str) -> &'static str {
         "batch_failed" => "실패",
         "switch_to_remote" => "원격으로 전환",
         "stop_transfer" => "전송 중지",
+        "drop_to_upload" => "놓아서 업로드",
+        "drop_not_connected" => "연결되지 않음",
         "loading" => "로딩 중...",
         "show_hidden_files" => "숨김 파일 표시",
         "hide_hidden_files" => "숨김 파일 숨기기",

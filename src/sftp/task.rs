@@ -234,6 +234,59 @@ async fn sftp_task_inner(
                     is_upload: false,
                 });
             }
+            Some(SftpCommand::DownloadSync { remote, local, done }) => {
+                cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
+                let mut fatal = false;
+                let result = match download_file(&sftp, &remote, &local, &resp_tx, &cancel_flag).await {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                            if is_disconnect_error(&e) {
+                                fatal = true;
+                            } else {
+                                let _ = resp_tx.send(SftpResponse::Error(e.clone()));
+                            }
+                        }
+                        Err(e)
+                    }
+                };
+                // Ack before any loop break so the blocked promise delegate wakes.
+                let _ = done.send(result);
+                if fatal {
+                    let _ = resp_tx.send(SftpResponse::Disconnected);
+                    break;
+                }
+                let _ = resp_tx.send(SftpResponse::TransferComplete {
+                    filename: remote.rsplit('/').next().unwrap_or(&remote).to_string(),
+                    is_upload: false,
+                });
+            }
+            Some(SftpCommand::DownloadDirSync { remote_dir, local_dir, done }) => {
+                cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
+                let mut fatal = false;
+                let result = match download_dir(&sftp, &remote_dir, &local_dir, &resp_tx, &cancel_flag).await {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                            if is_disconnect_error(&e) {
+                                fatal = true;
+                            } else {
+                                let _ = resp_tx.send(SftpResponse::Error(e.clone()));
+                            }
+                        }
+                        Err(e)
+                    }
+                };
+                let _ = done.send(result);
+                if fatal {
+                    let _ = resp_tx.send(SftpResponse::Disconnected);
+                    break;
+                }
+                let _ = resp_tx.send(SftpResponse::TransferComplete {
+                    filename: remote_dir.rsplit('/').next().unwrap_or(&remote_dir).to_string(),
+                    is_upload: false,
+                });
+            }
             Some(SftpCommand::Rename { from, to }) => {
                 match sftp.rename(&from, &to).await {
                     Ok(_) => { let _ = resp_tx.send(SftpResponse::OperationComplete); }
@@ -471,6 +524,10 @@ pub async fn download_file(
         started_at: std::time::Instant::now(),
     };
 
+    // Emit an immediate zero-byte progress so the UI bar appears at once,
+    // instead of waiting for the first 100ms-throttled update.
+    let _ = resp_tx.send(SftpResponse::Progress(progress.clone()));
+
     let mut buffer = vec![0u8; 65536];
     let mut last_progress_time = std::time::Instant::now();
 
@@ -574,6 +631,9 @@ pub async fn upload_file(
         is_upload: true,
         started_at: std::time::Instant::now(),
     };
+
+    // Emit an immediate zero-byte progress so the UI bar appears at once.
+    let _ = resp_tx.send(SftpResponse::Progress(progress.clone()));
 
     let mut buffer = vec![0u8; 65536];
     let mut last_progress_time = std::time::Instant::now();
@@ -679,6 +739,19 @@ async fn upload_file_for_dir(
     let mut buffer = vec![0u8; 65536];
     let mut transferred = 0u64;
     let mut last_progress_time = std::time::Instant::now();
+
+    // Immediate zero-byte progress so the bar appears before the first read.
+    let _ = resp_tx.send(SftpResponse::Progress(TransferProgress {
+        filename: std::path::Path::new(local_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(local_path)
+            .to_string(),
+        bytes_transferred: 0,
+        total_bytes: total,
+        is_upload: true,
+        started_at: std::time::Instant::now(),
+    }));
 
     loop {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
@@ -795,6 +868,19 @@ async fn download_file_for_dir(
     let mut buffer = vec![0u8; 65536];
     let mut transferred = 0u64;
     let mut last_progress_time = std::time::Instant::now();
+
+    // Immediate zero-byte progress so the bar appears before the first read.
+    let _ = resp_tx.send(SftpResponse::Progress(TransferProgress {
+        filename: remote_path
+            .rsplit('/')
+            .next()
+            .unwrap_or(remote_path)
+            .to_string(),
+        bytes_transferred: 0,
+        total_bytes: total,
+        is_upload: false,
+        started_at: std::time::Instant::now(),
+    }));
 
     loop {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {

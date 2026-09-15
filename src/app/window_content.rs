@@ -51,6 +51,29 @@ impl PortalApp {
 
         // ── Keyboard shortcuts (terminal view only) ─────────────────────
         let current_view = self.windows[window_idx].current_view;
+
+        // ── Remote metrics polling gate ─────────────────────────────────
+        // SSH sessions poll remote /proc stats only while the Metrics tab
+        // of the active tab's tools drawer is visible (and only for the
+        // focused pane — the one actually displayed). Synced every frame
+        // so closing the drawer or leaving the Terminal view stops the
+        // remote traffic immediately. On slow links a standing 5 s exec
+        // loop competes with interactive I/O and makes vim etc. feel stuck.
+        {
+            let window = &self.windows[window_idx];
+            for (ti, tab) in window.tabs.iter().enumerate() {
+                let want = ti == window.active_tab
+                    && current_view == AppView::Terminal
+                    && tab.tools_drawer_open
+                    && tab.tools_tab == 0;
+                for (si, session) in tab.sessions.iter().enumerate() {
+                    if let SessionKind::Ssh(ssh, _, _) = &session.kind {
+                        ssh.set_metrics_enabled(want && si == tab.focused_session);
+                    }
+                }
+            }
+        }
+
         if current_view == AppView::Terminal {
             let sr = self.shortcut_resolver.clone();
 
