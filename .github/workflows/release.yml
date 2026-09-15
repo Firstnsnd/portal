@@ -46,12 +46,20 @@ jobs:
           ./scripts/build-dmg.sh
           DMG_FILE=$(ls target/release/Portal-*.dmg | head -1)
           cp "$DMG_FILE" "Portal-macos-${{ matrix.name }}.dmg"
+          PKG_FILE=$(ls target/release/Portal-*.pkg | head -1)
+          cp "$PKG_FILE" "Portal-macos-${{ matrix.name }}.pkg"
 
-      - name: Upload artifacts
+      - name: Upload dmg artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.name }}-dmg
           path: Portal-macos-${{ matrix.name }}.dmg
+
+      - name: Upload pkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.name }}-pkg
+          path: Portal-macos-${{ matrix.name }}.pkg
 
   # ── Linux ──────────────────────────────────────────────────────────
   build-linux:
@@ -114,6 +122,18 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: macos-arm64-dmg
+          path: ./artifacts
+
+      - name: Download macOS x86_64 pkg
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-x86_64-pkg
+          path: ./artifacts
+
+      - name: Download macOS arm64 pkg
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64-pkg
           path: ./artifacts
 
       - name: Download Linux x86_64 artifact

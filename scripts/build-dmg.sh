@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Build Portal.app, code-sign it, and package into a .dmg installer.
 #
 # Code Signing:
@@ -35,10 +37,14 @@ VERSION="${VERSION:-0.0.0}"
 ARCH="$(uname -m)"
 APP_NAME="Portal"
 DMG_NAME="${APP_NAME}-${VERSION}-${ARCH}.dmg"
+PKG_NAME="${APP_NAME}-${VERSION}-${ARCH}.pkg"
 BUNDLE_DIR="target/release/bundle/osx"
 APP_PATH="${BUNDLE_DIR}/${APP_NAME}.app"
 DMG_OUTPUT="target/release/${DMG_NAME}"
+PKG_OUTPUT="target/release/${PKG_NAME}"
 STAGING_DIR="target/release/dmg-staging"
+PKG_ROOT="target/release/pkg-root"
+PKG_SCRIPTS="target/release/pkg-scripts"
 
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
 APPLE_ID="${APPLE_ID:-}"
@@ -92,10 +98,33 @@ if [ -n "${SIGNING_IDENTITY}" ]; then
     codesign --force --sign "${SIGNING_IDENTITY}" "${DMG_OUTPUT}"
 fi
 
+# ── 3b. Create pkg installer ─────────────────────────────────────────
+# The .pkg installs to /Applications and runs preinstall.sh, which stops any
+# running Portal and removes the old copy first — so an "update" actually
+# replaces the executable instead of silently keeping the old version running.
+echo "==> Preparing pkg root (${PKG_ROOT})..."
+rm -rf "${PKG_ROOT}" "${PKG_SCRIPTS}"
+mkdir -p "${PKG_ROOT}" "${PKG_SCRIPTS}"
+cp -R "${APP_PATH}" "${PKG_ROOT}/"
+
+echo "==> Installing preinstall script..."
+cp "${SCRIPT_DIR}/pkg/preinstall.sh" "${PKG_SCRIPTS}/preinstall"
+chmod +x "${PKG_SCRIPTS}/preinstall"
+
+echo "==> Building ${PKG_NAME}..."
+rm -f "${PKG_OUTPUT}"
+PKGBUILD_ARGS=(--root "${PKG_ROOT}" --scripts "${PKG_SCRIPTS}" --identifier "com.portal.app" --version "${VERSION}" --install-location /Applications)
+if [ -n "${SIGNING_IDENTITY}" ]; then
+    PKGBUILD_ARGS+=(--sign "${SIGNING_IDENTITY}")
+fi
+pkgbuild "${PKGBUILD_ARGS[@]}" "${PKG_OUTPUT}"
+
+rm -rf "${PKG_ROOT}" "${PKG_SCRIPTS}"
+
 # ── 4. Notarize (optional) ──
 if [ -n "${SIGNING_IDENTITY}" ] && [ -n "${APPLE_ID}" ] && [ -n "${APPLE_TEAM_ID}" ] && [ -n "${APPLE_PASSWORD}" ]; then
     echo "==> Submitting for notarization..."
-    xcrun notarytool submit "${DMG_OUTPUT}" \
+    xcrun notarytool submit "${DMG_OUTPUT}" "${PKG_OUTPUT}" \
         --apple-id "${APPLE_ID}" \
         --team-id "${APPLE_TEAM_ID}" \
         --password "${APPLE_PASSWORD}" \
@@ -103,13 +132,15 @@ if [ -n "${SIGNING_IDENTITY}" ] && [ -n "${APPLE_ID}" ] && [ -n "${APPLE_TEAM_ID
 
     echo "==> Stapling notarization ticket..."
     xcrun stapler staple "${DMG_OUTPUT}"
+    xcrun stapler staple "${PKG_OUTPUT}"
     echo "==> Notarization complete!"
 else
     if [ -n "${SIGNING_IDENTITY}" ]; then
         echo ""
-        echo "    NOTE: DMG is signed but NOT notarized."
+        echo "    NOTE: DMG/pkg are signed but NOT notarized."
         echo "    Set APPLE_ID, APPLE_TEAM_ID, APPLE_PASSWORD to enable notarization."
     fi
 fi
 
 echo "==> Done! DMG created at: ${DMG_OUTPUT}"
+echo "             pkg created at: ${PKG_OUTPUT}"
