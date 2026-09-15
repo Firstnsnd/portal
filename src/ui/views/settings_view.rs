@@ -87,6 +87,8 @@ impl PortalApp {
             scrollback_limit_mb: self.scrollback_limit_mb,
             ssh_keepalive_interval: self.ssh_keepalive_interval,
             keyboard_shortcuts: self.shortcut_resolver.bindings().to_vec(),
+            check_for_updates: self.check_for_updates,
+            last_dismissed_update_version: self.last_dismissed_update_version.clone(),
         };
         crate::config::save_settings(&settings);
     }
@@ -215,6 +217,22 @@ impl PortalApp {
                         changed = true;
                     }
                 }
+
+                ui.add_space(SPACE_LG);
+                ui.separator();
+                ui.add_space(SPACE_SM);
+
+                // ── Updates section ──
+                ui.label(egui::RichText::new(lang.t("updates")).color(theme.fg_primary).size(14.0).strong());
+                ui.add_space(SPACE_XS);
+                let check = ui.checkbox(&mut self.check_for_updates, lang.t("check_for_updates"));
+                if check.changed() {
+                    changed = true;
+                    if self.check_for_updates {
+                        self.next_update_check = std::time::Instant::now();
+                    }
+                }
+                ui.label(egui::RichText::new(lang.t("check_for_updates_desc")).color(theme.fg_dim).size(FONT_SM));
 
                 ui.add_space(SPACE_LG);
                 ui.separator();

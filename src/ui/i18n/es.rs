@@ -194,6 +194,16 @@ pub fn t(key: &str) -> &'static str {
         "key_path_hint" => "~/.ssh/id_rsa",
         "key_content_hint" => "-----BEGIN PRIVATE KEY-----",
         "key_passphrase_hint" => "Dejar vacío si no hay",
+        // Updates
+        "updates" => "Actualizaciones",
+        "check_for_updates" => "Buscar actualizaciones",
+        "check_for_updates_desc" => "Busca nuevas versiones de Portal al iniciar y a diario.",
+        "update_download" => "Descargar",
+        "update_dismiss" => "Descartar",
+        "update_downloading" => "Descargando…",
+        "update_open" => "Abrir",
+        "update_close" => "Cerrar",
+        "update_check_error" => "Fallo al buscar actualizaciones",
         _ => "???",
     }
 }
@@ -211,6 +221,8 @@ pub fn tf(key: &str, arg: &str) -> String {
         "lines_above" => format!(" ↑ {} líneas arriba ", arg),
         "uploading" => format!("Subiendo {}", arg),
         "downloading" => format!("Descargando {}", arg),
+        "update_available" => format!("v{} disponible — ¿Actualizar?", arg),
+        "update_ready" => format!("Descargado v{} — sigue la ventana del instalador.", arg),
         _ => format!("{}: {}", key, arg),
     }
 }

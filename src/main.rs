@@ -9,6 +9,7 @@ mod sftp;
 mod ssh;
 mod terminal;
 mod ui;
+mod update;
 
 use app::PortalApp;
 use sftp::LocalBrowser;
@@ -47,6 +48,8 @@ impl eframe::App for PortalApp {
         if self.fonts_dirty {
             self.apply_fonts(ctx);
         }
+
+        self.maybe_check_for_updates();
 
         // ── Window close handling ─────────────────────────────────────────────────────────────
         // IMPORTANT: eframe/egui architecture limitation

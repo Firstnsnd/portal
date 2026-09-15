@@ -194,6 +194,16 @@ pub fn t(key: &str) -> &'static str {
         "key_path_hint" => "~/.ssh/id_rsa",
         "key_content_hint" => "-----BEGIN PRIVATE KEY-----",
         "key_passphrase_hint" => "없으면 비워두세요",
+        // Updates
+        "updates" => "업데이트",
+        "check_for_updates" => "업데이트 확인",
+        "check_for_updates_desc" => "시작 시 및 매일 Portal 새 버전을 확인합니다.",
+        "update_download" => "다운로드",
+        "update_dismiss" => "무시",
+        "update_downloading" => "다운로드 중…",
+        "update_open" => "열기",
+        "update_close" => "닫기",
+        "update_check_error" => "업데이트 확인 실패",
         _ => "???",
     }
 }
@@ -211,6 +221,8 @@ pub fn tf(key: &str, arg: &str) -> String {
         "lines_above" => format!(" ↑ {} 줄 위 ", arg),
         "uploading" => format!("업로드 중 {}", arg),
         "downloading" => format!("다운로드 중 {}", arg),
+        "update_available" => format!("v{} 사용 가능 — 업그레이드할까요?", arg),
+        "update_ready" => format!("v{} 다운로드 완료 — 설치 프로그램 안내를 따르세요.", arg),
         _ => format!("{}: {}", key, arg),
     }
 }
