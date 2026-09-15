@@ -34,6 +34,8 @@ pub fn t(key: &str) -> &'static str {
         "back" => "Retour",
         "disconnect" => "Déconnecter",
         "connecting" => "Connexion ...",
+        "reconnect" => "Reconnecter",
+        "sf_disconnected" => "Déconnecté — cliquez pour reconnecter",
         "authenticating" => "Authentification ...",
         "connection_failed" => "Échec de la Connexion",
         "testing" => "Test…",

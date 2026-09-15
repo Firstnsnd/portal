@@ -34,6 +34,8 @@ pub fn t(key: &str) -> &'static str {
         "back" => "戻る",
         "disconnect" => "切断",
         "connecting" => "接続中 ...",
+        "reconnect" => "再接続",
+        "sf_disconnected" => "切断されました — クリックで再接続",
         "authenticating" => "認証中 ...",
         "connection_failed" => "接続失敗",
         "testing" => "テスト中…",

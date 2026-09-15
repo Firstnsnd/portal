@@ -109,13 +109,13 @@ impl SftpBrowser {
                     }
                 }
                 SftpResponse::Disconnected => {
-                    if matches!(self.state, SftpConnectionState::Connected) {
-                        // Connection lost while previously connected — auto-reconnect
-                        log::info!("SFTP connection lost, auto-reconnecting to {}", self.host_name);
-                        self.auto_reconnect();
-                    } else {
-                        self.state = SftpConnectionState::Disconnected;
-                    }
+                    // Connection dropped (or the task's command channel closed).
+                    // Do NOT silently auto-reconnect here: that would hide the
+                    // "disconnected" state and leave the UI pretending we're still
+                    // connected. Instead mark the browser disconnected; it reconnects
+                    // lazily when the user next operates on this panel.
+                    self.state = SftpConnectionState::Disconnected;
+                    self.transfer = None;
                 }
             }
         }
@@ -158,18 +158,30 @@ impl SftpBrowser {
         self.state = SftpConnectionState::Connecting;
     }
 
+    /// Reconnect on-demand if we are currently disconnected. Called at the top
+    /// of every user-initiated operation so a dead connection transparently
+    /// re-establishes itself when the user next acts on the panel.
+    fn ensure_reconnected(&mut self) {
+        if matches!(self.state, SftpConnectionState::Disconnected) {
+            log::info!("SFTP: reconnecting to {} on user action", self.host_name);
+            self.auto_reconnect();
+        }
+    }
+
     /// Navigate to a directory path.
-    pub fn navigate(&self, path: &str) {
+    pub fn navigate(&mut self, path: &str) {
+        self.ensure_reconnected();
         let _ = self.cmd_tx.send(SftpCommand::ListDir(path.to_string()));
     }
 
     /// Refresh the current directory.
-    pub fn refresh(&self) {
-        self.navigate(&self.current_path);
+    pub fn refresh(&mut self) {
+        let path = self.current_path.clone();
+        self.navigate(&path);
     }
 
     /// Navigate to the parent directory.
-    pub fn navigate_up(&self) {
+    pub fn navigate_up(&mut self) {
         let parent = if self.current_path == "/" {
             "/".to_string()
         } else {
@@ -184,7 +196,8 @@ impl SftpBrowser {
     }
 
     /// Download a remote file to a local path.
-    pub fn download(&self, remote_path: &str, local_path: &str) {
+    pub fn download(&mut self, remote_path: &str, local_path: &str) {
+        self.ensure_reconnected();
         let _ = self.cmd_tx.send(SftpCommand::Download {
             remote: remote_path.to_string(),
             local: local_path.to_string(),
@@ -192,7 +205,8 @@ impl SftpBrowser {
     }
 
     /// Upload a local file to a remote path.
-    pub fn upload(&self, local_path: &str, remote_path: &str) {
+    pub fn upload(&mut self, local_path: &str, remote_path: &str) {
+        self.ensure_reconnected();
         let _ = self.cmd_tx.send(SftpCommand::Upload {
             local: local_path.to_string(),
             remote: remote_path.to_string(),
@@ -210,7 +224,8 @@ impl SftpBrowser {
     }
 
     /// Upload an entire local directory recursively.
-    pub fn upload_dir(&self, local_dir: &str, remote_dir: &str) {
+    pub fn upload_dir(&mut self, local_dir: &str, remote_dir: &str) {
+        self.ensure_reconnected();
         let _ = self.cmd_tx.send(SftpCommand::UploadDir {
             local_dir: local_dir.to_string(),
             remote_dir: remote_dir.to_string(),
@@ -218,7 +233,8 @@ impl SftpBrowser {
     }
 
     /// Download an entire remote directory recursively.
-    pub fn download_dir(&self, remote_dir: &str, local_dir: &str) {
+    pub fn download_dir(&mut self, remote_dir: &str, local_dir: &str) {
+        self.ensure_reconnected();
         let _ = self.cmd_tx.send(SftpCommand::DownloadDir {
             remote_dir: remote_dir.to_string(),
             local_dir: local_dir.to_string(),
@@ -240,7 +256,8 @@ impl SftpBrowser {
     }
 
     /// Rename a remote file or directory.
-    pub fn rename(&self, from: &str, to: &str) {
+    pub fn rename(&mut self, from: &str, to: &str) {
+        self.ensure_reconnected();
         let _ = self.cmd_tx.send(SftpCommand::Rename {
             from: from.to_string(),
             to: to.to_string(),
@@ -248,22 +265,26 @@ impl SftpBrowser {
     }
 
     /// Delete a remote file or directory.
-    pub fn delete(&self, path: &str) {
+    pub fn delete(&mut self, path: &str) {
+        self.ensure_reconnected();
         let _ = self.cmd_tx.send(SftpCommand::Delete(path.to_string()));
     }
 
     /// Create a remote directory.
-    pub fn create_dir(&self, path: &str) {
+    pub fn create_dir(&mut self, path: &str) {
+        self.ensure_reconnected();
         let _ = self.cmd_tx.send(SftpCommand::CreateDir(path.to_string()));
     }
 
     /// Request to read a remote file for the editor.
-    pub fn read_file(&self, path: &str) {
+    pub fn read_file(&mut self, path: &str) {
+        self.ensure_reconnected();
         let _ = self.cmd_tx.send(SftpCommand::ReadFile { path: path.to_string() });
     }
 
     /// Write content to a remote file from the editor.
-    pub fn write_file(&self, path: &str, data: Vec<u8>) {
+    pub fn write_file(&mut self, path: &str, data: Vec<u8>) {
+        self.ensure_reconnected();
         let _ = self.cmd_tx.send(SftpCommand::WriteFile { path: path.to_string(), data });
     }
 

@@ -137,6 +137,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     let mut left_connect_host: Option<usize> = None;
     let mut left_disconnect_request = false;
     let mut left_toggle_hidden_files = false;
+    let mut left_remote_reconnect_request = false;
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(left_panel_rect), |ui| {
         if window.left_panel_is_local {
             // ── LEFT PANEL: Local ──
@@ -518,7 +519,31 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                                 &mut left_remote_move_to_dir,
                             );
                         }
-                        SftpConnectionState::Disconnected => {}
+                        SftpConnectionState::Disconnected => {
+                            egui::Frame {
+                                fill: cx.theme.bg_secondary,
+                                inner_margin: egui::Margin::symmetric(8.0, 6.0),
+                                stroke: egui::Stroke::NONE,
+                                ..Default::default()
+                            }
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(cx.language.t("remote")).color(cx.theme.fg_dim).size(13.0).strong());
+                                    ui.allocate_space(egui::vec2(ui.available_width(), 0.0));
+                                });
+                            });
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(40.0);
+                                ui.label(egui::RichText::new(cx.language.t("sf_disconnected")).color(cx.theme.fg_dim).size(14.0));
+                                ui.add_space(12.0);
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new(cx.language.t("reconnect")).color(cx.theme.accent).size(13.0))
+                                        .frame(false)
+                                ).clicked() {
+                                    left_remote_reconnect_request = true;
+                                }
+                            });
+                        }
                     }
                 }
             }
@@ -528,6 +553,12 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     // ── Handle left panel disconnect request ──
     if left_disconnect_request {
         window.sftp_browser_left = None;
+    }
+    // ── Handle left panel reconnect request (user clicked "reconnect") ──
+    if left_remote_reconnect_request {
+        if let Some(ref mut b) = window.sftp_browser_left {
+            b.refresh();
+        }
     }
     // ── Handle left panel cancel connect request ──
     if left_cancel_connect_request {
@@ -553,6 +584,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     let mut connect_host: Option<usize> = None;
     let mut right_disconnect_request = false;
     let mut right_toggle_hidden_files = false;
+    let mut right_remote_reconnect_request = false;
 
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(right_panel_rect), |ui| {
         if window.right_panel_is_local {
@@ -921,7 +953,31 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                                 &mut remote_move_to_dir,
                             );
                         }
-                        SftpConnectionState::Disconnected => {}
+                        SftpConnectionState::Disconnected => {
+                            egui::Frame {
+                                fill: cx.theme.bg_secondary,
+                                inner_margin: egui::Margin::symmetric(8.0, 6.0),
+                                stroke: egui::Stroke::NONE,
+                                ..Default::default()
+                            }
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(cx.language.t("remote")).color(cx.theme.fg_dim).size(13.0).strong());
+                                    ui.allocate_space(egui::vec2(ui.available_width(), 0.0));
+                                });
+                            });
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(40.0);
+                                ui.label(egui::RichText::new(cx.language.t("sf_disconnected")).color(cx.theme.fg_dim).size(14.0));
+                                ui.add_space(12.0);
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new(cx.language.t("reconnect")).color(cx.theme.accent).size(13.0))
+                                        .frame(false)
+                                ).clicked() {
+                                    right_remote_reconnect_request = true;
+                                }
+                            });
+                        }
                     }
                 }
             }
@@ -931,6 +987,12 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     // ── Handle right panel disconnect request ──
     if right_disconnect_request {
         window.sftp_browser = None;
+    }
+    // ── Handle right panel reconnect request (user clicked "reconnect") ──
+    if right_remote_reconnect_request {
+        if let Some(ref mut b) = window.sftp_browser {
+            b.refresh();
+        }
     }
     // ── Handle right panel cancel connect request ──
     if right_cancel_connect_request {
@@ -1026,7 +1088,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     );
     if left_is_connected {
         if let Some(name) = left_remote_navigate_to {
-            let browser = window.sftp_browser_left.as_ref().unwrap();
+            let browser = window.sftp_browser_left.as_mut().unwrap();
             if name == ".." {
                 browser.navigate_up();
             } else if name.starts_with('/') {
@@ -1049,7 +1111,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     // ── Apply deferred remote panel actions (only when connected) ──
     if is_connected {
         if let Some(name) = remote_navigate_to {
-            let browser = window.sftp_browser.as_ref().unwrap();
+            let browser = window.sftp_browser.as_mut().unwrap();
             if name == ".." {
                 browser.navigate_up();
             } else if name.starts_with('/') {
@@ -1246,7 +1308,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         }
     }
     if remote_delete_request {
-        if let Some(ref browser) = window.sftp_browser {
+        if let Some(ref mut browser) = window.sftp_browser {
             let filtered = browser.filtered_entries();
             let names: Vec<String> = browser.selection.selected.iter()
                 .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
@@ -1260,7 +1322,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         }
     }
     if left_remote_delete_request {
-        if let Some(ref browser) = window.sftp_browser_left {
+        if let Some(ref mut browser) = window.sftp_browser_left {
             let filtered = browser.filtered_entries();
             let names: Vec<String> = browser.selection.selected.iter()
                 .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
@@ -1300,7 +1362,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         window.local_browser_right.refresh();
     }
     if let Some(req) = remote_move_to_dir {
-        if let Some(ref browser) = window.sftp_browser {
+        if let Some(ref mut browser) = window.sftp_browser {
             let current_path = browser.current_path.clone();
             let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
             for entry in &req.source_entries {
@@ -1310,7 +1372,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         }
     }
     if let Some(req) = left_remote_move_to_dir {
-        if let Some(ref browser) = window.sftp_browser_left {
+        if let Some(ref mut browser) = window.sftp_browser_left {
             let current_path = browser.current_path.clone();
             let target_path = format!("{}/{}", current_path.trim_end_matches('/'), req.target_dir);
             for entry in &req.source_entries {
@@ -1583,7 +1645,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         }
     }
     if let Some(idx) = remote_open_file_req {
-        if let Some(ref browser) = window.sftp_browser {
+        if let Some(ref mut browser) = window.sftp_browser {
             let filtered = browser.filtered_entries();
             if let Some(entry) = filtered.get(idx) {
                 if entry.kind != SftpEntryKind::Directory {
@@ -1593,7 +1655,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         }
     }
     if let Some(idx) = left_remote_open_file_req {
-        if let Some(ref browser) = window.sftp_browser_left {
+        if let Some(ref mut browser) = window.sftp_browser_left {
             let filtered = browser.filtered_entries();
             if let Some(entry) = filtered.get(idx) {
                 if entry.kind != SftpEntryKind::Directory {
@@ -1683,14 +1745,14 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
                 }
             }
             SftpPanel::LeftRemote => {
-                if let Some(ref browser) = window.sftp_browser_left {
+                if let Some(ref mut browser) = window.sftp_browser_left {
                     let from = format!("{}/{}", browser.current_path.trim_end_matches('/'), old_name);
                     let to = format!("{}/{}", browser.current_path.trim_end_matches('/'), new_name);
                     browser.rename(&from, &to);
                 }
             }
             SftpPanel::RightRemote => {
-                if let Some(ref browser) = window.sftp_browser {
+                if let Some(ref mut browser) = window.sftp_browser {
                     let from = format!("{}/{}", browser.current_path.trim_end_matches('/'), old_name);
                     let to = format!("{}/{}", browser.current_path.trim_end_matches('/'), new_name);
                     browser.rename(&from, &to);
@@ -1776,13 +1838,13 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
                 }
             }
             SftpPanel::LeftRemote => {
-                if let Some(ref browser) = window.sftp_browser_left {
+                if let Some(ref mut browser) = window.sftp_browser_left {
                     let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                     browser.create_dir(&path);
                 }
             }
             SftpPanel::RightRemote => {
-                if let Some(ref browser) = window.sftp_browser {
+                if let Some(ref mut browser) = window.sftp_browser {
                     let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                     browser.create_dir(&path);
                 }
@@ -1869,13 +1931,13 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
                 }
             }
             SftpPanel::LeftRemote => {
-                if let Some(ref browser) = window.sftp_browser_left {
+                if let Some(ref mut browser) = window.sftp_browser_left {
                     let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                     browser.write_file(&path, Vec::new());
                 }
             }
             SftpPanel::RightRemote => {
-                if let Some(ref browser) = window.sftp_browser {
+                if let Some(ref mut browser) = window.sftp_browser {
                     let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                     browser.write_file(&path, Vec::new());
                 }
@@ -1996,13 +2058,13 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
                     }
                 }
                 SftpPanel::LeftRemote => {
-                    if let Some(ref browser) = window.sftp_browser_left {
+                    if let Some(ref mut browser) = window.sftp_browser_left {
                         let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                         browser.delete(&path);
                     }
                 }
                 SftpPanel::RightRemote => {
-                    if let Some(ref browser) = window.sftp_browser {
+                    if let Some(ref mut browser) = window.sftp_browser {
                         let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                         browser.delete(&path);
                     }
@@ -2055,7 +2117,7 @@ fn open_file_for_editing(window: &mut AppWindow, is_local: bool, file_name: &str
                 });
             }
         }
-    } else if let Some(ref browser) = window.sftp_browser {
+    } else if let Some(ref mut browser) = window.sftp_browser {
         let dir = browser.current_path.clone();
         let full_path = format!("{}/{}", dir.trim_end_matches('/'), file_name);
         browser.read_file(&full_path);
@@ -2111,7 +2173,7 @@ fn open_file_for_editing_with_panel(window: &mut AppWindow, panel: SftpPanel, fi
             }
         }
         SftpPanel::LeftRemote => {
-            if let Some(ref browser) = window.sftp_browser_left {
+            if let Some(ref mut browser) = window.sftp_browser_left {
                 let dir = browser.current_path.clone();
                 let full_path = format!("{}/{}", dir.trim_end_matches('/'), file_name);
                 browser.read_file(&full_path);
@@ -2130,7 +2192,7 @@ fn open_file_for_editing_with_panel(window: &mut AppWindow, panel: SftpPanel, fi
             }
         }
         SftpPanel::RightRemote => {
-            if let Some(ref browser) = window.sftp_browser {
+            if let Some(ref mut browser) = window.sftp_browser {
                 let dir = browser.current_path.clone();
                 let full_path = format!("{}/{}", dir.trim_end_matches('/'), file_name);
                 browser.read_file(&full_path);
@@ -2445,7 +2507,7 @@ pub fn render_editor_dialog(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut 
                 }
             }
             SftpPanel::LeftRemote => {
-                if let Some(ref browser) = window.sftp_browser_left {
+                if let Some(ref mut browser) = window.sftp_browser_left {
                     browser.write_file(&path, content.as_bytes().to_vec());
                     let current = browser.current_path.clone();
                     browser.navigate(&current);
@@ -2453,7 +2515,7 @@ pub fn render_editor_dialog(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut 
                 }
             }
             SftpPanel::RightRemote => {
-                if let Some(ref browser) = window.sftp_browser {
+                if let Some(ref mut browser) = window.sftp_browser {
                     browser.write_file(&path, content.as_bytes().to_vec());
                     let current = browser.current_path.clone();
                     browser.navigate(&current);

@@ -34,6 +34,8 @@ pub fn t(key: &str) -> &'static str {
         "back" => "返回",
         "disconnect" => "断开连接",
         "connecting" => "连接中 ...",
+        "reconnect" => "重新连接",
+        "sf_disconnected" => "已断开 — 点击重新连接",
         "authenticating" => "认证中 ...",
         "connection_failed" => "连接失败",
         "testing" => "测试中…",
