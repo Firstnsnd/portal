@@ -761,6 +761,21 @@ impl SshSession {
                 }
             }
         }
+
+        // ── Release bound ports on every exit path ──
+        // The main loop `break`s on organic disconnects (remote Eof/Close,
+        // write/resize failure, cmd channel closed) as well as the explicit
+        // `Disconnect` command. Each local forward holds a bound TcpListener
+        // in a spawned task until its cancel signal fires, so leaving this
+        // cleanup only in the `Disconnect` arm leaked the bound ports after
+        // an abrupt disconnect. Stop and clear them unconditionally here so
+        // any session teardown frees the listener.
+        if let Ok(mut fwds) = port_forwards.lock() {
+            for pf in fwds.iter() {
+                pf.stop();
+            }
+            fwds.clear();
+        }
     }
 
     /// Spawn a local port forward task and track it in port_forwards.
