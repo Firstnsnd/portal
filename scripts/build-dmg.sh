@@ -107,9 +107,10 @@ rm -rf "${PKG_ROOT}" "${PKG_SCRIPTS}"
 mkdir -p "${PKG_ROOT}" "${PKG_SCRIPTS}"
 cp -R "${APP_PATH}" "${PKG_ROOT}/"
 
-echo "==> Installing preinstall script..."
+echo "==> Installing preinstall/postinstall scripts..."
 cp "${SCRIPT_DIR}/pkg/preinstall.sh" "${PKG_SCRIPTS}/preinstall"
-chmod +x "${PKG_SCRIPTS}/preinstall"
+cp "${SCRIPT_DIR}/pkg/postinstall.sh" "${PKG_SCRIPTS}/postinstall"
+chmod +x "${PKG_SCRIPTS}/preinstall" "${PKG_SCRIPTS}/postinstall"
 
 echo "==> Building ${PKG_NAME}..."
 rm -f "${PKG_OUTPUT}"
