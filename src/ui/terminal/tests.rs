@@ -202,4 +202,73 @@ mod tests {
             }
         }
     }
+
+    // ── 2FA prompt input sync (T5.1) ───────────────────────────────────────
+
+    use crate::ssh::{AuthPrompt, AuthPromptField};
+    use crate::ui::terminal::auth_prompt_ui::sync_prompt_inputs;
+
+    fn two_field_prompt(id: u64) -> AuthPrompt {
+        AuthPrompt {
+            id,
+            name: "Two-Factor Authentication".into(),
+            instructions: "Enter code".into(),
+            prompts: vec![
+                AuthPromptField { prompt: "Login:".into(), echo: true },
+                AuthPromptField { prompt: "OTP:".into(), echo: false },
+            ],
+        }
+    }
+
+    #[test]
+    fn test_prompt_id_change_resets_inputs() {
+        // First prompt initializes empty inputs sized to the field count.
+        let mut last_id: Option<u64> = None;
+        let mut inputs: Vec<String> = Vec::new();
+        sync_prompt_inputs(&mut last_id, &mut inputs, &two_field_prompt(1));
+        assert_eq!(last_id, Some(1));
+        assert_eq!(inputs.len(), 2);
+        assert!(inputs.iter().all(|s| s.is_empty()));
+
+        // Same id on the next frame: typed values must be preserved.
+        inputs[1] = "123456".into();
+        sync_prompt_inputs(&mut last_id, &mut inputs, &two_field_prompt(1));
+        assert_eq!(inputs[1], "123456");
+
+        // A new round (id 2): buffers reset — a stale OTP must never leak
+        // into the next round's fields.
+        sync_prompt_inputs(&mut last_id, &mut inputs, &two_field_prompt(2));
+        assert_eq!(last_id, Some(2));
+        assert_eq!(inputs.len(), 2);
+        assert!(inputs.iter().all(|s| s.is_empty()));
+    }
+
+    #[test]
+    fn test_prompt_field_count_change_resizes_inputs() {
+        // Same id but a different field count (defensive): resize, keeping
+        // existing values where positions still exist.
+        let mut last_id: Option<u64> = Some(7);
+        let mut inputs: Vec<String> = vec!["kept".into(), "second".into(), "dropped".into()];
+        sync_prompt_inputs(&mut last_id, &mut inputs, &two_field_prompt(7));
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0], "kept");
+        assert_eq!(inputs[1], "second");
+
+        // Growing back fills the new positions with empty strings.
+        sync_prompt_inputs(
+            &mut last_id,
+            &mut inputs,
+            &AuthPrompt {
+                id: 7,
+                name: "t".into(),
+                instructions: String::new(),
+                prompts: vec![
+                    AuthPromptField { prompt: "a".into(), echo: true },
+                    AuthPromptField { prompt: "b".into(), echo: true },
+                    AuthPromptField { prompt: "c".into(), echo: false },
+                ],
+            },
+        );
+        assert_eq!(inputs, vec!["kept", "second", ""]);
+    }
 }

@@ -2,7 +2,18 @@
 //!
 //! Common data types for SFTP operations.
 
-use crate::ui::formatting::format_duration_hms_from_secs;
+/// Format seconds as "HH:MM:SS" (or "MM:SS" under an hour), for transfer ETA.
+/// Inlined from `ui::formatting` to keep the crate UI-agnostic.
+fn format_duration_hms_from_secs(secs: u64) -> String {
+    let hours = secs / 3600;
+    let mins = (secs % 3600) / 60;
+    let s = secs % 60;
+    if hours > 0 {
+        format!("{}:{:02}:{:02}", hours, mins, s)
+    } else {
+        format!("{:02}:{:02}", mins, s)
+    }
+}
 
 /// File entry returned from a directory listing
 #[derive(Clone, Debug)]

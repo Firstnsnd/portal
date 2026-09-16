@@ -29,6 +29,9 @@ pub struct SftpBrowser {
     conn_port: u16,
     conn_username: String,
     conn_auth: ResolvedAuth,
+    /// Keyboard-interactive (2FA) prompt mailbox for the live task; the
+    /// SFTP view renders it while the panel is connecting.
+    pub auth_prompt: std::sync::Arc<crate::ssh::AuthPromptBridge>,
 }
 
 impl SftpBrowser {
@@ -44,9 +47,15 @@ impl SftpBrowser {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (resp_tx, resp_rx) = mpsc::unbounded_channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let auth_prompt = std::sync::Arc::new(crate::ssh::AuthPromptBridge::new());
 
         let cancel_clone = cancel_flag.clone();
-        runtime.spawn(crate::sftp::task::sftp_task(host.clone(), port, username.clone(), auth.clone(), cmd_rx, resp_tx, cancel_clone));
+        let prompt_clone = std::sync::Arc::clone(&auth_prompt);
+        runtime.spawn(crate::sftp::task::sftp_task(
+            host.clone(), port, username.clone(), auth.clone(),
+            cmd_rx, resp_tx, cancel_clone, prompt_clone,
+            crate::ssh::HostKeyPolicy::Learn,
+        ));
 
         Self {
             cmd_tx,
@@ -67,6 +76,7 @@ impl SftpBrowser {
             conn_port: port,
             conn_username: username,
             conn_auth: auth,
+            auth_prompt,
         }
     }
 
@@ -131,6 +141,9 @@ impl SftpBrowser {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (resp_tx, resp_rx) = mpsc::unbounded_channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // Fresh prompt mailbox per task — the old task's prompts (if any)
+        // died with it.
+        let auth_prompt = std::sync::Arc::new(crate::ssh::AuthPromptBridge::new());
 
         let reconnect_path = if self.current_path.is_empty() {
             None
@@ -139,6 +152,7 @@ impl SftpBrowser {
         };
 
         let cancel_clone = cancel_flag.clone();
+        let prompt_clone = std::sync::Arc::clone(&auth_prompt);
         self.runtime.spawn(crate::sftp::task::sftp_task_with_initial_path(
             self.conn_host.clone(),
             self.conn_port,
@@ -147,6 +161,8 @@ impl SftpBrowser {
             cmd_rx,
             resp_tx,
             cancel_clone,
+            prompt_clone,
+            crate::ssh::HostKeyPolicy::Learn,
             reconnect_path,
         ));
 
@@ -154,6 +170,7 @@ impl SftpBrowser {
         self.cmd_tx = cmd_tx;
         self.resp_rx = resp_rx;
         self.cancel_flag = cancel_flag;
+        self.auth_prompt = auth_prompt;
         self.transfer = None;
         self.state = SftpConnectionState::Connecting;
     }

@@ -389,6 +389,22 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                                     left_cancel_connect_request = true;
                                 }
                             });
+
+                            // 2FA: render the keyboard-interactive challenge
+                            // while the remote panel is still connecting.
+                            if let Some(prompt) = browser.auth_prompt.pending() {
+                                let ui_action = crate::ui::terminal::auth_prompt_ui::render_auth_prompt_window(
+                                    ui.ctx(),
+                                    "sftp_left_2fa",
+                                    &browser.auth_prompt,
+                                    &prompt,
+                                    cx.theme,
+                                    &cx.language,
+                                );
+                                if ui_action == crate::ui::terminal::auth_prompt_ui::AuthPromptUiAction::Cancelled {
+                                    left_cancel_connect_request = true;
+                                }
+                            }
                         }
                         SftpConnectionState::Error(e) => {
                             let err = e.clone();
@@ -828,6 +844,22 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                                     right_cancel_connect_request = true;
                                 }
                             });
+
+                            // 2FA: render the keyboard-interactive challenge
+                            // while the remote panel is still connecting.
+                            if let Some(prompt) = browser.auth_prompt.pending() {
+                                let ui_action = crate::ui::terminal::auth_prompt_ui::render_auth_prompt_window(
+                                    ui.ctx(),
+                                    "sftp_right_2fa",
+                                    &browser.auth_prompt,
+                                    &prompt,
+                                    cx.theme,
+                                    &cx.language,
+                                );
+                                if ui_action == crate::ui::terminal::auth_prompt_ui::AuthPromptUiAction::Cancelled {
+                                    right_cancel_connect_request = true;
+                                }
+                            }
                         }
                         SftpConnectionState::Error(e) => {
                             let err = e.clone();

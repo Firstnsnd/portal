@@ -14,6 +14,9 @@ pub struct LocalBrowser {
 }
 
 impl LocalBrowser {
+    // `new()` performs filesystem I/O (`refresh`), so a `Default` impl
+    // would be misleading rather than trivial.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let home = dirs::home_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("/"))

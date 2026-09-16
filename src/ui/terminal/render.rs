@@ -696,6 +696,9 @@ pub fn render_terminal_session(
     }
 
     // ── Render terminal content ──────────────────────────────────────────────
+    // 2FA challenge captured inside the lock, consumed outside it (see the
+    // prompt window render after `grid.lock()` ends).
+    let mut pending_2fa: Option<crate::ssh::AuthPrompt> = None;
     if let Ok(grid) = session.grid.lock() {
         painter.rect_filled(pane_rect, 0.0, theme.bg_primary);
         let scrollback_len = grid.scrollback_len();
@@ -1257,51 +1260,60 @@ pub fn render_terminal_session(
 
         // ── SSH connection state overlay ──────────────────────────────────────
         if let SessionKind::Ssh(ssh, _, _) = &session.kind {
+            // Capture any pending 2FA challenge now. The interactive prompt
+            // window renders AFTER the grid lock (below), since egui widgets
+            // must not be created while the painter holds the lock.
+            pending_2fa = ssh.auth_prompt.pending();
             match ssh.connection_state() {
                 SshConnectionState::Connecting | SshConnectionState::Authenticating => {
                     painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_premultiplied(
                         theme.bg_primary.r(), theme.bg_primary.g(), theme.bg_primary.b(), 240,
                     ));
-                    let msg = match ssh.connection_state() {
-                        SshConnectionState::Connecting    => language.t("connecting"),
-                        SshConnectionState::Authenticating => language.t("authenticating"),
-                        _ => "",
-                    };
-                    let galley = ui.fonts(|f| f.layout_no_wrap(
-                        msg.to_string(),
-                        egui::FontId::monospace(16.0),
-                        theme.accent,
-                    ));
-                    painter.galley(
-                        egui::pos2(
-                            rect.center().x - galley.rect.width() / 2.0,
-                            rect.center().y - galley.rect.height() / 2.0 - 14.0,
-                        ),
-                        galley,
-                        egui::Color32::TRANSPARENT,
-                    );
+                    // With a pending challenge, the prompt window owns all
+                    // interaction — keep only the dim backdrop here (no stray
+                    // "Authenticating…" text or duplicate cancel button).
+                    if pending_2fa.is_none() {
+                        let msg = match ssh.connection_state() {
+                            SshConnectionState::Connecting    => language.t("connecting"),
+                            SshConnectionState::Authenticating => language.t("authenticating"),
+                            _ => "",
+                        };
+                        let galley = ui.fonts(|f| f.layout_no_wrap(
+                            msg.to_string(),
+                            egui::FontId::monospace(16.0),
+                            theme.accent,
+                        ));
+                        painter.galley(
+                            egui::pos2(
+                                rect.center().x - galley.rect.width() / 2.0,
+                                rect.center().y - galley.rect.height() / 2.0 - 14.0,
+                            ),
+                            galley,
+                            egui::Color32::TRANSPARENT,
+                        );
 
-                    let btn_size = egui::vec2(70.0, 28.0);
-                    let btn_pos  = egui::pos2(rect.center().x - btn_size.x / 2.0, rect.center().y + 10.0);
-                    let btn_rect = egui::Rect::from_min_size(btn_pos, btn_size);
-                    let btn_resp = ui.allocate_rect(btn_rect, egui::Sense::click());
-                    let btn_bg = if btn_resp.hovered() { theme.bg_elevated } else { theme.bg_secondary };
-                    painter.rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, theme.border));
-                    let cancel_galley = ui.fonts(|f| f.layout_no_wrap(
-                        language.t("cancel").to_string(),
-                        egui::FontId::proportional(12.0),
-                        theme.red,
-                    ));
-                    painter.galley(
-                        egui::pos2(
-                            btn_rect.center().x - cancel_galley.rect.width() / 2.0,
-                            btn_rect.center().y - cancel_galley.rect.height() / 2.0,
-                        ),
-                        cancel_galley,
-                        egui::Color32::TRANSPARENT,
-                    );
-                    if btn_resp.clicked() {
-                        action = Some(PaneAction::ClosePane);
+                        let btn_size = egui::vec2(70.0, 28.0);
+                        let btn_pos  = egui::pos2(rect.center().x - btn_size.x / 2.0, rect.center().y + 10.0);
+                        let btn_rect = egui::Rect::from_min_size(btn_pos, btn_size);
+                        let btn_resp = ui.allocate_rect(btn_rect, egui::Sense::click());
+                        let btn_bg = if btn_resp.hovered() { theme.bg_elevated } else { theme.bg_secondary };
+                        painter.rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, theme.border));
+                        let cancel_galley = ui.fonts(|f| f.layout_no_wrap(
+                            language.t("cancel").to_string(),
+                            egui::FontId::proportional(12.0),
+                            theme.red,
+                        ));
+                        painter.galley(
+                            egui::pos2(
+                                btn_rect.center().x - cancel_galley.rect.width() / 2.0,
+                                btn_rect.center().y - cancel_galley.rect.height() / 2.0,
+                            ),
+                            cancel_galley,
+                            egui::Color32::TRANSPARENT,
+                        );
+                        if btn_resp.clicked() {
+                            action = Some(PaneAction::ClosePane);
+                        }
                     }
                 }
                 SshConnectionState::Error(ref err) => {
@@ -1388,6 +1400,28 @@ pub fn render_terminal_session(
         }
 
     } // end grid.lock()
+
+    // ── 2FA prompt window ─────────────────────────────────────────────────────
+    // Rendered outside the grid lock so egui can create real interactive
+    // widgets (the search bar below follows the same pattern). Only while
+    // the session is still authenticating.
+    if let Some(prompt) = pending_2fa {
+        if let SessionKind::Ssh(ssh, _, _) = &session.kind {
+            if matches!(ssh.connection_state(), SshConnectionState::Authenticating) {
+                let ui_action = crate::ui::terminal::auth_prompt_ui::render_auth_prompt_window(
+                    ctx,
+                    pane_id,
+                    &ssh.auth_prompt,
+                    &prompt,
+                    theme,
+                    language,
+                );
+                if ui_action == crate::ui::terminal::auth_prompt_ui::AuthPromptUiAction::Cancelled {
+                    action = Some(PaneAction::ClosePane);
+                }
+            }
+        }
+    }
 
     // ── Search bar overlay ────────────────────────────────────────────────────
     if session.search_state.is_some() {

@@ -22,6 +22,7 @@ use super::port_forward::{
     PortForwardConfig, PortForward, ForwardKind, ForwardState,
     start_local_forward, AppNotification,
 };
+use super::auth::connect_and_authenticate;
 
 /// Commands sent from the synchronous GUI thread to the async SSH task
 enum SshCommand {
@@ -48,16 +49,20 @@ pub enum SshConnectionState {
 pub struct SshClient {
     host: String,
     port: u16,
+    /// Host-key treatment: `Learn` = verify + auto-learn (production);
+    /// `AcceptAll` = skip known_hosts entirely (tests only).
+    host_key_policy: super::auth::HostKeyPolicy,
     /// Remote forward configs: maps (remote_host, remote_port) -> (local_host, local_port)
     /// Used by server_channel_open_forwarded_tcpip callback
     remote_forwards: Arc<Mutex<Vec<PortForwardConfig>>>,
 }
 
 impl SshClient {
-    pub fn new(host: &str, port: u16) -> Self {
+    pub fn with_policy(host: &str, port: u16, policy: super::auth::HostKeyPolicy) -> Self {
         Self {
             host: host.to_string(),
             port,
+            host_key_policy: policy,
             remote_forwards: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -70,6 +75,11 @@ impl russh::client::Handler for SshClient {
         &mut self,
         server_public_key: &russh::keys::ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
+        // Tests connect to ephemeral-key mock servers; never touch the
+        // user's real known_hosts from there.
+        if self.host_key_policy == super::auth::HostKeyPolicy::AcceptAll {
+            return Ok(true);
+        }
         match russh::keys::check_known_hosts(&self.host, self.port, server_public_key) {
             Ok(true) => {
                 // Host key matches known_hosts
@@ -141,89 +151,15 @@ impl russh::client::Handler for SshClient {
     }
 }
 
-/// Connect and authenticate an SSH session, returning the handle.
-/// Shared by SshSession, test_connection, and SFTP.
-pub async fn connect_and_authenticate(
-    host: &str,
-    port: u16,
-    username: &str,
-    auth: &ResolvedAuth,
-    _keepalive_interval: u32,
-    _agent_forwarding: bool,
-) -> Result<russh::client::Handle<SshClient>, String> {
-    let config = russh::client::Config {
-        keepalive_interval: Some(std::time::Duration::from_secs(15)),
-        keepalive_max: 30,
-        ..Default::default()
-    };
-    let config = Arc::new(config);
-    let addr = format!("{}:{}", host, port);
-
-    let remote_forwards = Arc::new(Mutex::new(Vec::new()));
-    let client = SshClient {
-        host: host.to_string(),
-        port,
-        remote_forwards,
-    };
-
-    let mut handle = russh::client::connect(config, &addr, client)
-        .await
-        .map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("KeyChanged") || msg.contains("key changed") {
-                format!("Host key verification failed: server key has changed for {}:{}.\nThis could indicate a MITM attack.\nRemove the old key from ~/.ssh/known_hosts to connect.", host, port)
-            } else {
-                format!("Connect failed: {}", e)
-            }
-        })?;
-
-    let auth_ok = match auth {
-        ResolvedAuth::Password { password } => {
-            handle
-                .authenticate_password(username, password)
-                .await
-                .map(|r| r.success())
-                .map_err(|e| format!("Auth error: {}", e))?
-        }
-        ResolvedAuth::Key { key_content, passphrase } => {
-            let pw = passphrase.as_deref();
-
-            let key_pair = if !key_content.is_empty() {
-                russh::keys::decode_secret_key(key_content, pw)
-                    .map_err(|e| format!("Key decode failed: {}", e))?
-            } else {
-                return Err("No key content available for authentication".to_string());
-            };
-
-            let rsa_hash = handle
-                .best_supported_rsa_hash()
-                .await
-                .ok()
-                .flatten()
-                .flatten();
-            let key_with_hash =
-                russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key_pair), rsa_hash);
-
-            handle
-                .authenticate_publickey(username, key_with_hash)
-                .await
-                .map(|r| r.success())
-                .map_err(|e| format!("Auth error: {}", e))?
-        }
-        ResolvedAuth::None => return Err("No authentication configured".to_string()),
-    };
-
-    if auth_ok {
-        Ok(handle)
-    } else {
-        Err("Authentication failed".to_string())
-    }
-}
-
 /// Connect to a target host via a jump host using direct-tcpip forwarding.
 /// 1. Connects and authenticates to the jump host
 /// 2. Opens a direct-tcpip channel to the target
 /// 3. Runs a second SSH handshake through the forwarded channel
+///
+/// `host_key_policy` is `Learn` in production; tests pass `AcceptAll`
+/// against ephemeral-key mocks. Both hops share `bridge` — either leg may
+/// need keyboard-interactive 2FA.
+#[allow(clippy::too_many_arguments)] // jump + target + auth + bridge + policy
 pub async fn connect_via_jump(
     jump: &JumpHostInfo,
     target_host: &str,
@@ -232,11 +168,21 @@ pub async fn connect_via_jump(
     target_auth: &ResolvedAuth,
     keepalive_interval: u32,
     _agent_forwarding: bool,
+    bridge: &super::auth_prompt::AuthPromptBridge,
+    host_key_policy: super::auth::HostKeyPolicy,
 ) -> Result<russh::client::Handle<SshClient>, String> {
-    let jump_handle = connect_and_authenticate(
-        &jump.host, jump.port, &jump.username, &jump.auth,
-        keepalive_interval, false,
-    ).await.map_err(|e| format!("Jump host connection failed: {}", e))?;
+    let mut jump_handle = super::auth::open_ssh_connection(
+        &jump.host,
+        jump.port,
+        host_key_policy,
+        Some((std::time::Duration::from_secs(15), 30)),
+    )
+    .await
+    .map_err(|e| format!("Jump host connection failed: {}", e))?;
+
+    super::auth::authenticate(&mut jump_handle, &jump.username, &jump.auth, bridge)
+        .await
+        .map_err(|e| format!("Jump host connection failed: {}", e))?;
 
     let tunnel_channel = jump_handle
         .channel_open_direct_tcpip(target_host, target_port as u32, "127.0.0.1", 0)
@@ -253,47 +199,16 @@ pub async fn connect_via_jump(
     let config = Arc::new(config);
 
     let mut handle = russh::client::connect_stream(
-        config, stream, SshClient::new(target_host, target_port),
+        config, stream, SshClient::with_policy(
+            target_host, target_port, host_key_policy,
+        ),
     ).await.map_err(|e| format!("SSH handshake through jump host failed: {}", e))?;
 
-    let auth_ok = match target_auth {
-        ResolvedAuth::Password { password } => {
-            handle
-                .authenticate_password(target_username, password)
-                .await
-                .map(|r| r.success())
-                .map_err(|e| format!("Target auth error: {}", e))?
-        }
-        ResolvedAuth::Key { key_content, passphrase } => {
-            let pw = passphrase.as_deref();
-            let key_pair = if !key_content.is_empty() {
-                russh::keys::decode_secret_key(key_content, pw)
-                    .map_err(|e| format!("Target key decode failed: {}", e))?
-            } else {
-                return Err("No key content available for target authentication".to_string());
-            };
-            let rsa_hash = handle
-                .best_supported_rsa_hash()
-                .await
-                .ok()
-                .flatten()
-                .flatten();
-            let key_with_hash =
-                russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key_pair), rsa_hash);
-            handle
-                .authenticate_publickey(target_username, key_with_hash)
-                .await
-                .map(|r| r.success())
-                .map_err(|e| format!("Target auth error: {}", e))?
-        }
-        ResolvedAuth::None => return Err("No authentication configured for target".to_string()),
-    };
+    super::auth::authenticate(&mut handle, target_username, target_auth, bridge)
+        .await
+        .map_err(|e| format!("Target authentication failed: {}", e))?;
 
-    if auth_ok {
-        Ok(handle)
-    } else {
-        Err("Target authentication failed".to_string())
-    }
+    Ok(handle)
 }
 
 /// Execute a one-off command over an open SSH handle and return stdout.
@@ -339,6 +254,8 @@ pub struct SshSession {
     /// Gate for remote metrics polling — true only while the Metrics tab
     /// of the tools drawer is visible (synced by the UI every frame).
     metrics_enabled: Arc<AtomicBool>,
+    /// Keyboard-interactive (2FA) prompt mailbox shared with the UI.
+    pub auth_prompt: Arc<super::auth_prompt::AuthPromptBridge>,
 }
 
 impl SshSession {
@@ -411,6 +328,8 @@ impl SshSession {
         let notifications_clone = Arc::clone(&notifications);
         let metrics_clone = Arc::clone(&metrics);
         let metrics_enabled_clone = Arc::clone(&metrics_enabled);
+        let auth_prompt = Arc::new(super::auth_prompt::AuthPromptBridge::new());
+        let auth_prompt_clone = Arc::clone(&auth_prompt);
 
         runtime.spawn(async move {
             Self::ssh_task(
@@ -418,7 +337,7 @@ impl SshSession {
                 state_clone, alive_clone, shell_hint_clone, startup_commands,
                 keepalive_interval, agent_forwarding, port_forward_configs,
                 port_forwards_clone, notifications_clone, metrics_clone,
-                metrics_enabled_clone, jump_host,
+                metrics_enabled_clone, auth_prompt_clone, jump_host,
             )
             .await;
         });
@@ -432,6 +351,7 @@ impl SshSession {
             notifications,
             metrics,
             metrics_enabled,
+            auth_prompt,
         }
     }
 
@@ -456,6 +376,7 @@ impl SshSession {
         notifications: Arc<Mutex<Vec<AppNotification>>>,
         metrics: Arc<Mutex<MetricsSnapshot>>,
         metrics_enabled: Arc<AtomicBool>,
+        auth_bridge: Arc<super::auth_prompt::AuthPromptBridge>,
         jump_host: Option<JumpHostInfo>,
     ) {
         let set_state = |s: SshConnectionState| {
@@ -477,7 +398,8 @@ impl SshSession {
         let handle = if let Some(ref jump) = jump_host {
             match connect_via_jump(
                 jump, &host, port, &username, &auth,
-                keepalive_interval, agent_forwarding,
+                keepalive_interval, agent_forwarding, &auth_bridge,
+                super::auth::HostKeyPolicy::Learn,
             ).await {
                 Ok(h) => h,
                 Err(e) => {
@@ -489,6 +411,7 @@ impl SshSession {
         } else {
             match connect_and_authenticate(
                 &host, port, &username, &auth, keepalive_interval, agent_forwarding,
+                &auth_bridge,
             ).await {
                 Ok(h) => h,
                 Err(e) => {
@@ -865,6 +788,9 @@ impl SshSession {
 
 impl Drop for SshSession {
     fn drop(&mut self) {
+        // Wake a task parked on a 2FA prompt before tearing down the
+        // transport — auth-stage tasks don't read the Disconnect command.
+        self.auth_prompt.cancel();
         self.disconnect();
     }
 }
@@ -879,7 +805,12 @@ pub async fn test_connection(
     keepalive_interval: u32,
     agent_forwarding: bool,
 ) -> Result<String, String> {
-    let _handle = connect_and_authenticate(&host, port, &username, &auth, keepalive_interval, agent_forwarding).await?;
+    // The test dialog has no UI for OTP entry: refuse prompts so 2FA
+    // hosts report an actionable error instead of hanging.
+    let _handle = connect_and_authenticate(
+        &host, port, &username, &auth, keepalive_interval, agent_forwarding,
+        &super::auth_prompt::AuthPromptBridge::decline(),
+    ).await?;
     Ok("Connection successful! Authentication passed.".to_string())
 }
 

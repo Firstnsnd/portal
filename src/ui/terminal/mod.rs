@@ -23,6 +23,7 @@
 
 pub mod render;
 pub mod selection;
+pub mod auth_prompt_ui;
 
 // Re-export commonly used functions
 pub use render::render_pane_tree;

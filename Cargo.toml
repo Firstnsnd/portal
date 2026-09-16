@@ -123,6 +123,11 @@ tokio-test = "0.4"
 # Mock SSH server for testing
 russh = { version = "0.57", features = ["default"] }
 
+# Ephemeral host-key generation for the mock SSH server.
+# 0.8, not 0.9: russh's forked ssh-key takes rand_core 0.6's CryptoRngCore,
+# which rand 0.8's OsRng implements (rand 0.9 is on rand_core 0.9).
+rand = "0.8"
+
 # Environment control for tests
 temp-env = "0.3"
 

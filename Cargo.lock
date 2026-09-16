@@ -4300,6 +4300,7 @@ dependencies = [
  "log",
  "objc",
  "pretty_assertions",
+ "rand 0.8.5",
  "rfd",
  "russh",
  "russh-sftp",

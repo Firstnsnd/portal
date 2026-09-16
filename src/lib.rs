@@ -32,6 +32,10 @@
 //! - **pty**: Unix PTY support
 //! - **keyring**: System keychain credential storage
 
+// Suppress warnings from objc crate macros (same as src/main.rs).
+#![allow(unexpected_cfgs)]
+
 pub mod terminal;
 pub mod config;
 pub mod ssh;
+pub mod sftp;
