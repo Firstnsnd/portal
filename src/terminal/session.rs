@@ -109,83 +109,129 @@ impl RealPtySession {
                 let mut parser = Parser::new();
                 let mut attrs = CellAttrs::default();
 
+                // ── INVARIANT ────────────────────────────────────────────
+                // `alive` is set false ONLY via `liveness_check`, and ONLY
+                // after `is_alive()` (waitpid WNOHANG) confirmed the child is
+                // gone. `is_connected()` reads `alive` directly, so a false
+                // "disconnected" report is impossible while the child runs. Do
+                // not add any other path that sets `alive=false`.
+                let liveness_check = || -> bool {
+                    let is_alive = {
+                        let pty_ref = pty_clone.lock().unwrap();
+                        pty_ref.is_alive()
+                    };
+                    if !is_alive {
+                        alive_clone.store(false, Ordering::Relaxed);
+                        false
+                    } else {
+                        true
+                    }
+                };
+
+                // Block on the master fd with poll() instead of a 10ms
+                // sleep-loop: idle terminals now consume ~0 CPU. The fd is
+                // non-blocking, so once poll reports readability we drain with
+                // try_read() and re-poll when it would-block.
                 while alive_clone.load(Ordering::Relaxed) {
-                    let data = {
-                        let mut pty_ref = pty_clone.lock().unwrap();
-                        pty_ref.try_read()
+                    // Snapshot the fd out of the lock so poll() never holds the
+                    // pty mutex — resize()/write() from the UI thread must stay
+                    // unblocked while we wait for output.
+                    let master_fd = {
+                        let pty_ref = pty_clone.lock().unwrap();
+                        pty_ref.master.as_raw_fd()
                     };
 
-                    match data {
-                        Ok(data) => {
-                            if data.is_empty() {
-                                // No data: either idle, or the shell exited
-                                // (EOF → Ok(0)). Distinguish via waitpid.
-                                let is_alive = {
-                                    let pty_ref = pty_clone.lock().unwrap();
-                                    pty_ref.is_alive()
-                                };
-                                if !is_alive {
-                                    // ── INVARIANT ────────────────────────────────
-                                    // `alive` is set false ONLY here (and in the Err
-                                    // branch below), and ONLY after `is_alive()`
-                                    // (waitpid WNOHANG) confirmed the child is gone.
-                                    // `is_connected()` reads `alive` directly, so a
-                                    // false "disconnected" report is impossible while
-                                    // the child runs. Do not add any other path that
-                                    // sets `alive=false`.
-                                    alive_clone.store(false, Ordering::Relaxed);
-                                    break;
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(10));
-                                continue;
-                            }
+                    let mut pfd = libc::pollfd {
+                        fd: master_fd,
+                        events: libc::POLLIN,
+                        revents: 0,
+                    };
+                    // 250ms timeout: a normal exit makes the master readable
+                    // (EOF) so poll returns immediately; the timeout is only a
+                    // fallback to run the periodic waitpid liveness check when
+                    // a grandchild keeps the slave open after the shell exits.
+                    let ready = unsafe { libc::poll(&mut pfd, 1, 250) };
 
-                            // Apply the whole read chunk under ONE grid lock so
-                            // the renderer can't interleave mid-batch and paint a
-                            // half-drawn frame. Full-screen apps wrap each render
-                            // in \e[?2026h…?2026l (synchronized output) and rely
-                            // on exactly this: the grid only ever becomes visible
-                            // at a coherent batch boundary, never in-between.
-                            {
-                                let mut grid = grid_clone.lock().unwrap();
-                                let mut handler = VteHandler {
-                                    grid: &mut grid,
-                                    attrs: &mut attrs,
-                                };
-                                for byte in &data {
-                                    parser.advance(&mut handler, *byte);
-                                }
-                                // Every write path (write_char, scroll_up/down,
-                                // insert/delete lines) and resize()/reflow keep
-                                // rows exactly `cols`-wide, so no per-chunk
-                                // normalization scan is needed here.
-                            }
-                            // Wake the UI so the new output is painted promptly
-                            // (the app no longer repaints unconditionally).
-                            crate::repaint::notify_repaint();
-                        }
-                        Err(_) => {
-                            // A non-transient read error (EIO on macOS when
-                            // the slave closes, broken master, etc.). Do NOT
-                            // blindly declare the session dead — the shell may
-                            // still be alive (e.g. a brief EIO during resize).
-                            // Confirm via waitpid: only exit if the child
-                            // actually terminated.
-                            let is_alive = {
-                                let pty_ref = pty_clone.lock().unwrap();
-                                pty_ref.is_alive()
-                            };
-                            if !is_alive {
-                                // Same INVARIANT as above: only flip `alive`
-                                // after waitpid confirms the child is gone.
-                                alive_clone.store(false, Ordering::Relaxed);
-                                break;
-                            }
-                            // Child still alive but read failed — transient.
-                            // Back off and retry instead of killing the PTY.
-                            std::thread::sleep(std::time::Duration::from_millis(10));
+                    if ready < 0 {
+                        if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                            // Interrupted by a signal (e.g. SIGCHLD when the
+                            // shell forks). Retry immediately.
                             continue;
                         }
+                        // Unexpected poll error (EBADF/ENOMEM/…). Back off
+                        // rather than busy-spin, after a liveness check.
+                        if !liveness_check() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+
+                    if ready == 0 {
+                        // Timeout with no data: run the periodic liveness check
+                        // so a shell that exits without closing the master is
+                        // still detected promptly.
+                        if !liveness_check() {
+                            break;
+                        }
+                        continue;
+                    }
+
+                    // ready > 0: drain all currently-buffered output. Each chunk
+                    // is applied under ONE grid lock so the renderer can't
+                    // interleave mid-batch and paint a half-drawn frame
+                    // (full-screen apps wrap renders in \e[?2026h…?2026l and
+                    // rely on exactly this boundary coherence).
+                    let dead = loop {
+                        let data = {
+                            let mut pty_ref = pty_clone.lock().unwrap();
+                            pty_ref.try_read()
+                        };
+                        match data {
+                            Ok(data) if !data.is_empty() => {
+                                {
+                                    let mut grid = grid_clone.lock().unwrap();
+                                    let mut handler = VteHandler {
+                                        grid: &mut grid,
+                                        attrs: &mut attrs,
+                                    };
+                                    for byte in &data {
+                                        parser.advance(&mut handler, *byte);
+                                    }
+                                    // Every write path and resize()/reflow keep
+                                    // rows exactly `cols`-wide, so no per-chunk
+                                    // normalization scan is needed here.
+                                }
+                                // Wake the UI so the new output is painted
+                                // promptly (the app no longer repaints
+                                // unconditionally).
+                                crate::repaint::notify_repaint();
+                            }
+                            Ok(_) => {
+                                // Empty read: either drained everything
+                                // (would-block) or EOF (child closed the slave).
+                                // Distinguish via waitpid.
+                                break !liveness_check();
+                            }
+                            Err(_) => {
+                                // Non-transient read error (EIO on macOS when
+                                // the slave closes, broken master, etc.). Do NOT
+                                // blindly declare the session dead — confirm via
+                                // waitpid that the child actually terminated.
+                                break !liveness_check();
+                            }
+                        }
+                    };
+                    if dead {
+                        break;
+                    }
+
+                    // A hangup/error that poll reported but that didn't surface
+                    // as an EOF read (e.g. POLLHUP with no pending data).
+                    if pfd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0
+                        && !liveness_check()
+                    {
+                        break;
                     }
                 }
             })
