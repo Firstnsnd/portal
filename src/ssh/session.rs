@@ -383,6 +383,9 @@ impl SshSession {
             if let Ok(mut st) = state.lock() {
                 *st = s;
             }
+            // Connection state changes (Connecting → Connected → Disconnected)
+            // happen off the UI thread; wake it so the status/banner updates.
+            crate::repaint::notify_repaint();
         };
 
         // 1. Connect + Authenticate using shared helper
@@ -541,6 +544,9 @@ impl SshSession {
                     if let Ok(mut snap) = metrics_arc.lock() {
                         crate::terminal::metrics::parse_remote(&out, &mut snap);
                     }
+                    // Metrics snapshots change independently of terminal
+                    // output; wake the UI so the drawer keeps animating.
+                    crate::repaint::notify_repaint();
                 }
             }
         });
@@ -574,6 +580,7 @@ impl SshSession {
                                     parser.advance(&mut handler, *byte);
                                 }
                             }
+                            crate::repaint::notify_repaint();
                         }
                         Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
                             if let Ok(mut g) = grid.lock() {
@@ -585,6 +592,7 @@ impl SshSession {
                                     parser.advance(&mut handler, *byte);
                                 }
                             }
+                            crate::repaint::notify_repaint();
                         }
                         Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => {
                             set_state(SshConnectionState::Disconnected("Session ended".into()));

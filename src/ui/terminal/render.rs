@@ -34,6 +34,54 @@ fn measure_char_width(fonts: &egui::text::Fonts, font_id: &egui::FontId) -> f32 
     galley.size().x / 2.0
 }
 
+/// Extract the currently selected text (unified scrollback + grid), if any.
+///
+/// Computed only on demand (copy) rather than every frame: a Select-All over a
+/// large scrollback is O(scrollback × cols) and used to run per-frame.
+fn selected_text_of(session: &TerminalSession) -> Option<String> {
+    if !session.selection.has_selection() {
+        return None;
+    }
+    let grid = session.grid.lock().ok()?;
+    let scrollback_len = grid.scrollback_len();
+    let ((sr, sc), (er, ec)) = session.selection.ordered();
+    let mut text = String::new();
+
+    for row in sr..=er {
+        let cells = if row < scrollback_len {
+            match grid.get_scrollback_row(row) {
+                Some(c) => c,
+                None => break,
+            }
+        } else {
+            let grid_row = row.saturating_sub(scrollback_len);
+            if grid_row >= grid.rows { break; }
+            &grid.cells[grid_row]
+        };
+
+        let col_start = if row == sr { sc } else { 0 };
+        // Clamp to the row's actual length: a scrollback row may have scrolled
+        // off at a narrower width than the current grid.cols, and indexing it
+        // by grid.cols goes out of bounds.
+        let col_end = (if row == er { ec + 1 } else { grid.cols })
+            .min(grid.cols)
+            .min(cells.len());
+
+        for cell in &cells[col_start..col_end] {
+            if !cell.wide_continuation {
+                text.push(cell.c);
+            }
+        }
+
+        if row != er {
+            let trimmed = text.trim_end().len();
+            text.truncate(trimmed);
+            text.push('\n');
+        }
+    }
+    Some(text.trim_end().to_owned())
+}
+
 /// Core terminal session rendering function.
 ///
 /// This is the main rendering function that handles all terminal UI including:
@@ -120,6 +168,13 @@ pub fn render_terminal_session(
     let total_rows = ((available_height / line_height) as usize).max(4);
     let new_rows = total_rows;
     session.resize(new_cols, new_rows);
+
+    // The app no longer repaints unconditionally; when a resize is debounced
+    // (pending_pty_size), schedule one follow-up frame just past the settle
+    // window so the grid+PTY jump together without a drag to keep driving it.
+    if session.pending_pty_size.is_some() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(160));
+    }
 
     // Make rect fill the full available height (pane adjacent to status bar)
     let rect = egui::Rect::from_min_size(
@@ -289,48 +344,9 @@ pub fn render_terminal_session(
         }
     }
 
-    // Extract selected text for copy operations
-    let selected_text: Option<String> = if session.selection.has_selection() {
-        if let Ok(grid) = session.grid.lock() {
-            let scrollback_len = grid.scrollback_len();
-            let ((sr, sc), (er, ec)) = session.selection.ordered();
-            let mut text = String::new();
-
-            for row in sr..=er {
-                let cells = if row < scrollback_len {
-                    match grid.get_scrollback_row(row) {
-                        Some(c) => c,
-                        None => break,
-                    }
-                } else {
-                    let grid_row = row.saturating_sub(scrollback_len);
-                    if grid_row >= grid.rows { break; }
-                    &grid.cells[grid_row]
-                };
-
-                let col_start = if row == sr { sc } else { 0 };
-                // Clamp to the row's actual length: a scrollback row may have
-                // scrolled off at a narrower width than the current grid.cols,
-                // and indexing it by grid.cols goes out of bounds.
-                let col_end = (if row == er { ec + 1 } else { grid.cols })
-                    .min(grid.cols)
-                    .min(cells.len());
-
-                for cell in &cells[col_start..col_end] {
-                    if !cell.wide_continuation {
-                        text.push(cell.c);
-                    }
-                }
-
-                if row != er {
-                    let trimmed = text.trim_end().len();
-                    text.truncate(trimmed);
-                    text.push('\n');
-                }
-            }
-            Some(text.trim_end().to_owned())
-        } else { None }
-    } else { None };
+    // Selected text is computed lazily on copy (see `selected_text_of`) —
+    // a Select-All over a large scrollback is O(scrollback × cols) and must
+    // not run every frame. The Copy button only needs `has_selection()`.
 
     // Right-click context menu
     let mut ctx_copy = false;
@@ -340,7 +356,7 @@ pub fn render_terminal_session(
     let mut ctx_split_v = false;
     let mut ctx_close = false;
     response.context_menu(|ui| {
-        if ui.add_enabled(selected_text.is_some(), egui::Button::new("Copy")).clicked() {
+        if ui.add_enabled(session.selection.has_selection(), egui::Button::new("Copy")).clicked() {
             ctx_copy = true;
             ui.close_menu();
         }
@@ -369,9 +385,9 @@ pub fn render_terminal_session(
     });
 
     if ctx_copy {
-        if let Some(ref text) = selected_text {
+        if let Some(text) = selected_text_of(session) {
             if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                let _ = clipboard.set_text(text.clone());
+                let _ = clipboard.set_text(text);
             }
             session.selection.clear();
         }
@@ -567,9 +583,9 @@ pub fn render_terminal_session(
                             } else if shortcut_resolver.matches(ShortcutAction::ToggleBroadcast, ctx) {
                                 action = Some(PaneAction::ToggleBroadcast);
                             } else if shortcut_resolver.matches(ShortcutAction::Copy, ctx) {
-                                if let Some(ref text) = selected_text {
+                                if let Some(text) = selected_text_of(session) {
                                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                        let _ = clipboard.set_text(text.clone());
+                                        let _ = clipboard.set_text(text);
                                     }
                                     session.selection.clear();
                                 } else {
@@ -670,9 +686,9 @@ pub fn render_terminal_session(
                         }
                     }
                     egui::Event::Copy => {
-                        if let Some(ref text) = selected_text {
+                        if let Some(text) = selected_text_of(session) {
                             if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                let _ = clipboard.set_text(text.clone());
+                                let _ = clipboard.set_text(text);
                             }
                             session.selection.clear();
                         } else {
@@ -1103,6 +1119,7 @@ pub fn render_terminal_session(
 
         // ── URL detection & hover highlight ──────────────────────────────────
         let mut hovered_url: Option<String> = None;
+        let mut hovered_url_span: Option<(usize, usize)> = None;
         if is_hovering {
             if let Some(pointer) = pointer_pos {
                 if rect.contains(pointer) {
@@ -1121,6 +1138,7 @@ pub fn render_terminal_session(
                         for (start_col, end_col, url) in &urls {
                             if p_col >= *start_col && p_col < *end_col {
                                 hovered_url = Some(url.clone());
+                                hovered_url_span = Some((*start_col, *end_col));
                                 break;
                             }
                         }
@@ -1129,33 +1147,18 @@ pub fn render_terminal_session(
             }
         }
 
-        // Draw URL underlines and handle cursor
+        // Draw URL underline and set the pointing-hand cursor. The span was
+        // already resolved above, so we avoid re-scanning the row for URLs.
         if let Some(ref _url) = hovered_url {
-            let pointer = pointer_pos.unwrap();
-            let p_row = ((pointer.y - rect.min.y) / line_height) as usize;
-            let p_col = ((pointer.x - rect.min.x) / char_width) as usize;
-            let cells: Option<&Vec<terminal::TerminalCell>> =
-                if offset > 0 && p_row < offset {
-                    let sb_idx = scrollback_len.saturating_sub(offset) + p_row;
-                    grid.get_scrollback_row(sb_idx)
-                } else {
-                    let gr = p_row.saturating_sub(offset);
-                    if gr < grid.rows { Some(&grid.cells[gr]) } else { None }
-                };
-            if let Some(cells) = cells {
-                let urls = terminal::url::scan_row_for_urls(cells, grid.cols);
-                for (start_col, end_col, _) in &urls {
-                    if p_col >= *start_col && p_col < *end_col {
-                        let x0 = rect.min.x + *start_col as f32 * char_width;
-                        let x1 = rect.min.x + *end_col as f32 * char_width;
-                        let y = rect.min.y + p_row as f32 * line_height + line_height - 2.0;
-                        painter.line_segment(
-                            [egui::pos2(x0, y), egui::pos2(x1, y)],
-                            egui::Stroke::new(1.5, theme.accent),
-                        );
-                        break;
-                    }
-                }
+            if let (Some(pointer), Some((start_col, end_col))) = (pointer_pos, hovered_url_span) {
+                let p_row = ((pointer.y - rect.min.y) / line_height) as usize;
+                let x0 = rect.min.x + start_col as f32 * char_width;
+                let x1 = rect.min.x + end_col as f32 * char_width;
+                let y = rect.min.y + p_row as f32 * line_height + line_height - 2.0;
+                painter.line_segment(
+                    [egui::pos2(x0, y), egui::pos2(x1, y)],
+                    egui::Stroke::new(1.5, theme.accent),
+                );
             }
             ctx.output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
         }

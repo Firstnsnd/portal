@@ -89,6 +89,14 @@ impl PortalApp {
         let fonts = fonts::load_fonts(&custom_font_path);
         cc.egui_ctx.set_fonts(fonts);
 
+        // Install the process-wide repaint notifier so reader threads (PTY/SSH)
+        // can wake the UI when terminal output arrives — the app no longer
+        // repaints unconditionally at 60 FPS.
+        let repaint_ctx = cc.egui_ctx.clone();
+        crate::repaint::set_global_repaint_notifier(std::sync::Arc::new(move || {
+            repaint_ctx.request_repaint();
+        }));
+
         // Visuals will be applied on the first frame via visuals_dirty flag,
         // because eframe may override visuals set during new().
 

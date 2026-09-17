@@ -5,6 +5,7 @@
 
 mod app;
 mod config;
+mod repaint;
 mod sftp;
 mod ssh;
 mod terminal;
@@ -19,8 +20,6 @@ use ui::*;
 
 impl eframe::App for PortalApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint_after(Duration::from_millis(16));
-
         // Update main window title based on current view and active tab
         if let Some(window) = self.windows.first() {
             let title = match window.current_view {
@@ -135,7 +134,6 @@ impl eframe::App for PortalApp {
                     AppView::Snippets => "Snippets".to_string(),
                 };
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
-                ctx.request_repaint_after(Duration::from_millis(16));
 
                 if ctx.input(|i| i.viewport().close_requested()) {
                     self.windows[i].close_requested = true;
@@ -229,11 +227,15 @@ impl eframe::App for PortalApp {
         }
 
         // ── Poll SFTP browsers (per-window) ──────────────────────────────────────────────
+        let mut sftp_active = false;
         for window_idx in 0..self.windows.len() {
             let window = &mut self.windows[window_idx];
 
             // Poll right panel SFTP browser
             if let Some(ref mut browser) = window.sftp_browser {
+                if browser.transfer.is_some() {
+                    sftp_active = true;
+                }
                 let had_transfer = browser.transfer.is_some();
                 let was_download = browser.transfer.as_ref().is_some_and(|t| !t.is_upload);
                 browser.poll();
@@ -272,6 +274,9 @@ impl eframe::App for PortalApp {
 
             // Poll left panel SFTP browser
             if let Some(ref mut browser) = window.sftp_browser_left {
+                if browser.transfer.is_some() {
+                    sftp_active = true;
+                }
                 let had_transfer = browser.transfer.is_some();
                 let was_download = browser.transfer.as_ref().is_some_and(|t| !t.is_upload);
                 browser.poll();
@@ -309,6 +314,11 @@ impl eframe::App for PortalApp {
             }
         }
 
+        // Keep the SFTP transfer progress bar animating while a transfer is
+        // active, since the app no longer repaints unconditionally.
+        if sftp_active {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
     }
 }
 

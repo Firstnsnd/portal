@@ -155,12 +155,14 @@ impl RealPtySession {
                                 for byte in &data {
                                     parser.advance(&mut handler, *byte);
                                 }
-                                // Guarantee every row is cols-wide. If any row was
-                                // built at an older/narrower width it would crash
-                                // the renderer (indexing by cols) and show as
-                                // overlapping/truncated history when scrolling.
-                                grid.normalize_row_widths();
+                                // Every write path (write_char, scroll_up/down,
+                                // insert/delete lines) and resize()/reflow keep
+                                // rows exactly `cols`-wide, so no per-chunk
+                                // normalization scan is needed here.
                             }
+                            // Wake the UI so the new output is painted promptly
+                            // (the app no longer repaints unconditionally).
+                            crate::repaint::notify_repaint();
                         }
                         Err(_) => {
                             // A non-transient read error (EIO on macOS when
@@ -226,6 +228,9 @@ impl RealPtySession {
                         net_tx_bytes_per_sec: net_tx_rate,
                     };
                     metrics_clone.lock().unwrap().push(m);
+                    // Metrics snapshots change independently of terminal output;
+                    // wake the UI so the drawer's sparklines keep animating.
+                    crate::repaint::notify_repaint();
                 }
             })
             .ok(); // fire-and-forget; thread outlives the loop, cleaned on drop

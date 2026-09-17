@@ -73,6 +73,9 @@ pub struct TerminalGrid {
     pub line_wrapped: Vec<bool>,
     /// Per-scrollback-row wrapped flag
     pub scrollback_wrapped: VecDeque<bool>,
+    /// Recycled blank rows (from trimmed scrollback / removed rows) to avoid a
+    /// heap allocation on every scrolled line.
+    blank_row_pool: Vec<Vec<TerminalCell>>,
     /// Current working directory (updated via OSC 7 sequence)
     pub cwd: Option<String>,
     /// Row index of the last known prompt (for protecting reflowed content)
@@ -116,6 +119,7 @@ impl TerminalGrid {
             current_scrollback_bytes: 0,
             line_wrapped: vec![false; rows],
             scrollback_wrapped: VecDeque::new(),
+            blank_row_pool: Vec::new(),
             cwd,
             last_prompt_row: None,
         }
@@ -146,7 +150,13 @@ impl TerminalGrid {
     /// is padded; longer rows are truncated. Guards the renderer / clear_* /
     /// erase_* paths against indexing a narrow row by grid.cols — the
     /// "len is N but index is N" crash seen when a resized grid kept stale
-    /// rows. Call after every read chunk and after any resize.
+    /// rows.
+    ///
+    /// The invariant is now maintained by every write path and by
+    /// `resize()`/reflow, so the per-chunk call was removed (it was an
+    /// O(scrollback) scan per read chunk). Kept as a defensive helper and for
+    /// the regression test that documents the invariant.
+    #[allow(dead_code)]
     pub fn normalize_row_widths(&mut self) {
         for row in self.cells.iter_mut() {
             row.resize(self.cols, TerminalCell::default());
@@ -378,14 +388,37 @@ impl TerminalGrid {
         }
     }
 
+    /// Take a blank row of `cols` width, reusing a pooled allocation if possible.
+    fn take_blank_row(&mut self) -> Vec<TerminalCell> {
+        match self.blank_row_pool.pop() {
+            Some(mut row) => {
+                row.clear();
+                row.resize(self.cols, TerminalCell::default());
+                row
+            }
+            None => vec![TerminalCell::default(); self.cols],
+        }
+    }
+
+    /// Return a row's allocation to the pool (contents discarded). Capped so a
+    /// huge trimmed scrollback can't pin unbounded memory.
+    fn recycle_row(&mut self, mut row: Vec<TerminalCell>) {
+        row.clear();
+        if self.blank_row_pool.len() < self.rows + 4 {
+            self.blank_row_pool.push(row);
+        }
+    }
+
     /// Remove a row at one index and insert a blank row at another.
     fn remove_and_insert_row(&mut self, remove_idx: usize, insert_idx: usize) {
         if remove_idx < self.cells.len() {
-            self.cells.remove(remove_idx);
+            let removed = self.cells.remove(remove_idx);
             self.line_wrapped.remove(remove_idx);
+            self.recycle_row(removed);
         }
         if insert_idx <= self.cells.len() {
-            self.cells.insert(insert_idx, vec![TerminalCell::default(); self.cols]);
+            let blank = self.take_blank_row();
+            self.cells.insert(insert_idx, blank);
             self.line_wrapped.insert(insert_idx, false);
         }
     }
@@ -409,14 +442,17 @@ impl TerminalGrid {
                     if let Some(oldest) = self.scrollback.pop_front() {
                         let oldest_bytes = Self::row_memory_usage(&oldest);
                         self.current_scrollback_bytes -= oldest_bytes;
+                        self.recycle_row(oldest);
                     }
                     self.scrollback_wrapped.pop_front();
                 }
             } else {
-                self.cells.remove(top);
+                let removed = self.cells.remove(top);
                 self.line_wrapped.remove(top);
+                self.recycle_row(removed);
             }
-            self.cells.insert(bottom, vec![TerminalCell::default(); self.cols]);
+            let blank = self.take_blank_row();
+            self.cells.insert(bottom, blank);
             self.line_wrapped.insert(bottom, false);
         }
     }

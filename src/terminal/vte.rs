@@ -22,6 +22,13 @@ pub fn param_or_one_usize(p: usize) -> usize {
     if p == 0 { 1 } else { p }
 }
 
+/// Get the i-th CSI parameter's first sub-param (or None). Avoids collecting
+/// all params into a `Vec<u16>` on every CSI dispatch.
+#[inline]
+fn param_at(params: &Params, i: usize) -> Option<u16> {
+    params.iter().nth(i).and_then(|p| p.first().copied())
+}
+
 /// URL decode a percent-encoded string
 pub fn urlencoding_decode(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
@@ -190,12 +197,7 @@ impl<'a> Perform for VteHandler<'a> {
         // Any CSI sequence clears the pending wrap state
         self.grid.wrap_pending = false;
 
-        // Collect params into a vec for indexed access
-        let param_list: Vec<u16> = params.iter()
-            .map(|p| p.first().copied().unwrap_or(0))
-            .collect();
-
-        let p1 = param_list.first().copied().unwrap_or(0);
+        let p1 = param_at(params, 0).unwrap_or(0);
 
         match action {
             // Cursor movement
@@ -236,7 +238,7 @@ impl<'a> Perform for VteHandler<'a> {
             'H' | 'f' => {
                 // CUP/HVP - Cursor Position
                 let row = param_or_one_usize(p1 as usize);
-                let col = param_or_one_usize(param_list.get(1).copied().unwrap_or(1) as usize);
+                let col = param_or_one_usize(param_at(params, 1).unwrap_or(1) as usize);
                 self.grid.cursor_row = (row - 1).min(self.grid.rows.saturating_sub(1));
                 self.grid.cursor_col = (col - 1).min(self.grid.cols.saturating_sub(1));
                 self.grid.program_uses_positioning = true;
@@ -323,7 +325,7 @@ impl<'a> Perform for VteHandler<'a> {
                 // DECSTBM - Set Scrolling Region
                 if !is_private {
                     let top = param_or_one_usize(p1 as usize);
-                    let bottom = param_or_one_usize(param_list.get(1).copied().unwrap_or(self.grid.rows as u16) as usize).max(1);
+                    let bottom = param_or_one_usize(param_at(params, 1).unwrap_or(self.grid.rows as u16) as usize).max(1);
                     self.grid.scroll_top = (top - 1).min(self.grid.rows.saturating_sub(1));
                     self.grid.scroll_bottom = (bottom - 1).min(self.grid.rows.saturating_sub(1));
                     // Move cursor to home after setting scroll region

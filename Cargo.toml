@@ -113,6 +113,22 @@ assets = [
 name = "portal"
 path = "src/main.rs"
 
+[[bench]]
+name = "parse"
+harness = false
+
+[[bench]]
+name = "grid_scroll"
+harness = false
+
+[[bench]]
+name = "selection"
+harness = false
+
+[[bench]]
+name = "search"
+harness = false
+
 [dev-dependencies]
 # Testing utilities
 tempfile = "3.10"
@@ -139,4 +155,12 @@ insta = "0.1"
 
 # HTTP mocking for E2E tests
 wiremock = "0.6"
+
+# Benchmarking
+criterion = "0.5"
+vte = "0.11"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
 

@@ -125,6 +125,15 @@ impl Pty for UnixPty {
         }
         let master_file = unsafe { File::from_raw_fd(fd_dup) };
 
+        // Set non-blocking ONCE here so `try_read` never pays per-read fcntl
+        // syscalls. The reader loop polls with a short sleep, so the master
+        // must never block the reader thread.
+        let fd = master_file.as_raw_fd();
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags >= 0 {
+            unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+        }
+
         Ok(Self {
             master: master_file,
             child_pid: pid,
@@ -147,18 +156,8 @@ impl Pty for UnixPty {
             return Ok(Vec::new());
         }
 
-        // Set non-blocking mode using libc
-        let fd = self.master.as_raw_fd();
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-        if flags < 0 {
-            return Err(Error::ReadFailed("Failed to get flags".to_string()));
-        }
-        unsafe {
-            if libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
-                return Err(Error::ReadFailed("Failed to set non-blocking".to_string()));
-            }
-        }
-
+        // The master fd is non-blocking (set once at spawn), so a plain read()
+        // returns WouldBlock when there's no data instead of blocking.
         let mut buffer = vec![0u8; 8192];
         match self.master.read(&mut buffer) {
             Ok(n) if n > 0 => {
