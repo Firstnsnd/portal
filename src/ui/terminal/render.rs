@@ -749,6 +749,36 @@ pub fn render_terminal_session(
 
         let offset = session.scroll_offset;
 
+        // ── O8: snapshot the grid, then release the lock ────────────────────
+        //
+        // Clone the scalar state and the visible rows, then `drop(grid)` to
+        // release the lock. Everything below paints from this snapshot, so the
+        // reader thread can parse the next PTY chunk concurrently with the
+        // (comparatively slow) galley/painter work instead of blocking on the
+        // grid lock for the whole frame. `TerminalCell` is Clone and visible
+        // rows number at most `new_rows` (tens to hundreds), so the clone is
+        // microseconds.
+        let cols = grid.cols;
+        let rows = grid.rows;
+        let cursor = (grid.cursor_col, grid.cursor_row, grid.cursor_visible);
+        let visible_len = rows.min(new_rows);
+        let mut visible_rows: Vec<Vec<terminal::TerminalCell>> =
+            Vec::with_capacity(visible_len);
+        for screen_row in 0..visible_len {
+            let row = if offset > 0 && screen_row < offset {
+                grid.get_scrollback_row(scrollback_len.saturating_sub(offset) + screen_row)
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                grid.cells
+                    .get(screen_row.saturating_sub(offset))
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            visible_rows.push(row);
+        }
+        drop(grid);
+
         // Convert pixel position to global grid index.
         // Returns absolute index: 0..scrollback_len-1 for scrollback, scrollback_len.. for active grid
         let pixel_to_cell = |pos: egui::Pos2| -> (usize, usize) {
@@ -774,17 +804,17 @@ pub fn render_terminal_session(
                 } else {
                     // Viewport is showing active grid content
                     let grid_row = screen_row.saturating_sub(offset);
-                    let grid_row = grid_row.min(grid.rows.saturating_sub(1));
+                    let grid_row = grid_row.min(rows.saturating_sub(1));
                     scrollback_len + grid_row
                 }
             } else {
                 // Below viewport - extend to bottom of content
-                scrollback_len + grid.rows.saturating_sub(1)
+                scrollback_len + rows.saturating_sub(1)
             };
 
             let x_in_row = (pos.x - rect.min.x).max(0.0);
             let col = (x_in_row / char_width).floor() as usize;
-            let col = col.min(grid.cols.saturating_sub(1));
+            let col = col.min(cols.saturating_sub(1));
 
             (grid_row_idx, col)
         };
@@ -808,39 +838,38 @@ pub fn render_terminal_session(
         }
         if let Some(pos) = double_click_pos {
             let (grid_row, grid_col) = pixel_to_cell(pos);
-            // Get the actual cells for this row (from scrollback or grid)
-            let cells = if grid_row < scrollback_len {
-                grid.get_scrollback_row(grid_row)
+            // Get the visible snapshot row for this absolute grid index
+            // (scrollback or active), mirroring the mapping used to build
+            // `visible_rows` above.
+            let cells: Option<&Vec<terminal::TerminalCell>> = if grid_row < scrollback_len {
+                let sb_visible_start = scrollback_len.saturating_sub(offset);
+                if grid_row < sb_visible_start {
+                    None
+                } else {
+                    visible_rows.get(grid_row - sb_visible_start)
+                }
             } else {
                 let local_row = grid_row.saturating_sub(scrollback_len);
-                if local_row < grid.rows {
-                    Some(&grid.cells[local_row])
-                } else {
+                if local_row >= rows {
                     None
+                } else {
+                    visible_rows.get(local_row + offset)
                 }
             };
 
             if let Some(row_cells) = cells {
-                let (word_start, word_end) = super::selection::find_word_boundaries_in_row(row_cells, grid.cols, grid_col);
+                let (word_start, word_end) = super::selection::find_word_boundaries_in_row(row_cells, cols, grid_col);
                 session.selection.start = (grid_row, word_start);
                 session.selection.end = (grid_row, word_end);
             }
         }
 
         // ── Text rendering ───────────────────────────────────────────────────
-        for screen_row in 0..grid.rows.min(new_rows) {
+        for screen_row in 0..visible_rows.len() {
             let row_y = rect.min.y + screen_row as f32 * line_height;
 
-            let cells: Option<&Vec<terminal::TerminalCell>> = if offset > 0 && screen_row < offset {
-                let sb_idx = scrollback_len.saturating_sub(offset) + screen_row;
-                grid.get_scrollback_row(sb_idx)
-            } else {
-                let grid_row = screen_row.saturating_sub(offset);
-                if grid_row < grid.rows { Some(&grid.cells[grid_row]) } else { None }
-            };
-
-            let Some(cells) = cells else { continue; };
-            let row_cols = grid.cols.min(cells.len());
+            let Some(cells) = visible_rows.get(screen_row) else { continue; };
+            let row_cols = cols.min(cells.len());
 
             let mut col = 0;
             while col < row_cols {
@@ -1043,19 +1072,18 @@ pub fn render_terminal_session(
                     if sel_row < scrollback_visible_start { continue; } // Not in visible portion
                     sel_row - scrollback_visible_start
                 } else {
-                    if grid_row_idx >= grid.rows { break; }
+                    if grid_row_idx >= rows { break; }
                     grid_row_idx + offset
                 };
 
-                if screen_row >= new_rows {
+                if screen_row >= visible_rows.len() {
                     if is_scrollback { continue; } else { break; }
                 }
 
-                let row_cols = if is_scrollback {
-                    grid.get_scrollback_row(sel_row).map(|c| c.len().min(grid.cols)).unwrap_or(grid.cols)
-                } else {
-                    grid.cells[grid_row_idx].len().min(grid.cols)
-                };
+                let row_cols = visible_rows
+                    .get(screen_row)
+                    .map(|c| c.len().min(cols))
+                    .unwrap_or(cols);
 
                 let col_start = if sel_row == sr { sc.min(row_cols) } else { 0 };
                 let col_end = if sel_row == er { (ec + 1).min(row_cols) } else { row_cols };
@@ -1095,13 +1123,13 @@ pub fn render_terminal_session(
                     if m.row < vis_start || m.row >= vis_start + offset.min(new_rows) { continue; }
                     m.row - vis_start
                 } else {
-                    if grid_row_idx >= grid.rows { continue; }
+                    if grid_row_idx >= rows { continue; }
                     grid_row_idx + offset
                 };
 
-                if screen_row >= new_rows { continue; }
+                if screen_row >= visible_rows.len() { continue; }
 
-                let col_end_clamped   = m.col_end.min(grid.cols);
+                let col_end_clamped   = m.col_end.min(cols);
                 let col_start_clamped = m.col_start.min(col_end_clamped);
                 if col_start_clamped >= col_end_clamped { continue; }
 
@@ -1125,16 +1153,9 @@ pub fn render_terminal_session(
                 if rect.contains(pointer) {
                     let p_row = ((pointer.y - rect.min.y) / line_height) as usize;
                     let p_col = ((pointer.x - rect.min.x) / char_width) as usize;
-                    let cells: Option<&Vec<terminal::TerminalCell>> =
-                        if offset > 0 && p_row < offset {
-                            let sb_idx = scrollback_len.saturating_sub(offset) + p_row;
-                            grid.get_scrollback_row(sb_idx)
-                        } else {
-                            let gr = p_row.saturating_sub(offset);
-                            if gr < grid.rows { Some(&grid.cells[gr]) } else { None }
-                        };
+                    let cells: Option<&Vec<terminal::TerminalCell>> = visible_rows.get(p_row);
                     if let Some(cells) = cells {
-                        let urls = terminal::url::scan_row_for_urls(cells, grid.cols);
+                        let urls = terminal::url::scan_row_for_urls(cells, cols);
                         for (start_col, end_col, url) in &urls {
                             if p_col >= *start_col && p_col < *end_col {
                                 hovered_url = Some(url.clone());
@@ -1174,12 +1195,12 @@ pub fn render_terminal_session(
             SessionKind::Local(pty, _) => pty.has_exited(),
         };
         if !session_disconnected && offset == 0
-            && grid.cursor_visible
-            && grid.cursor_col < grid.cols
-            && grid.cursor_row < grid.rows
+            && cursor.2
+            && cursor.0 < cols
+            && cursor.1 < rows
         {
-            let cursor_x = rect.min.x + (grid.cursor_col as f32) * char_width;
-            let cursor_y = rect.min.y + grid.cursor_row as f32 * line_height;
+            let cursor_x = rect.min.x + (cursor.0 as f32) * char_width;
+            let cursor_y = rect.min.y + cursor.1 as f32 * line_height;
             let cursor_top    = egui::pos2(cursor_x, cursor_y);
             let cursor_bottom = egui::pos2(cursor_x, cursor_y + line_height);
 
@@ -1218,16 +1239,16 @@ pub fn render_terminal_session(
 
         // ── IME preedit overlay ───────────────────────────────────────────────
         if is_focused && !ime_preedit.is_empty()
-            && grid.cursor_col < grid.cols
-            && grid.cursor_row < grid.rows
+            && cursor.0 < cols
+            && cursor.1 < rows
         {
             let safe_preedit: String = ime_preedit.chars()
                 .filter(|c| !c.is_control())
                 .collect();
 
             if !safe_preedit.is_empty() {
-                let base_x = rect.min.x + grid.cursor_col as f32 * char_width;
-                let py = rect.min.y + grid.cursor_row as f32 * line_height;
+                let base_x = rect.min.x + cursor.0 as f32 * char_width;
+                let py = rect.min.y + cursor.1 as f32 * line_height;
                 let galley = ui.fonts(|f| f.layout_no_wrap(safe_preedit, font_id.clone(), theme.accent));
                 let bg_rect = egui::Rect::from_min_size(
                     egui::pos2(base_x, py),
@@ -1402,7 +1423,7 @@ pub fn render_terminal_session(
             }
         }
 
-    } // end grid.lock()
+    } // end render block (grid lock released earlier, after snapshot)
 
     // ── 2FA prompt window ─────────────────────────────────────────────────────
     // Rendered outside the grid lock so egui can create real interactive
