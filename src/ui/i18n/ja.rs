@@ -209,6 +209,10 @@ pub fn t(key: &str) -> &'static str {
         "update_open" => "開く",
         "update_close" => "閉じる",
         "update_check_error" => "更新確認に失敗しました",
+        "file_content" => "ファイル内容",
+        "no_snippets" => "スニペットが未設定",
+        "session_ended" => "[セッション終了]",
+        "tag" => "タグ",
         _ => "???",
     }
 }
@@ -222,7 +226,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "n_items" => format!("{}件", arg),
         "ssh_error" => format!("SSH エラー: {}", arg),
         "disconnected" => format!("[切断: {}]", arg),
-        "session_ended" => "[セッション終了]".to_string(),
+        "remote_host" => format!("リモート: {}", arg),
         "lines_above" => format!(" ↑ {} 行上 ", arg),
         "uploading" => format!("アップロード中 {}", arg),
         "downloading" => format!("ダウンロード中 {}", arg),

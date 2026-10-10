@@ -209,6 +209,10 @@ pub fn t(key: &str) -> &'static str {
         "update_open" => "Ouvrir",
         "update_close" => "Fermer",
         "update_check_error" => "Échec de la vérification",
+        "file_content" => "Contenu du fichier",
+        "no_snippets" => "Aucun snippet configuré",
+        "session_ended" => "[Session terminée]",
+        "tag" => "Étiquette",
         _ => "???",
     }
 }
@@ -222,7 +226,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "n_items" => format!("{} éléments", arg),
         "ssh_error" => format!("Erreur SSH: {}", arg),
         "disconnected" => format!("[Déconnecté: {}]", arg),
-        "session_ended" => "[Session terminée]".to_string(),
+        "remote_host" => format!("Distant : {}", arg),
         "lines_above" => format!(" ↑ {} lignes ci-dessus ", arg),
         "uploading" => format!("Téléchargement {}", arg),
         "downloading" => format!("Téléchargement {}", arg),

@@ -14,6 +14,12 @@ impl PortalApp {
 
     /// Add a new local terminal tab to a specific window
     pub fn add_tab_local_to_window(&mut self, window_idx: usize) {
+        self.add_local_tab_to_window_in(window_idx, None);
+    }
+
+    /// Add a local terminal tab to a specific window, optionally starting the
+    /// shell in `cwd` ("New Portal Tab Here").
+    pub fn add_local_tab_to_window_in(&mut self, window_idx: usize, cwd: Option<&str>) {
         let window = if let Some(w) = self.windows.get_mut(window_idx) {
             w
         } else {
@@ -26,7 +32,7 @@ impl PortalApp {
             .unwrap_or_else(|_| "/bin/zsh".to_string());
         let tab = Tab {
             title: format!("Terminal {}", id),
-            sessions: vec![TerminalSession::new_local(id, &default_shell)],
+            sessions: vec![TerminalSession::new_local_in(id, &default_shell, cwd)],
             layout: PaneNode::Terminal(0),
             focused_session: 0,
             broadcast_enabled: false,
@@ -37,6 +43,36 @@ impl PortalApp {
         window.tabs.push(tab);
         window.active_tab = window.tabs.len() - 1;
         window.current_view = AppView::Terminal;
+    }
+
+    /// Open a new native window with a single local terminal tab running in
+    /// `cwd` ("New Portal Window Here"). The window renders via
+    /// show_viewport_immediate on the next frame.
+    pub fn open_local_window_here(&mut self, cwd: &str) {
+        let default_shell = std::env::var("SHELL")
+            .unwrap_or_else(|_| "/bin/zsh".to_string());
+        // Session/tab ids must not collide with any existing window's ids.
+        let id = self.windows.iter().map(|w| w.next_id).max().unwrap_or(0);
+        let title = std::path::Path::new(cwd)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| format!("Terminal {}", id));
+        let tab = Tab {
+            title: title.clone(),
+            sessions: vec![TerminalSession::new_local_in(id, &default_shell, Some(cwd))],
+            layout: PaneNode::Terminal(0),
+            focused_session: 0,
+            broadcast_enabled: false,
+            tools_drawer_open: false,
+            tools_tab: 0,
+            pending_snippet: None,
+        };
+        let viewport_id =
+            egui::ViewportId::from_hash_of(format!("window_{}", self.next_viewport_id));
+        self.next_viewport_id += 1;
+        let window = crate::ui::pane::AppWindow::new_window(viewport_id, "Portal", tab, id + 1);
+        self.windows.push(window);
     }
 
     pub(crate) fn resolve_jump_host(&self, host: &HostEntry) -> Option<JumpHostInfo> {

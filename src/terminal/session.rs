@@ -76,16 +76,16 @@ impl RealPtySession {
     #[cfg(unix)]
     #[allow(dead_code)]
     pub fn new(id: usize, cols: u16, rows: u16, shell: &str) -> Result<Self> {
-        Self::with_scrollback_limit(id, cols, rows, shell, TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES)
+        Self::with_scrollback_limit(id, cols, rows, shell, TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES, None)
     }
 
     #[cfg(unix)]
-    pub fn with_scrollback_limit(id: usize, cols: u16, rows: u16, shell: &str, scrollback_limit_bytes: usize) -> Result<Self> {
+    pub fn with_scrollback_limit(id: usize, cols: u16, rows: u16, shell: &str, scrollback_limit_bytes: usize, cwd: Option<&str>) -> Result<Self> {
         use std::os::unix::io::AsRawFd;
         let _ = id;
 
         let grid: Arc<Mutex<TerminalGrid>> = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols as usize, rows as usize, scrollback_limit_bytes)));
-        let pty = UnixPty::spawn(shell, &["-l"], PtySize::new(rows, cols))?;
+        let pty = UnixPty::spawn_in(shell, &["-l"], PtySize::new(rows, cols), cwd)?;
         let pty = Arc::new(Mutex::new(pty));
 
         let fd = {
@@ -438,6 +438,46 @@ impl Drop for RealPtySession {
 mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
+
+    /// "Open terminal here": a PTY spawned with an explicit cwd must actually
+    /// start there. Spawns /bin/sh in a tempdir, asks `pwd`, and checks the
+    /// rendered grid for the path.
+    #[cfg(unix)]
+    #[test]
+    fn pty_spawn_with_cwd_starts_in_cwd() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cwd = dir.path().to_string_lossy().to_string();
+        let session = RealPtySession::with_scrollback_limit(
+            1,
+            80,
+            24,
+            "/bin/sh",
+            1024 * 1024,
+            Some(&cwd),
+        )
+        .expect("spawn sh");
+
+        session.write(b"pwd\n").expect("write pwd");
+
+        let grid = session.get_grid();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let found = {
+                let g = grid.lock().unwrap();
+                g.cells.iter().any(|row| {
+                    let line: String = row.iter().map(|c| c.c).collect();
+                    line.contains(&cwd)
+                })
+            };
+            if found {
+                return; // shell reports the requested directory
+            }
+            if std::time::Instant::now() > deadline {
+                panic!("`pwd` output did not contain {cwd:?} within 5s");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
 
     /// Verify that is_connected() returns false when the alive flag is false.
     /// This simulates what happens when the reader thread encounters a read error

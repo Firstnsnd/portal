@@ -144,16 +144,24 @@ impl TerminalSession {
     const PTY_RESIZE_SETTLE_MS: u64 = 150;
 
     pub fn new_local(id: usize, shell: &str) -> Self {
+        Self::new_local_in(id, shell, None)
+    }
+
+    /// Create a local session whose shell starts in `cwd` ("open terminal
+    /// here"). `None` falls back to the platform default ($HOME).
+    pub fn new_local_in(id: usize, shell: &str, cwd: Option<&str>) -> Self {
         // Load settings to get scrollback limit
         let settings = crate::config::load_settings();
         let scrollback_bytes = (settings.scrollback_limit_mb as usize) * 1024 * 1024;
 
-        let pty = RealPtySession::with_scrollback_limit(id, 80, 24, shell, scrollback_bytes)
+        let pty = RealPtySession::with_scrollback_limit(id, 80, 24, shell, scrollback_bytes, cwd)
             .expect("failed to spawn local PTY");
         let grid = pty.get_grid();
 
         // Get initial cwd
-        let cwd = std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string());
+        let cwd = cwd
+            .map(|c| c.to_string())
+            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()));
 
         Self {
             kind: SessionKind::Local(pty, shell.to_string()),

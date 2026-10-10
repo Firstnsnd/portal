@@ -209,6 +209,10 @@ pub fn t(key: &str) -> &'static str {
         "update_open" => "열기",
         "update_close" => "닫기",
         "update_check_error" => "업데이트 확인 실패",
+        "file_content" => "파일 내용",
+        "no_snippets" => "스니펫이 없습니다",
+        "session_ended" => "[세션 종료됨]",
+        "tag" => "태그",
         _ => "???",
     }
 }
@@ -222,7 +226,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "n_items" => format!("{}개 항목", arg),
         "ssh_error" => format!("SSH 오류: {}", arg),
         "disconnected" => format!("[연결 끊김: {}]", arg),
-        "session_ended" => "[세션 종료됨]".to_string(),
+        "remote_host" => format!("원격: {}", arg),
         "lines_above" => format!(" ↑ {} 줄 위 ", arg),
         "uploading" => format!("업로드 중 {}", arg),
         "downloading" => format!("다운로드 중 {}", arg),

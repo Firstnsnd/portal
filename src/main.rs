@@ -5,6 +5,8 @@
 
 mod app;
 mod config;
+#[cfg(unix)]
+mod ipc;
 mod repaint;
 mod sftp;
 mod ssh;
@@ -13,7 +15,6 @@ mod ui;
 mod update;
 
 use app::PortalApp;
-use sftp::LocalBrowser;
 use std::time::Duration;
 
 use ui::*;
@@ -49,6 +50,11 @@ impl eframe::App for PortalApp {
         }
 
         self.maybe_check_for_updates();
+
+        // Handle "open here" requests (from CLI at startup, or forwarded from
+        // a second instance over the IPC socket).
+        #[cfg(unix)]
+        self.handle_open_here_requests(ctx);
 
         // ── Window close handling ─────────────────────────────────────────────────────────────
         // IMPORTANT: eframe/egui architecture limitation
@@ -181,47 +187,12 @@ impl eframe::App for PortalApp {
                     let viewport_id = egui::ViewportId::from_hash_of(format!("window_{}", id_val));
                     let next_id = dw.next_id;
                     dw.next_id += 100;
-                    self.windows.push(AppWindow {
+                    self.windows.push(AppWindow::new_window(
                         viewport_id,
-                        title: tab.title.clone(),
-                        tabs: vec![tab],
-                        active_tab: 0,
-                        current_view: AppView::Terminal,
-                        close_requested: false,
-                        ime_composing: false,
-                        ime_preedit: String::new(),
+                        tab.title.clone(),
+                        tab,
                         next_id,
-                        tab_drag: TabDragState::default(),
-                        broadcast_state: BroadcastState::default(),
-                        // SFTP state (new window starts with fresh SFTP state)
-                        sftp_browser_left: None,
-                        sftp_browser: None,
-                        local_browser_left: LocalBrowser::new(),
-                        local_browser_right: LocalBrowser::new(),
-                        left_panel_is_local: true,
-                        right_panel_is_local: false,
-                        sftp_context_menu: None,
-                        sftp_rename_dialog: None,
-                        sftp_new_folder_dialog: None,
-                        sftp_new_file_dialog: None,
-                        sftp_confirm_delete: None,
-                        sftp_editor_dialog: None,
-                        sftp_error_dialog: None,
-                        sftp_local_left_refresh_start: None,
-                        sftp_local_right_refresh_start: None,
-                        sftp_remote_refresh_start: None,
-                        sftp_left_remote_refresh_start: None,
-                        sftp_active_panel_is_local: true,
-                        sftp_active_side_left: true,
-                        sftp_os_drag_active: false,
-                        // Page-related dialogs (new window starts with fresh state)
-                        add_host_dialog: AddHostDialog::default(),
-                        credential_dialog: CredentialDialog::default(),
-                        snippet_view_state: SnippetViewState::default(),
-                        host_filter: HostFilter::default(),
-                        confirm_delete_host: None,
-                        notifications: Vec::new(),
-                    });
+                    ));
                 }
             }
         }
@@ -322,6 +293,44 @@ impl eframe::App for PortalApp {
     }
 }
 
+impl PortalApp {
+    /// Apply pending "open here" requests — gathered from the CLI at startup,
+    /// or forwarded from a second instance over the IPC socket. A tab request
+    /// lands in the most recently used visible window; a window request opens
+    /// a new native window. Either way the target window is focused.
+    #[cfg(unix)]
+    fn handle_open_here_requests(&mut self, ctx: &egui::Context) {
+        if self.windows.is_empty() {
+            return;
+        }
+        for req in ipc::drain_requests() {
+            match req {
+                ipc::IpcRequest::OpenTab(path) => {
+                    let idx = self
+                        .windows
+                        .iter()
+                        .rposition(|w| !w.close_requested)
+                        .unwrap_or(0);
+                    if let Some(cwd) = path.to_str() {
+                        self.add_local_tab_to_window_in(idx, Some(cwd));
+                        if let Some(w) = self.windows.get(idx) {
+                            ctx.send_viewport_cmd_to(
+                                w.viewport_id,
+                                egui::ViewportCommand::Focus,
+                            );
+                        }
+                    }
+                }
+                ipc::IpcRequest::OpenWindow(path) => {
+                    if let Some(cwd) = path.to_str() {
+                        self.open_local_window_here(cwd);
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn load_app_icon() -> Option<egui::IconData> {
     let png_bytes = include_bytes!("../assets/portal-icon-1024.png");
     let decoder = eframe::icon_data::from_png_bytes(png_bytes);
@@ -330,6 +339,24 @@ fn load_app_icon() -> Option<egui::IconData> {
 
 fn main() -> eframe::Result<()> {
     env_logger::init();
+
+    // Single-instance "open here" requests (Finder Quick Actions / Nautilus
+    // scripts / Dolphin service menus): if a Portal instance is already
+    // running, hand the requests over and exit before creating any window;
+    // otherwise keep them for ourselves and become the IPC server.
+    #[cfg(unix)]
+    {
+        let requests = ipc::parse_cli_requests(std::env::args().skip(1));
+        if !requests.is_empty() && ipc::forward(&requests) {
+            log::info!(
+                "Forwarded {} open-here request(s) to the running instance",
+                requests.len()
+            );
+            return Ok(());
+        }
+        ipc::set_initial(requests);
+        ipc::start_server();
+    }
 
     // Set up signal handler for clean PTY cleanup on exit
     // This prevents PTY resource leaks when the app is terminated

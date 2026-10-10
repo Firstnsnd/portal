@@ -229,6 +229,8 @@ pub fn t(key: &str) -> &'static str {
         "update_open" => "打开",
         "update_close" => "关闭",
         "update_check_error" => "检查更新失败",
+        "file_content" => "文件内容",
+        "session_ended" => "[会话已结束]",
         _ => "???",
     }
 }
@@ -242,7 +244,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "n_items" => format!("{} 个项目", arg),
         "ssh_error" => format!("SSH 错误: {}", arg),
         "disconnected" => format!("[已断开: {}]", arg),
-        "session_ended" => "[会话已结束]".to_string(),
+        "remote_host" => format!("远程: {}", arg),
         "lines_above" => format!(" ↑ {} 行在上方 ", arg),
         "uploading" => format!("正在上传 {}", arg),
         "downloading" => format!("正在下载 {}", arg),

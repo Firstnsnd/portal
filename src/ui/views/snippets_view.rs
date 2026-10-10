@@ -234,7 +234,6 @@ pub fn render_snippets_view(
                                             &snippet.group
                                         );
                                     }
-                                    ui.allocate_exact_size(egui::vec2(56.0, 22.0), egui::Sense::hover());
                                 }
                             }
                             ui.add_space(12.0);
@@ -475,7 +474,13 @@ pub fn render_snippet_list(
                         let (rect, resp) = ui.allocate_exact_size(
                             egui::vec2(width, row_h), egui::Sense::click());
                         if resp.hovered() {
-                            ui.painter().rect_filled(rect, 4.0, theme.hover_bg);
+                            // Same hover treatment as the hosts/snippets lists:
+                            // square hover_bg fill with a 1px bottom shadow line.
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - 1.0), rect.max),
+                                0.0, theme.hover_shadow,
+                            );
+                            ui.painter().rect_filled(rect, 0.0, theme.hover_bg);
                         }
                         ui.painter().text(
                             egui::pos2(rect.min.x + 12.0, rect.min.y + 16.0),

@@ -245,4 +245,67 @@ mod tests {
 
         assert!(matches!(pf.current_state(), ForwardState::Conflict(_)));
     }
+
+    // --- bridge_half_close: graceful half-close over duplex streams ---
+
+    use crate::ssh::port_forward::bridge_half_close;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Drive both ends of a bridged pair: the "client" sends data and half-closes,
+    /// the "server" must observe EOF, then reply and half-close; the client must
+    /// still receive the full reply (the reverse direction drains instead of
+    /// being torn down when the client's direction finishes).
+    #[tokio::test]
+    async fn test_bridge_half_close_propagates_eof_and_drains() {
+        let (client, local_end) = tokio::io::duplex(4096);
+        let (remote_end, server) = tokio::io::duplex(4096);
+        let bridged = tokio::spawn(bridge_half_close(local_end, remote_end));
+
+        let client = tokio::spawn(async move {
+            let mut client = client;
+            client.write_all(b"ping").await.unwrap();
+            client.shutdown().await.unwrap();
+
+            let mut reply = Vec::new();
+            client.read_to_end(&mut reply).await.unwrap();
+            assert_eq!(reply, b"pong");
+        });
+
+        let server = tokio::spawn(async move {
+            let mut server = server;
+            let mut req = Vec::new();
+            server.read_to_end(&mut req).await.unwrap();
+            assert_eq!(req, b"ping");
+
+            // Reply after seeing the client's EOF — this is the part the old
+            // select!-based bridge cut off.
+            server.write_all(b"pong").await.unwrap();
+            server.shutdown().await.unwrap();
+        });
+
+        let (c, s) = tokio::join!(client, server);
+        c.unwrap();
+        s.unwrap();
+        // Bridge must terminate once both halves are done.
+        tokio::time::timeout(std::time::Duration::from_secs(1), bridged)
+            .await
+            .expect("bridge should end after both sides EOF")
+            .unwrap();
+    }
+
+    /// Dropping the peers must end the bridge (no leaked bridge task).
+    #[tokio::test]
+    async fn test_bridge_ends_when_peers_drop() {
+        let (client, local_end) = tokio::io::duplex(4096);
+        let (remote_end, server) = tokio::io::duplex(4096);
+        let bridged = tokio::spawn(bridge_half_close(local_end, remote_end));
+
+        drop(client);
+        drop(server);
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), bridged)
+            .await
+            .expect("bridge should end when both peers drop")
+            .unwrap();
+    }
 }

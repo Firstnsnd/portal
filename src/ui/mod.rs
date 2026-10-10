@@ -54,11 +54,8 @@ pub mod formatting;
 // Re-export all public types for convenient access via `use ui::*`
 pub use theme::{ThemeColors, ThemePreset};
 pub use i18n::Language;
-pub use types::{
-    AppView, BroadcastState,
-    AddHostDialog, CredentialDialog, SnippetViewState, HostFilter,
-};
-pub use pane::{AppWindow, TabDragState};
+pub use types::AppView;
+pub use pane::AppWindow;
 #[allow(unused_imports)]
 pub use pane_view::{WindowContext, ViewActions};
 pub use terminal::render_pane_tree;

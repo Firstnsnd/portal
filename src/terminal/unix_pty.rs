@@ -37,6 +37,10 @@ pub struct UnixPty {
 
 impl Pty for UnixPty {
     fn spawn(command: &str, args: &[&str], size: PtySize) -> Result<Self> {
+        Self::spawn_in(command, args, size, None)
+    }
+
+    fn spawn_in(command: &str, args: &[&str], size: PtySize, cwd: Option<&str>) -> Result<Self> {
         // forkpty() opens a PTY pair, forks, and in the CHILD does:
         //   setsid() + acquire controlling terminal (TIOCSCTTY) + dup2 the
         //   slave onto stdin/stdout/stderr. This is the exact setup the system
@@ -68,6 +72,10 @@ impl Pty for UnixPty {
             ));
         }
 
+        // Prepare the explicit cwd before the fork — CString::new allocates,
+        // which is NOT async-signal-safe in the child.
+        let cwd_c = cwd.and_then(|c| std::ffi::CString::new(c).ok());
+
         if pid == 0 {
             // ── Child process ─────────────────────────────────────────────
             // forkpty already wired up the controlling terminal + stdio.
@@ -83,12 +91,16 @@ impl Pty for UnixPty {
                 libc::setenv(c"LANG".as_ptr(), c"en_US.UTF-8".as_ptr(), 1);
                 libc::setenv(c"LC_ALL".as_ptr(), c"en_US.UTF-8".as_ptr(), 1);
 
-                // Default to the user's home directory so new terminals open at ~
+                // Explicit cwd wins ("open terminal here"); otherwise default
+                // to the user's home directory so new terminals open at ~
                 // instead of the app's working directory. getenv/chdir are
                 // async-signal-safe (allowed between fork and exec).
-                let home = libc::getenv(c"HOME".as_ptr());
-                if !home.is_null() {
-                    libc::chdir(home);
+                let dir = cwd_c
+                    .as_ref()
+                    .map(|c| c.as_ptr())
+                    .unwrap_or_else(|| libc::getenv(c"HOME".as_ptr()));
+                if !dir.is_null() {
+                    libc::chdir(dir);
                 }
             }
 

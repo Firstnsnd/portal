@@ -8,12 +8,8 @@ mod tab_management;
 mod window_content;
 
 use crate::config::{HostEntry, Credential, ConnectionRecord, ShortcutAction, Snippet};
-use crate::sftp::LocalBrowser;
-use crate::ui::types::{
-    dialogs::AppView,
-    session::TerminalSession,
-};
-use crate::ui::pane::{Tab, AppWindow, TabDragState};
+use crate::ui::types::session::TerminalSession;
+use crate::ui::pane::{Tab, AppWindow};
 use crate::ui::input::ShortcutResolver;
 use crate::ui::{ThemeColors, ThemePreset, Language, fonts};
 use std::path::PathBuf;
@@ -115,47 +111,7 @@ impl PortalApp {
         };
 
         // Create the first (main) window
-        let first_window = AppWindow {
-            viewport_id: egui::ViewportId::ROOT,
-            tabs: vec![first_tab],
-            active_tab: 0,
-            current_view: AppView::Terminal,
-            title: "Portal".to_string(),
-            close_requested: false,
-            ime_composing: false,
-            ime_preedit: String::new(),
-            next_id: 1,
-            tab_drag: TabDragState::default(),
-            broadcast_state: crate::ui::types::BroadcastState::default(),
-            // SFTP state
-            sftp_browser_left: None,
-            sftp_browser: None,
-            local_browser_left: LocalBrowser::new(),
-            local_browser_right: LocalBrowser::new(),
-            left_panel_is_local: true,
-            right_panel_is_local: false,
-            sftp_context_menu: None,
-            sftp_rename_dialog: None,
-            sftp_new_folder_dialog: None,
-            sftp_new_file_dialog: None,
-            sftp_confirm_delete: None,
-            sftp_editor_dialog: None,
-            sftp_error_dialog: None,
-            sftp_local_left_refresh_start: None,
-            sftp_local_right_refresh_start: None,
-            sftp_remote_refresh_start: None,
-            sftp_left_remote_refresh_start: None,
-            sftp_active_panel_is_local: true,
-            sftp_active_side_left: true,
-            sftp_os_drag_active: false,
-            // Page-related dialog states (per-window)
-            add_host_dialog: crate::ui::types::dialogs::AddHostDialog::default(),
-            credential_dialog: crate::ui::types::dialogs::CredentialDialog::default(),
-            snippet_view_state: crate::ui::types::dialogs::SnippetViewState::default(),
-            host_filter: crate::ui::types::dialogs::HostFilter::default(),
-            confirm_delete_host: None,
-            notifications: Vec::new(),
-        };
+        let first_window = AppWindow::new_window(egui::ViewportId::ROOT, "Portal", first_tab, 1);
 
         let connection_history = crate::config::load_history();
         let snippets = crate::config::load_snippets(&crate::config::snippets_file_path());
@@ -294,6 +250,11 @@ impl PortalApp {
                 tab.sessions.clear();
             }
         }
+        // Remove the single-instance IPC socket so "open here" forwards fail
+        // fast (and the next launch rebinds cleanly) instead of hanging on a
+        // dead socket.
+        #[cfg(unix)]
+        crate::ipc::cleanup();
     }
 }
 

@@ -357,6 +357,58 @@ pub struct AppWindow {
     pub notifications: Vec<crate::ssh::AppNotification>,
 }
 
+impl AppWindow {
+    /// Create a fresh window around a single tab with fresh SFTP/dialog state.
+    /// Used for the root window at startup, for detached tabs, and for
+    /// "New Portal Window Here".
+    pub fn new_window(
+        viewport_id: egui::ViewportId,
+        title: impl Into<String>,
+        tab: Tab,
+        next_id: usize,
+    ) -> Self {
+        Self {
+            viewport_id,
+            title: title.into(),
+            tabs: vec![tab],
+            active_tab: 0,
+            current_view: AppView::Terminal,
+            close_requested: false,
+            ime_composing: false,
+            ime_preedit: String::new(),
+            next_id,
+            tab_drag: TabDragState::default(),
+            broadcast_state: BroadcastState::default(),
+            sftp_browser_left: None,
+            sftp_browser: None,
+            local_browser_left: LocalBrowser::new(),
+            local_browser_right: LocalBrowser::new(),
+            left_panel_is_local: true,
+            right_panel_is_local: false,
+            sftp_context_menu: None,
+            sftp_rename_dialog: None,
+            sftp_new_folder_dialog: None,
+            sftp_new_file_dialog: None,
+            sftp_confirm_delete: None,
+            sftp_editor_dialog: None,
+            sftp_error_dialog: None,
+            sftp_local_left_refresh_start: None,
+            sftp_local_right_refresh_start: None,
+            sftp_remote_refresh_start: None,
+            sftp_left_remote_refresh_start: None,
+            sftp_active_panel_is_local: true,
+            sftp_active_side_left: true,
+            sftp_os_drag_active: false,
+            add_host_dialog: AddHostDialog::default(),
+            credential_dialog: CredentialDialog::default(),
+            snippet_view_state: SnippetViewState::default(),
+            host_filter: HostFilter::default(),
+            confirm_delete_host: None,
+            notifications: Vec::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
