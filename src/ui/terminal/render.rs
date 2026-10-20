@@ -358,6 +358,7 @@ pub fn render_terminal_session(
     let mut ctx_copy = false;
     let mut ctx_paste = false;
     let mut ctx_select_all = false;
+    let mut ctx_broadcast = false;
     let mut ctx_split_h = false;
     let mut ctx_split_v = false;
     let mut ctx_close = false;
@@ -373,6 +374,19 @@ pub fn render_terminal_session(
         ui.separator();
         if ui.button("Select All").clicked() {
             ctx_select_all = true;
+            ui.close_menu();
+        }
+        ui.separator();
+        // Broadcast toggle lives in the terminal context menu (not the tools
+        // drawer) — the label reflects the current mode so right-clicking any
+        // pane reveals a clear enable/disable state.
+        let broadcast_label = if broadcast_state.is_active() {
+            language.t("broadcast_off")
+        } else {
+            language.t("broadcast_on")
+        };
+        if ui.button(broadcast_label).clicked() {
+            ctx_broadcast = true;
             ui.close_menu();
         }
         ui.separator();
@@ -421,6 +435,7 @@ pub fn render_terminal_session(
     }
     if ctx_split_h { action = Some(PaneAction::SplitHorizontal); }
     if ctx_split_v { action = Some(PaneAction::SplitVertical); }
+    if ctx_broadcast { action = Some(PaneAction::ToggleBroadcast); }
     if ctx_close   { action = Some(PaneAction::ClosePane); }
 
     // Keyboard input — only for the focused pane

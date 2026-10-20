@@ -2,6 +2,12 @@
 
 All notable changes to Portal will be documented in this file.
 
+## [0.16.1] - 2026-10-20
+
+### Changed
+- **Broadcast entry in the context menu** - The broadcast toggle now lives in the terminal right-click context menu (label reflects enable/disable state); removed the button from the top-right tools drawer.
+- **Single right-hand drawer** - The AI Assistant drawer and the tools drawer (Metrics/Snippets/Tunnels) now share one panel: opening either dismisses the other so only one is visible at a time.
+
 ## [0.16.0] - 2026-10-20
 
 ### Added

@@ -158,6 +158,9 @@ impl PortalApp {
                     } else {
                         tab.tools_drawer_open = true;
                         tab.tools_tab = 0;
+                        if let Ok(mut ai) = tab.ai_chat.lock() {
+                            ai.open = false;
+                        }
                     }
                 }
             }
@@ -170,6 +173,9 @@ impl PortalApp {
                     } else {
                         tab.tools_drawer_open = true;
                         tab.tools_tab = 1;
+                        if let Ok(mut ai) = tab.ai_chat.lock() {
+                            ai.open = false;
+                        }
                     }
                 }
             }
@@ -756,6 +762,11 @@ impl PortalApp {
                     } else {
                         tab.tools_drawer_open = true;
                         tab.tools_tab = 0; // default to Metrics
+                        // The tools drawer and AI drawer share the right-hand
+                        // rail — opening tools dismisses the AI drawer.
+                        if let Ok(mut ai) = tab.ai_chat.lock() {
+                            ai.open = false;
+                        }
                     }
                 }
             }
@@ -1052,6 +1063,11 @@ impl PortalApp {
             if orb_clicked {
                 ai.open = true;
             }
+        }
+        if orb_clicked {
+            // The AI drawer and tools drawer share the right-hand rail —
+            // opening the AI drawer dismisses the tools drawer.
+            tab.tools_drawer_open = false;
         }
 
         // Execute a confirmed AI command in the focused terminal (single frame
