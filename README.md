@@ -2,10 +2,16 @@
 
 A modern GUI terminal emulator built with Rust and egui, inspired by Termius.
 
-![Portal](https://img.shields.io/badge/Portal-0.12.0-blue)
+![Portal](https://img.shields.io/badge/Portal-0.16.2-blue)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)
 
 ## Features
+
+### AI Assistant
+- **In-terminal chat** - A draggable orb opens a chat drawer beside the terminal, backed by an LLM (OpenAI-compatible or Anthropic), with streaming replies.
+- **Markdown rendering** - Headings, bold/italic, inline code, links, lists, block quotes, and fenced shell commands rendered as runnable cards.
+- **Environment-aware prompts** - The system prompt reflects the target session (local OS/shell/cwd, or the remote host's probed OS/arch/shell for SSH), so suggested commands match where they run.
+- **Command safety** - AI-suggested commands never run on their own: every command requires two explicit approvals (Run button → confirm dialog) before reaching the terminal.
 
 ### Terminal
 - **Native Terminal Input** - Direct keyboard input with IME (CJK) support
@@ -88,16 +94,21 @@ src/
 │   ├── views/           # View pages
 │   │   ├── hosts_view.rs    # Host list page
 │   │   ├── tunnel_view.rs   # SSH tunnels page
-│   │   ├── snippet_view.rs  # Snippets page
+│   │   ├── snippets_view.rs # Snippets page
 │   │   ├── keychain_view.rs # Keychain management page
 │   │   ├── sftp_view.rs     # SFTP file browser UI
 │   │   ├── settings_view.rs # Settings page
-│   │   └── tab_view.rs      # Tab bar component
-│   ├── types.rs         # Shared UI types (AppView, sessions, dialogs)
+│   │   ├── tab_view.rs      # Tab bar component
+│   │   ├── metrics_drawer.rs # Tools drawer (metrics/snippets/tunnels)
+│   │   ├── ai_drawer.rs     # AI chat drawer + draggable orb
+│   │   └── ai_markdown.rs   # Lightweight Markdown renderer for AI replies
+│   ├── state/           # UI state
+│   │   └── ai_chat.rs   # AI chat state, streaming buffer, system prompt
+│   ├── types/           # Shared UI types (AppView, sessions, dialogs)
 │   ├── theme.rs         # Color themes (dark and light)
-│   ├── i18n.rs          # Internationalization (EN/ZH/JA/KO/FR/ES/RU)
+│   ├── i18n/            # Internationalization (EN/ZH/JA/KO/FR/ES/RU)
 │   ├── pane.rs          # Split pane layout
-│   ├── terminal_render.rs # Terminal pane rendering
+│   ├── terminal/        # Terminal grid rendering
 │   ├── widgets.rs       # Reusable UI components
 │   └── tokens.rs        # Design tokens (spacing, sizing)
 ├── terminal/
@@ -109,6 +120,11 @@ src/
 ├── sftp/
 │   ├── session.rs       # SFTP browser, local browser, async transfers
 │   └── mod.rs
+├── llm/                 # Chat backends (OpenAI-compatible + Anthropic), SSE
+│   ├── stream.rs        # Streaming request dispatch and SSE parsing
+│   ├── openai.rs        # OpenAI-compatible chat-completion body building
+│   ├── anthropic.rs     # Anthropic Messages body building
+│   └── types.rs         # LlmConfig, LlmBackend, ChatMessage
 └── config/
     └── mod.rs           # Host configuration, JSON persistence, keychain integration
 ```
@@ -122,7 +138,8 @@ src/
 - **pty** - Unix PTY support
 - **unicode-width** - CJK double-width detection
 - **arboard** - Clipboard access
-- **keyring** - System keychain credential storage
+- **ureq** - HTTP client for the AI assistant (rustls TLS) and update checks
+- **serde / serde_json** - Configuration persistence and LLM JSON bodies
 - **cocoa** - macOS specific APIs (app activation, NSPanel)
 
 ## Building
@@ -177,6 +194,19 @@ APPLE_PASSWORD="xxxx-xxxx-xxxx-xxxx" \
 The script will automatically complete signing → submit for notarization → wait for approval → staple ticket. Users can then install by double-clicking without any security warnings.
 
 ## Configuration
+
+### AI Assistant
+
+Configure the AI assistant in **Settings → LLM**:
+
+- **Provider** - OpenAI-compatible (e.g. OpenAI, local Ollama, any `/v1` server) or Anthropic.
+- **Base URL** - Required for OpenAI-compatible endpoints (default `https://api.openai.com/v1`); blank falls back to `https://api.anthropic.com` for Anthropic.
+- **Model** - e.g. `gpt-4o`, `claude-sonnet`, or your local model.
+- **API key** - Stored for the configured provider.
+
+Once configured, drag the assistant orb in any terminal tab to open the chat drawer. The system prompt is built from the target session's environment (local OS/shell/cwd, or the probed remote environment for SSH sessions), so suggested commands match the host they run on.
+
+### Hosts & Credentials
 
 Host connections are stored in `~/Library/Application Support/portal/hosts.json`. Passwords, key passphrases, and private key contents are stored securely in the macOS Keychain. Each host's credentials appear under `Portal: <host name>` in Keychain Access. The JSON file never contains plaintext secrets.
 
