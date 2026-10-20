@@ -34,6 +34,54 @@ fn measure_char_width(fonts: &egui::text::Fonts, font_id: &egui::FontId) -> f32 
     galley.size().x / 2.0
 }
 
+/// Extract the currently selected text (unified scrollback + grid), if any.
+///
+/// Computed only on demand (copy) rather than every frame: a Select-All over a
+/// large scrollback is O(scrollback × cols) and used to run per-frame.
+fn selected_text_of(session: &TerminalSession) -> Option<String> {
+    if !session.selection.has_selection() {
+        return None;
+    }
+    let grid = session.grid.lock().ok()?;
+    let scrollback_len = grid.scrollback_len();
+    let ((sr, sc), (er, ec)) = session.selection.ordered();
+    let mut text = String::new();
+
+    for row in sr..=er {
+        let cells = if row < scrollback_len {
+            match grid.get_scrollback_row(row) {
+                Some(c) => c,
+                None => break,
+            }
+        } else {
+            let grid_row = row.saturating_sub(scrollback_len);
+            if grid_row >= grid.rows { break; }
+            &grid.cells[grid_row]
+        };
+
+        let col_start = if row == sr { sc } else { 0 };
+        // Clamp to the row's actual length: a scrollback row may have scrolled
+        // off at a narrower width than the current grid.cols, and indexing it
+        // by grid.cols goes out of bounds.
+        let col_end = (if row == er { ec + 1 } else { grid.cols })
+            .min(grid.cols)
+            .min(cells.len());
+
+        for cell in &cells[col_start..col_end] {
+            if !cell.wide_continuation {
+                text.push(cell.c);
+            }
+        }
+
+        if row != er {
+            let trimmed = text.trim_end().len();
+            text.truncate(trimmed);
+            text.push('\n');
+        }
+    }
+    Some(text.trim_end().to_owned())
+}
+
 /// Core terminal session rendering function.
 ///
 /// This is the main rendering function that handles all terminal UI including:
@@ -121,6 +169,13 @@ pub fn render_terminal_session(
     let new_rows = total_rows;
     session.resize(new_cols, new_rows);
 
+    // The app no longer repaints unconditionally; when a resize is debounced
+    // (pending_pty_size), schedule one follow-up frame just past the settle
+    // window so the grid+PTY jump together without a drag to keep driving it.
+    if session.pending_pty_size.is_some() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(160));
+    }
+
     // Make rect fill the full available height (pane adjacent to status bar)
     let rect = egui::Rect::from_min_size(
         egui::pos2(pane_rect.min.x + pad_x, pane_rect.min.y + pad_y_top),
@@ -153,7 +208,13 @@ pub fn render_terminal_session(
     }
     let is_focused = session_id == focused_session_id;
     if is_focused {
-        response.request_focus();
+        // Only grab keyboard focus when no other widget — e.g. the AI chat
+        // drawer's TextEdit — is already holding it. Otherwise the drawer's
+        // input box can never be clicked/typed in: the focused pane would
+        // steal focus back every frame.
+        if !ctx.wants_keyboard_input() {
+            response.request_focus();
+        }
     }
 
     let search_input_id = egui::Id::new("search_input").with(pane_id);
@@ -289,58 +350,20 @@ pub fn render_terminal_session(
         }
     }
 
-    // Extract selected text for copy operations
-    let selected_text: Option<String> = if session.selection.has_selection() {
-        if let Ok(grid) = session.grid.lock() {
-            let scrollback_len = grid.scrollback_len();
-            let ((sr, sc), (er, ec)) = session.selection.ordered();
-            let mut text = String::new();
-
-            for row in sr..=er {
-                let cells = if row < scrollback_len {
-                    match grid.get_scrollback_row(row) {
-                        Some(c) => c,
-                        None => break,
-                    }
-                } else {
-                    let grid_row = row.saturating_sub(scrollback_len);
-                    if grid_row >= grid.rows { break; }
-                    &grid.cells[grid_row]
-                };
-
-                let col_start = if row == sr { sc } else { 0 };
-                // Clamp to the row's actual length: a scrollback row may have
-                // scrolled off at a narrower width than the current grid.cols,
-                // and indexing it by grid.cols goes out of bounds.
-                let col_end = (if row == er { ec + 1 } else { grid.cols })
-                    .min(grid.cols)
-                    .min(cells.len());
-
-                for cell in &cells[col_start..col_end] {
-                    if !cell.wide_continuation {
-                        text.push(cell.c);
-                    }
-                }
-
-                if row != er {
-                    let trimmed = text.trim_end().len();
-                    text.truncate(trimmed);
-                    text.push('\n');
-                }
-            }
-            Some(text.trim_end().to_owned())
-        } else { None }
-    } else { None };
+    // Selected text is computed lazily on copy (see `selected_text_of`) —
+    // a Select-All over a large scrollback is O(scrollback × cols) and must
+    // not run every frame. The Copy button only needs `has_selection()`.
 
     // Right-click context menu
     let mut ctx_copy = false;
     let mut ctx_paste = false;
     let mut ctx_select_all = false;
+    let mut ctx_broadcast = false;
     let mut ctx_split_h = false;
     let mut ctx_split_v = false;
     let mut ctx_close = false;
     response.context_menu(|ui| {
-        if ui.add_enabled(selected_text.is_some(), egui::Button::new("Copy")).clicked() {
+        if ui.add_enabled(session.selection.has_selection(), egui::Button::new("Copy")).clicked() {
             ctx_copy = true;
             ui.close_menu();
         }
@@ -351,6 +374,19 @@ pub fn render_terminal_session(
         ui.separator();
         if ui.button("Select All").clicked() {
             ctx_select_all = true;
+            ui.close_menu();
+        }
+        ui.separator();
+        // Broadcast toggle lives in the terminal context menu (not the tools
+        // drawer) — the label reflects the current mode so right-clicking any
+        // pane reveals a clear enable/disable state.
+        let broadcast_label = if broadcast_state.is_active() {
+            language.t("broadcast_off")
+        } else {
+            language.t("broadcast_on")
+        };
+        if ui.button(broadcast_label).clicked() {
+            ctx_broadcast = true;
             ui.close_menu();
         }
         ui.separator();
@@ -369,9 +405,9 @@ pub fn render_terminal_session(
     });
 
     if ctx_copy {
-        if let Some(ref text) = selected_text {
+        if let Some(text) = selected_text_of(session) {
             if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                let _ = clipboard.set_text(text.clone());
+                let _ = clipboard.set_text(text);
             }
             session.selection.clear();
         }
@@ -399,6 +435,7 @@ pub fn render_terminal_session(
     }
     if ctx_split_h { action = Some(PaneAction::SplitHorizontal); }
     if ctx_split_v { action = Some(PaneAction::SplitVertical); }
+    if ctx_broadcast { action = Some(PaneAction::ToggleBroadcast); }
     if ctx_close   { action = Some(PaneAction::ClosePane); }
 
     // Keyboard input — only for the focused pane
@@ -567,9 +604,9 @@ pub fn render_terminal_session(
                             } else if shortcut_resolver.matches(ShortcutAction::ToggleBroadcast, ctx) {
                                 action = Some(PaneAction::ToggleBroadcast);
                             } else if shortcut_resolver.matches(ShortcutAction::Copy, ctx) {
-                                if let Some(ref text) = selected_text {
+                                if let Some(text) = selected_text_of(session) {
                                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                        let _ = clipboard.set_text(text.clone());
+                                        let _ = clipboard.set_text(text);
                                     }
                                     session.selection.clear();
                                 } else {
@@ -670,9 +707,9 @@ pub fn render_terminal_session(
                         }
                     }
                     egui::Event::Copy => {
-                        if let Some(ref text) = selected_text {
+                        if let Some(text) = selected_text_of(session) {
                             if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                let _ = clipboard.set_text(text.clone());
+                                let _ = clipboard.set_text(text);
                             }
                             session.selection.clear();
                         } else {
@@ -696,6 +733,9 @@ pub fn render_terminal_session(
     }
 
     // ── Render terminal content ──────────────────────────────────────────────
+    // 2FA challenge captured inside the lock, consumed outside it (see the
+    // prompt window render after `grid.lock()` ends).
+    let mut pending_2fa: Option<crate::ssh::AuthPrompt> = None;
     if let Ok(grid) = session.grid.lock() {
         painter.rect_filled(pane_rect, 0.0, theme.bg_primary);
         let scrollback_len = grid.scrollback_len();
@@ -730,6 +770,36 @@ pub fn render_terminal_session(
 
         let offset = session.scroll_offset;
 
+        // ── O8: snapshot the grid, then release the lock ────────────────────
+        //
+        // Clone the scalar state and the visible rows, then `drop(grid)` to
+        // release the lock. Everything below paints from this snapshot, so the
+        // reader thread can parse the next PTY chunk concurrently with the
+        // (comparatively slow) galley/painter work instead of blocking on the
+        // grid lock for the whole frame. `TerminalCell` is Clone and visible
+        // rows number at most `new_rows` (tens to hundreds), so the clone is
+        // microseconds.
+        let cols = grid.cols;
+        let rows = grid.rows;
+        let cursor = (grid.cursor_col, grid.cursor_row, grid.cursor_visible);
+        let visible_len = rows.min(new_rows);
+        let mut visible_rows: Vec<Vec<terminal::TerminalCell>> =
+            Vec::with_capacity(visible_len);
+        for screen_row in 0..visible_len {
+            let row = if offset > 0 && screen_row < offset {
+                grid.get_scrollback_row(scrollback_len.saturating_sub(offset) + screen_row)
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                grid.cells
+                    .get(screen_row.saturating_sub(offset))
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            visible_rows.push(row);
+        }
+        drop(grid);
+
         // Convert pixel position to global grid index.
         // Returns absolute index: 0..scrollback_len-1 for scrollback, scrollback_len.. for active grid
         let pixel_to_cell = |pos: egui::Pos2| -> (usize, usize) {
@@ -755,17 +825,17 @@ pub fn render_terminal_session(
                 } else {
                     // Viewport is showing active grid content
                     let grid_row = screen_row.saturating_sub(offset);
-                    let grid_row = grid_row.min(grid.rows.saturating_sub(1));
+                    let grid_row = grid_row.min(rows.saturating_sub(1));
                     scrollback_len + grid_row
                 }
             } else {
                 // Below viewport - extend to bottom of content
-                scrollback_len + grid.rows.saturating_sub(1)
+                scrollback_len + rows.saturating_sub(1)
             };
 
             let x_in_row = (pos.x - rect.min.x).max(0.0);
             let col = (x_in_row / char_width).floor() as usize;
-            let col = col.min(grid.cols.saturating_sub(1));
+            let col = col.min(cols.saturating_sub(1));
 
             (grid_row_idx, col)
         };
@@ -789,39 +859,38 @@ pub fn render_terminal_session(
         }
         if let Some(pos) = double_click_pos {
             let (grid_row, grid_col) = pixel_to_cell(pos);
-            // Get the actual cells for this row (from scrollback or grid)
-            let cells = if grid_row < scrollback_len {
-                grid.get_scrollback_row(grid_row)
+            // Get the visible snapshot row for this absolute grid index
+            // (scrollback or active), mirroring the mapping used to build
+            // `visible_rows` above.
+            let cells: Option<&Vec<terminal::TerminalCell>> = if grid_row < scrollback_len {
+                let sb_visible_start = scrollback_len.saturating_sub(offset);
+                if grid_row < sb_visible_start {
+                    None
+                } else {
+                    visible_rows.get(grid_row - sb_visible_start)
+                }
             } else {
                 let local_row = grid_row.saturating_sub(scrollback_len);
-                if local_row < grid.rows {
-                    Some(&grid.cells[local_row])
-                } else {
+                if local_row >= rows {
                     None
+                } else {
+                    visible_rows.get(local_row + offset)
                 }
             };
 
             if let Some(row_cells) = cells {
-                let (word_start, word_end) = super::selection::find_word_boundaries_in_row(row_cells, grid.cols, grid_col);
+                let (word_start, word_end) = super::selection::find_word_boundaries_in_row(row_cells, cols, grid_col);
                 session.selection.start = (grid_row, word_start);
                 session.selection.end = (grid_row, word_end);
             }
         }
 
         // ── Text rendering ───────────────────────────────────────────────────
-        for screen_row in 0..grid.rows.min(new_rows) {
+        for screen_row in 0..visible_rows.len() {
             let row_y = rect.min.y + screen_row as f32 * line_height;
 
-            let cells: Option<&Vec<terminal::TerminalCell>> = if offset > 0 && screen_row < offset {
-                let sb_idx = scrollback_len.saturating_sub(offset) + screen_row;
-                grid.get_scrollback_row(sb_idx)
-            } else {
-                let grid_row = screen_row.saturating_sub(offset);
-                if grid_row < grid.rows { Some(&grid.cells[grid_row]) } else { None }
-            };
-
-            let Some(cells) = cells else { continue; };
-            let row_cols = grid.cols.min(cells.len());
+            let Some(cells) = visible_rows.get(screen_row) else { continue; };
+            let row_cols = cols.min(cells.len());
 
             let mut col = 0;
             while col < row_cols {
@@ -1024,19 +1093,18 @@ pub fn render_terminal_session(
                     if sel_row < scrollback_visible_start { continue; } // Not in visible portion
                     sel_row - scrollback_visible_start
                 } else {
-                    if grid_row_idx >= grid.rows { break; }
+                    if grid_row_idx >= rows { break; }
                     grid_row_idx + offset
                 };
 
-                if screen_row >= new_rows {
+                if screen_row >= visible_rows.len() {
                     if is_scrollback { continue; } else { break; }
                 }
 
-                let row_cols = if is_scrollback {
-                    grid.get_scrollback_row(sel_row).map(|c| c.len().min(grid.cols)).unwrap_or(grid.cols)
-                } else {
-                    grid.cells[grid_row_idx].len().min(grid.cols)
-                };
+                let row_cols = visible_rows
+                    .get(screen_row)
+                    .map(|c| c.len().min(cols))
+                    .unwrap_or(cols);
 
                 let col_start = if sel_row == sr { sc.min(row_cols) } else { 0 };
                 let col_end = if sel_row == er { (ec + 1).min(row_cols) } else { row_cols };
@@ -1076,13 +1144,13 @@ pub fn render_terminal_session(
                     if m.row < vis_start || m.row >= vis_start + offset.min(new_rows) { continue; }
                     m.row - vis_start
                 } else {
-                    if grid_row_idx >= grid.rows { continue; }
+                    if grid_row_idx >= rows { continue; }
                     grid_row_idx + offset
                 };
 
-                if screen_row >= new_rows { continue; }
+                if screen_row >= visible_rows.len() { continue; }
 
-                let col_end_clamped   = m.col_end.min(grid.cols);
+                let col_end_clamped   = m.col_end.min(cols);
                 let col_start_clamped = m.col_start.min(col_end_clamped);
                 if col_start_clamped >= col_end_clamped { continue; }
 
@@ -1100,24 +1168,19 @@ pub fn render_terminal_session(
 
         // ── URL detection & hover highlight ──────────────────────────────────
         let mut hovered_url: Option<String> = None;
+        let mut hovered_url_span: Option<(usize, usize)> = None;
         if is_hovering {
             if let Some(pointer) = pointer_pos {
                 if rect.contains(pointer) {
                     let p_row = ((pointer.y - rect.min.y) / line_height) as usize;
                     let p_col = ((pointer.x - rect.min.x) / char_width) as usize;
-                    let cells: Option<&Vec<terminal::TerminalCell>> =
-                        if offset > 0 && p_row < offset {
-                            let sb_idx = scrollback_len.saturating_sub(offset) + p_row;
-                            grid.get_scrollback_row(sb_idx)
-                        } else {
-                            let gr = p_row.saturating_sub(offset);
-                            if gr < grid.rows { Some(&grid.cells[gr]) } else { None }
-                        };
+                    let cells: Option<&Vec<terminal::TerminalCell>> = visible_rows.get(p_row);
                     if let Some(cells) = cells {
-                        let urls = terminal::url::scan_row_for_urls(cells, grid.cols);
+                        let urls = terminal::url::scan_row_for_urls(cells, cols);
                         for (start_col, end_col, url) in &urls {
                             if p_col >= *start_col && p_col < *end_col {
                                 hovered_url = Some(url.clone());
+                                hovered_url_span = Some((*start_col, *end_col));
                                 break;
                             }
                         }
@@ -1126,33 +1189,18 @@ pub fn render_terminal_session(
             }
         }
 
-        // Draw URL underlines and handle cursor
+        // Draw URL underline and set the pointing-hand cursor. The span was
+        // already resolved above, so we avoid re-scanning the row for URLs.
         if let Some(ref _url) = hovered_url {
-            let pointer = pointer_pos.unwrap();
-            let p_row = ((pointer.y - rect.min.y) / line_height) as usize;
-            let p_col = ((pointer.x - rect.min.x) / char_width) as usize;
-            let cells: Option<&Vec<terminal::TerminalCell>> =
-                if offset > 0 && p_row < offset {
-                    let sb_idx = scrollback_len.saturating_sub(offset) + p_row;
-                    grid.get_scrollback_row(sb_idx)
-                } else {
-                    let gr = p_row.saturating_sub(offset);
-                    if gr < grid.rows { Some(&grid.cells[gr]) } else { None }
-                };
-            if let Some(cells) = cells {
-                let urls = terminal::url::scan_row_for_urls(cells, grid.cols);
-                for (start_col, end_col, _) in &urls {
-                    if p_col >= *start_col && p_col < *end_col {
-                        let x0 = rect.min.x + *start_col as f32 * char_width;
-                        let x1 = rect.min.x + *end_col as f32 * char_width;
-                        let y = rect.min.y + p_row as f32 * line_height + line_height - 2.0;
-                        painter.line_segment(
-                            [egui::pos2(x0, y), egui::pos2(x1, y)],
-                            egui::Stroke::new(1.5, theme.accent),
-                        );
-                        break;
-                    }
-                }
+            if let (Some(pointer), Some((start_col, end_col))) = (pointer_pos, hovered_url_span) {
+                let p_row = ((pointer.y - rect.min.y) / line_height) as usize;
+                let x0 = rect.min.x + start_col as f32 * char_width;
+                let x1 = rect.min.x + end_col as f32 * char_width;
+                let y = rect.min.y + p_row as f32 * line_height + line_height - 2.0;
+                painter.line_segment(
+                    [egui::pos2(x0, y), egui::pos2(x1, y)],
+                    egui::Stroke::new(1.5, theme.accent),
+                );
             }
             ctx.output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
         }
@@ -1168,12 +1216,12 @@ pub fn render_terminal_session(
             SessionKind::Local(pty, _) => pty.has_exited(),
         };
         if !session_disconnected && offset == 0
-            && grid.cursor_visible
-            && grid.cursor_col < grid.cols
-            && grid.cursor_row < grid.rows
+            && cursor.2
+            && cursor.0 < cols
+            && cursor.1 < rows
         {
-            let cursor_x = rect.min.x + (grid.cursor_col as f32) * char_width;
-            let cursor_y = rect.min.y + grid.cursor_row as f32 * line_height;
+            let cursor_x = rect.min.x + (cursor.0 as f32) * char_width;
+            let cursor_y = rect.min.y + cursor.1 as f32 * line_height;
             let cursor_top    = egui::pos2(cursor_x, cursor_y);
             let cursor_bottom = egui::pos2(cursor_x, cursor_y + line_height);
 
@@ -1212,16 +1260,16 @@ pub fn render_terminal_session(
 
         // ── IME preedit overlay ───────────────────────────────────────────────
         if is_focused && !ime_preedit.is_empty()
-            && grid.cursor_col < grid.cols
-            && grid.cursor_row < grid.rows
+            && cursor.0 < cols
+            && cursor.1 < rows
         {
             let safe_preedit: String = ime_preedit.chars()
                 .filter(|c| !c.is_control())
                 .collect();
 
             if !safe_preedit.is_empty() {
-                let base_x = rect.min.x + grid.cursor_col as f32 * char_width;
-                let py = rect.min.y + grid.cursor_row as f32 * line_height;
+                let base_x = rect.min.x + cursor.0 as f32 * char_width;
+                let py = rect.min.y + cursor.1 as f32 * line_height;
                 let galley = ui.fonts(|f| f.layout_no_wrap(safe_preedit, font_id.clone(), theme.accent));
                 let bg_rect = egui::Rect::from_min_size(
                     egui::pos2(base_x, py),
@@ -1257,51 +1305,60 @@ pub fn render_terminal_session(
 
         // ── SSH connection state overlay ──────────────────────────────────────
         if let SessionKind::Ssh(ssh, _, _) = &session.kind {
+            // Capture any pending 2FA challenge now. The interactive prompt
+            // window renders AFTER the grid lock (below), since egui widgets
+            // must not be created while the painter holds the lock.
+            pending_2fa = ssh.auth_prompt.pending();
             match ssh.connection_state() {
                 SshConnectionState::Connecting | SshConnectionState::Authenticating => {
                     painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_premultiplied(
                         theme.bg_primary.r(), theme.bg_primary.g(), theme.bg_primary.b(), 240,
                     ));
-                    let msg = match ssh.connection_state() {
-                        SshConnectionState::Connecting    => language.t("connecting"),
-                        SshConnectionState::Authenticating => language.t("authenticating"),
-                        _ => "",
-                    };
-                    let galley = ui.fonts(|f| f.layout_no_wrap(
-                        msg.to_string(),
-                        egui::FontId::monospace(16.0),
-                        theme.accent,
-                    ));
-                    painter.galley(
-                        egui::pos2(
-                            rect.center().x - galley.rect.width() / 2.0,
-                            rect.center().y - galley.rect.height() / 2.0 - 14.0,
-                        ),
-                        galley,
-                        egui::Color32::TRANSPARENT,
-                    );
+                    // With a pending challenge, the prompt window owns all
+                    // interaction — keep only the dim backdrop here (no stray
+                    // "Authenticating…" text or duplicate cancel button).
+                    if pending_2fa.is_none() {
+                        let msg = match ssh.connection_state() {
+                            SshConnectionState::Connecting    => language.t("connecting"),
+                            SshConnectionState::Authenticating => language.t("authenticating"),
+                            _ => "",
+                        };
+                        let galley = ui.fonts(|f| f.layout_no_wrap(
+                            msg.to_string(),
+                            egui::FontId::monospace(16.0),
+                            theme.accent,
+                        ));
+                        painter.galley(
+                            egui::pos2(
+                                rect.center().x - galley.rect.width() / 2.0,
+                                rect.center().y - galley.rect.height() / 2.0 - 14.0,
+                            ),
+                            galley,
+                            egui::Color32::TRANSPARENT,
+                        );
 
-                    let btn_size = egui::vec2(70.0, 28.0);
-                    let btn_pos  = egui::pos2(rect.center().x - btn_size.x / 2.0, rect.center().y + 10.0);
-                    let btn_rect = egui::Rect::from_min_size(btn_pos, btn_size);
-                    let btn_resp = ui.allocate_rect(btn_rect, egui::Sense::click());
-                    let btn_bg = if btn_resp.hovered() { theme.bg_elevated } else { theme.bg_secondary };
-                    painter.rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, theme.border));
-                    let cancel_galley = ui.fonts(|f| f.layout_no_wrap(
-                        language.t("cancel").to_string(),
-                        egui::FontId::proportional(12.0),
-                        theme.red,
-                    ));
-                    painter.galley(
-                        egui::pos2(
-                            btn_rect.center().x - cancel_galley.rect.width() / 2.0,
-                            btn_rect.center().y - cancel_galley.rect.height() / 2.0,
-                        ),
-                        cancel_galley,
-                        egui::Color32::TRANSPARENT,
-                    );
-                    if btn_resp.clicked() {
-                        action = Some(PaneAction::ClosePane);
+                        let btn_size = egui::vec2(70.0, 28.0);
+                        let btn_pos  = egui::pos2(rect.center().x - btn_size.x / 2.0, rect.center().y + 10.0);
+                        let btn_rect = egui::Rect::from_min_size(btn_pos, btn_size);
+                        let btn_resp = ui.allocate_rect(btn_rect, egui::Sense::click());
+                        let btn_bg = if btn_resp.hovered() { theme.bg_elevated } else { theme.bg_secondary };
+                        painter.rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, theme.border));
+                        let cancel_galley = ui.fonts(|f| f.layout_no_wrap(
+                            language.t("cancel").to_string(),
+                            egui::FontId::proportional(12.0),
+                            theme.red,
+                        ));
+                        painter.galley(
+                            egui::pos2(
+                                btn_rect.center().x - cancel_galley.rect.width() / 2.0,
+                                btn_rect.center().y - cancel_galley.rect.height() / 2.0,
+                            ),
+                            cancel_galley,
+                            egui::Color32::TRANSPARENT,
+                        );
+                        if btn_resp.clicked() {
+                            action = Some(PaneAction::ClosePane);
+                        }
                     }
                 }
                 SshConnectionState::Error(ref err) => {
@@ -1387,7 +1444,29 @@ pub fn render_terminal_session(
             }
         }
 
-    } // end grid.lock()
+    } // end render block (grid lock released earlier, after snapshot)
+
+    // ── 2FA prompt window ─────────────────────────────────────────────────────
+    // Rendered outside the grid lock so egui can create real interactive
+    // widgets (the search bar below follows the same pattern). Only while
+    // the session is still authenticating.
+    if let Some(prompt) = pending_2fa {
+        if let SessionKind::Ssh(ssh, _, _) = &session.kind {
+            if matches!(ssh.connection_state(), SshConnectionState::Authenticating) {
+                let ui_action = crate::ui::terminal::auth_prompt_ui::render_auth_prompt_window(
+                    ctx,
+                    pane_id,
+                    &ssh.auth_prompt,
+                    &prompt,
+                    theme,
+                    language,
+                );
+                if ui_action == crate::ui::terminal::auth_prompt_ui::AuthPromptUiAction::Cancelled {
+                    action = Some(PaneAction::ClosePane);
+                }
+            }
+        }
+    }
 
     // ── Search bar overlay ────────────────────────────────────────────────────
     if session.search_state.is_some() {

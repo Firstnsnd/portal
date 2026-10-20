@@ -87,17 +87,6 @@ pub fn render_tools_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut
 
             egui::Frame::none().inner_margin(egui::Margin::symmetric(14.0, 4.0))
                 .show(ui, |ui| {
-                    // Broadcast toggle
-                    let broadcasting = window.tabs.get(active).map(|t| t.broadcast_enabled).unwrap_or(false);
-                    let b_glyph = if broadcasting { "\u{25C9}" } else { "\u{25CB}" };
-                    let b_color = if broadcasting { theme.accent } else { theme.fg_dim };
-                    let b_label = format!("{}  {}  \u{2318}\u{21E7}I", b_glyph, language.t("broadcast"));
-                    if ui.add(egui::Button::new(
-                        egui::RichText::new(&b_label).color(b_color).size(13.0)).frame(false)).clicked() {
-                        if let Some(t) = window.tabs.get_mut(active) { t.broadcast_enabled = !t.broadcast_enabled; }
-                    }
-                    ui.add_space(6.0);
-
                     // Tab buttons — underline indicator style: a row of
                     // equal-width text labels over a full-width hairline
                     // divider. The active label is primary-colored with a 2px

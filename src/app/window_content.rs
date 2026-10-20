@@ -158,6 +158,9 @@ impl PortalApp {
                     } else {
                         tab.tools_drawer_open = true;
                         tab.tools_tab = 0;
+                        if let Ok(mut ai) = tab.ai_chat.lock() {
+                            ai.open = false;
+                        }
                     }
                 }
             }
@@ -170,6 +173,9 @@ impl PortalApp {
                     } else {
                         tab.tools_drawer_open = true;
                         tab.tools_tab = 1;
+                        if let Ok(mut ai) = tab.ai_chat.lock() {
+                            ai.open = false;
+                        }
                     }
                 }
             }
@@ -388,6 +394,7 @@ impl PortalApp {
                 self.language,
                 &self.runtime,
                 self.font_size,
+                &self.llm_config,
             );
             self.windows[window_idx].render_drawers(ctx, &mut cx);
         }
@@ -420,6 +427,7 @@ impl PortalApp {
                                 self.language,
                                 &self.runtime,
                                 self.font_size,
+                                &self.llm_config,
                             );
                             self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
                         };
@@ -439,6 +447,7 @@ impl PortalApp {
                                 self.language,
                                 &self.runtime,
                                 self.font_size,
+                                &self.llm_config,
                             );
                             self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
                         };
@@ -457,6 +466,7 @@ impl PortalApp {
                                 self.language,
                                 &self.runtime,
                                 self.font_size,
+                                &self.llm_config,
                             );
                             self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
                         };
@@ -478,6 +488,7 @@ impl PortalApp {
                                 self.language,
                                 &self.runtime,
                                 self.font_size,
+                                &self.llm_config,
                             );
                             self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
                         };
@@ -507,21 +518,9 @@ impl PortalApp {
 
         match state {
             UpdateState::Idle => {}
-            UpdateState::Checking => {
-                egui::Window::new("update_checking")
-                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                    .title_bar(false)
-                    .resizable(false)
-                    .collapsible(false)
-                    .frame(widgets::dialog_frame(&self.theme))
-                    .show(ctx, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.add(egui::Spinner::new());
-                            ui.add_space(8.0);
-                            ui.label(self.language.t("update_downloading"));
-                        });
-                    });
-            }
+            // Version check runs silently in the background — no UI. The user
+            // only sees anything once a newer version is actually found.
+            UpdateState::Checking => {}
             UpdateState::Available { version, .. } => {
                 // Never re-prompt for a version the user already dismissed.
                 if self.last_dismissed_update_version.as_deref() == Some(version.as_str()) {
@@ -532,7 +531,7 @@ impl PortalApp {
                 }
                 let mut act = None;
                 egui::Window::new("update_available")
-                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
                     .title_bar(false)
                     .resizable(false)
                     .collapsible(false)
@@ -561,7 +560,7 @@ impl PortalApp {
             }
             UpdateState::Downloading { version, asset_name, received, total } => {
                 egui::Window::new("update_downloading")
-                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
                     .title_bar(false)
                     .resizable(false)
                     .collapsible(false)
@@ -590,7 +589,7 @@ impl PortalApp {
             UpdateState::Ready { version, path } => {
                 let mut act = None;
                 egui::Window::new("update_ready")
-                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
                     .title_bar(false)
                     .resizable(false)
                     .collapsible(false)
@@ -629,7 +628,7 @@ impl PortalApp {
             UpdateState::Error(e) => {
                 let mut close = false;
                 egui::Window::new("update_error")
-                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
                     .title_bar(false)
                     .resizable(false)
                     .collapsible(false)
@@ -746,6 +745,10 @@ impl PortalApp {
                     tools_drawer_open: false,
                     tools_tab: 0,
                     pending_snippet: None,
+                    ai_chat: std::sync::Arc::new(std::sync::Mutex::new(
+                        crate::ui::state::ai_chat::AiChatState::default(),
+                    )),
+                    pending_ai_command: None,
                 };
                 window.tabs.push(new_tab);
                 window.active_tab = window.tabs.len() - 1;
@@ -759,6 +762,11 @@ impl PortalApp {
                     } else {
                         tab.tools_drawer_open = true;
                         tab.tools_tab = 0; // default to Metrics
+                        // The tools drawer and AI drawer share the right-hand
+                        // rail — opening tools dismisses the AI drawer.
+                        if let Ok(mut ai) = tab.ai_chat.lock() {
+                            ai.open = false;
+                        }
                     }
                 }
             }
@@ -1035,6 +1043,47 @@ impl PortalApp {
                 }
             }
         }
+
+        // ── AI orb (one per tab) + pending command execution ──
+        let tab = &mut self.windows[window_idx].tabs[active];
+        let prev_offset = tab.ai_chat.lock().map(|s| s.orb_offset).unwrap_or_default();
+        // Hide the orb while the drawer is open (it overlaps the drawer area and
+        // its Foreground Area would otherwise steal the drawer's input).
+        let drawer_open = tab.ai_chat.lock().map(|s| s.open).unwrap_or(false);
+        let (orb_clicked, new_offset) = if drawer_open {
+            (false, prev_offset)
+        } else {
+            crate::ui::views::ai_drawer::render_orb(ctx, available, &self.theme, prev_offset)
+        };
+        {
+            let mut ai = tab.ai_chat.lock().unwrap();
+            if new_offset != ai.orb_offset {
+                ai.orb_offset = new_offset;
+            }
+            if orb_clicked {
+                ai.open = true;
+            }
+        }
+        if orb_clicked {
+            // The AI drawer and tools drawer share the right-hand rail —
+            // opening the AI drawer dismisses the tools drawer.
+            tab.tools_drawer_open = false;
+        }
+
+        // Execute a confirmed AI command in the focused terminal (single frame
+        // after the confirmation modal, so PTY resize/settle has happened).
+        if let Some(cmd) = tab.pending_ai_command.take() {
+            let focused = tab.focused_session;
+            if tab.broadcast_enabled {
+                for session in &mut tab.sessions {
+                    session.write(&cmd);
+                    session.write("\r");
+                }
+            } else if let Some(session) = tab.sessions.get_mut(focused) {
+                session.write(&cmd);
+                session.write("\r");
+            }
+        }
     }
 
     /// Handle actions returned from view rendering
@@ -1055,9 +1104,6 @@ impl PortalApp {
         if actions.save_credentials {
             config::save_credentials(&self.credentials_file, &self.credentials);
         }
-        if actions.save_snippets {
-            config::save_snippets(&config::snippets_file_path(), &self.snippets);
-        }
         if let Some(idx) = actions.delete_host {
             if idx < self.hosts.len() && !self.hosts[idx].is_local {
                 config::delete_host_credentials(&self.hosts[idx]);
@@ -1069,10 +1115,6 @@ impl PortalApp {
             self.credentials.retain(|c| c.id != **id);
             config::delete_credential_secrets(id, id.as_str());
             config::save_credentials(&self.credentials_file, &self.credentials);
-        }
-        if let Some(id) = &actions.delete_snippet {
-            self.snippets.retain(|s| s.id != **id);
-            config::save_snippets(&config::snippets_file_path(), &self.snippets);
         }
     }
 }

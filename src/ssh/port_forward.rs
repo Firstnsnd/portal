@@ -1,6 +1,8 @@
 //! SSH port forwarding (Local -L and Remote -R)
 
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -217,6 +219,12 @@ pub async fn start_local_forward(
     }
 }
 
+/// How long to wait for the SSH server to confirm a direct-tcpip channel open.
+/// A healthy open completes in ~1 RTT; without a cap a wedged server leaves the
+/// local TCP connection hanging until the *client's* own connect timeout fires,
+/// with nothing in Portal's logs to explain it.
+const CHANNEL_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Bridge a single accepted TCP connection through an SSH direct-tcpip channel.
 async fn bridge_local_connection(
     handle: Arc<russh::client::Handle<SshClient>>,
@@ -226,34 +234,64 @@ async fn bridge_local_connection(
     originator: &str,
     originator_port: u32,
 ) -> Result<(), String> {
-    let channel = handle
-        .channel_open_direct_tcpip(remote_host, remote_port, originator, originator_port)
-        .await
-        .map_err(|e| format!("channel_open_direct_tcpip failed: {}", e))?;
+    let channel = tokio::time::timeout(
+        CHANNEL_OPEN_TIMEOUT,
+        handle.channel_open_direct_tcpip(remote_host, remote_port, originator, originator_port),
+    )
+    .await
+    .map_err(|_| {
+        format!(
+            "channel open to {}:{} timed out after {}s",
+            remote_host,
+            remote_port,
+            CHANNEL_OPEN_TIMEOUT.as_secs()
+        )
+    })?
+    .map_err(|e| {
+        format!(
+            "channel open to {}:{} failed: {}",
+            remote_host, remote_port, e
+        )
+    })?;
 
-    let mut channel_stream = channel.into_stream();
-    let (mut tcp_read, mut tcp_write) = tokio::io::split(tcp_stream);
-
-    // Use manual copy loops with select for clean shutdown
-    let (mut ch_read, mut ch_write) = tokio::io::split(&mut channel_stream);
-
-    let c1 = tokio::io::copy(&mut tcp_read, &mut ch_write);
-    let c2 = tokio::io::copy(&mut ch_read, &mut tcp_write);
-
-    tokio::select! {
-        r = c1 => {
-            if let Err(e) = r {
-                log::debug!("local fwd tcp->ssh ended: {}", e);
-            }
-        }
-        r = c2 => {
-            if let Err(e) = r {
-                log::debug!("local fwd ssh->tcp ended: {}", e);
-            }
-        }
-    }
-
+    bridge_half_close(tcp_stream, channel.into_stream()).await;
     Ok(())
+}
+
+/// Bridge two bidirectional streams with graceful half-close.
+///
+/// Each direction runs independently to completion: when one sees EOF it shuts
+/// down its write half (TCP FIN / SSH CHANNEL_EOF) so the peer learns no more
+/// data follows, while the opposite direction keeps draining until its own EOF.
+/// The bridge only ends when both directions finish, so a final response
+/// flushed after our EOF (e.g. MySQL's reply to COM_QUIT) is never cut off,
+/// and the server sees a clean disconnect instead of an aborted one.
+pub(super) async fn bridge_half_close<L, R>(local: L, remote: R)
+where
+    L: AsyncRead + AsyncWrite,
+    R: AsyncRead + AsyncWrite,
+{
+    let (mut local_r, mut local_w) = tokio::io::split(local);
+    let (mut remote_r, mut remote_w) = tokio::io::split(remote);
+
+    let up = async move {
+        let res = tokio::io::copy(&mut local_r, &mut remote_w).await;
+        let _ = remote_w.shutdown().await;
+        res
+    };
+    let down = async move {
+        let res = tokio::io::copy(&mut remote_r, &mut local_w).await;
+        let _ = local_w.shutdown().await;
+        res
+    };
+
+    let (up_res, down_res) = tokio::join!(up, down);
+    if let Err(e) = &up_res {
+        log::debug!("forward local->remote ended: {}", e);
+    }
+    if let Err(e) = &down_res {
+        log::debug!("forward remote->local ended: {}", e);
+    }
 }
 
 // Note: Remote forward setup (tcpip_forward) is handled directly in ssh_task
@@ -276,23 +314,5 @@ pub async fn handle_remote_forward_connection(
         }
     };
 
-    let mut channel_stream = channel.into_stream();
-    let (mut tcp_read, mut tcp_write) = tokio::io::split(tcp_stream);
-    let (mut ch_read, mut ch_write) = tokio::io::split(&mut channel_stream);
-
-    let c1 = tokio::io::copy(&mut tcp_read, &mut ch_write);
-    let c2 = tokio::io::copy(&mut ch_read, &mut tcp_write);
-
-    tokio::select! {
-        r = c1 => {
-            if let Err(e) = r {
-                log::debug!("remote fwd tcp->ssh ended: {}", e);
-            }
-        }
-        r = c2 => {
-            if let Err(e) = r {
-                log::debug!("remote fwd ssh->tcp ended: {}", e);
-            }
-        }
-    }
+    bridge_half_close(channel.into_stream(), tcp_stream).await;
 }

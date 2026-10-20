@@ -126,3 +126,111 @@ pub fn format_time_ago(secs_ago: u64, lang: &Language) -> String {
         Language::French => fr::format_time_ago(secs_ago),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::path::PathBuf;
+
+    const LANGS: [&str; 7] = ["en", "zh", "ja", "ko", "es", "ru", "fr"];
+
+    /// Extract literal call keys like `.t("key")` / `.tf("key")` from source.
+    /// The needles are mutually exclusive: `.t("` cannot match inside `.tf("`
+    /// because the character after `t` differs.
+    fn extract_calls(src: &str, func: &str) -> BTreeSet<String> {
+        let needle = format!(".{}(\"", func);
+        let mut keys = BTreeSet::new();
+        let mut idx = 0;
+        while let Some(pos) = src[idx..].find(&needle) {
+            let start = idx + pos + needle.len();
+            if let Some(end) = src[start..].find('"') {
+                keys.insert(src[start..start + end].to_string());
+            }
+            idx = start;
+        }
+        keys
+    }
+
+    /// Keys registered in a language file's `t()` / `tf()` / `tf2()` table,
+    /// delimited by the next `pub fn` marker (or end of file).
+    fn table_keys(src: &str, func: &str) -> BTreeSet<String> {
+        let start = src.find(&format!("pub fn {}(", func)).expect("table fn exists");
+        let rest = &src[start..];
+        let end = rest["pub fn".len()..]
+            .find("\npub fn ")
+            .map(|p| p + "pub fn".len())
+            .unwrap_or(rest.len());
+        let mut keys = BTreeSet::new();
+        for line in rest[..end].lines() {
+            let line = line.trim();
+            if let Some(key_end) = line.strip_prefix('"') {
+                if let Some(name_end) = key_end.find('"') {
+                    if line.contains("=>") {
+                        keys.insert(key_end[..name_end].to_string());
+                    }
+                }
+            }
+        }
+        keys
+    }
+
+    fn collect_rs_files(dir: &PathBuf, out: &mut Vec<PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    // Skip the i18n module itself: its dispatch uses variable
+                    // keys (no literals), and this file's own comments mention
+                    // `.t("` / `.tf("` in prose.
+                    if path.file_name().is_some_and(|n| n == "i18n") {
+                        continue;
+                    }
+                    collect_rs_files(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+    }
+
+    /// Every literal `.t()` / `.tf()` / `.tf2()` key used in the crate must be
+    /// registered in the matching table of every language — otherwise the
+    /// UI renders the "???" fallback (or a literal `key: arg`), which is how
+    /// `session_ended` slipped out as "???" on the local terminal overlay.
+    #[test]
+    fn all_used_keys_exist_in_every_language_table() {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        collect_rs_files(&manifest.join("src"), &mut files);
+
+        let mut used_t = BTreeSet::new();
+        let mut used_tf = BTreeSet::new();
+        let mut used_tf2 = BTreeSet::new();
+        for file in &files {
+            let src = std::fs::read_to_string(file).expect("readable source file");
+            used_t.extend(extract_calls(&src, "t"));
+            used_tf.extend(extract_calls(&src, "tf"));
+            used_tf2.extend(extract_calls(&src, "tf2"));
+        }
+
+        for lang in LANGS {
+            let src = std::fs::read_to_string(
+                manifest.join("src/ui/i18n").join(format!("{}.rs", lang)),
+            )
+            .expect("language file readable");
+
+            let t_keys = table_keys(&src, "t");
+            let tf_keys = table_keys(&src, "tf");
+            let tf2_keys = table_keys(&src, "tf2");
+            let missing_t: Vec<_> = used_t.difference(&t_keys).collect();
+            let missing_tf: Vec<_> = used_tf.difference(&tf_keys).collect();
+            let missing_tf2: Vec<_> = used_tf2.difference(&tf2_keys).collect();
+
+            assert!(
+                missing_t.is_empty() && missing_tf.is_empty() && missing_tf2.is_empty(),
+                "[{}] missing i18n keys — t(): {:?}, tf(): {:?}, tf2(): {:?}",
+                lang, missing_t, missing_tf, missing_tf2
+            );
+        }
+    }
+}

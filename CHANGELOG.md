@@ -2,6 +2,34 @@
 
 All notable changes to Portal will be documented in this file.
 
+## [0.16.3] - 2026-10-21
+
+### Changed
+- **Reorganized Settings page** - A left-hand navigation groups settings into five sections (General, Appearance, Terminal, AI, Shortcuts) with content on the right, replacing the previous single long scroll page. Language settings moved into General; Appearance now holds Font and Theme.
+
+## [0.16.2] - 2026-10-20
+
+### Changed
+- **Consistent inline code size** - Inline code in AI Markdown replies now uses the same point size as surrounding prose (monospace font only), keeping wrapped lines baseline-aligned instead of visually mismatched.
+- **Animated waiting bubble** - While waiting for the first token, the assistant bubble shows three accent dots bouncing in a loop (no "loading" label), replacing the previous static empty bubble.
+
+## [0.16.1] - 2026-10-20
+
+### Changed
+- **Broadcast entry in the context menu** - The broadcast toggle now lives in the terminal right-click context menu (label reflects enable/disable state); removed the button from the top-right tools drawer.
+- **Single right-hand drawer** - The AI Assistant drawer and the tools drawer (Metrics/Snippets/Tunnels) now share one panel: opening either dismisses the other so only one is visible at a time.
+
+## [0.16.0] - 2026-10-20
+
+### Added
+- **AI Assistant** - In-terminal chat drawer and draggable orb backed by an LLM (OpenAI-compatible or Anthropic). Streams replies, renders Markdown (headings, bold/italic/code, links, lists, block quotes), and shows fenced shell commands as runnable cards with Run/Copy actions.
+- **Execution-environment awareness** - The AI system prompt embeds the target session's real environment (OS/arch/shell/cwd); SSH sessions probe the remote `uname`/`$SHELL` so suggested commands match the remote host, not the local machine.
+- **Command safety** - AI-suggested commands never run automatically: every command requires two explicit approvals (Run button → confirm dialog) before reaching the terminal.
+
+### Changed
+- Selectable text throughout AI chat bubbles (copy any snippet with the mouse, in addition to right-click copy-all and per-block Copy).
+- Code blocks render in-place within the prose and scroll horizontally when longer than the drawer.
+
 ## [0.12.0] - 2026-03-29
 
 ### Added

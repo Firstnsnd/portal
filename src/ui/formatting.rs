@@ -33,6 +33,9 @@ pub fn format_duration_compact(duration: Duration) -> String {
 /// - `3665s` → "01:01:05"
 ///
 /// Used for: connection duration, transfer time
+// (SFTP's transfer ETA inlines a UI-agnostic copy in `sftp/types.rs`; this
+// UI variant is kept for future use, matching `format_duration_compact`.)
+#[allow(dead_code)]
 pub fn format_duration_hms(duration: Duration) -> String {
     let secs = duration.as_secs();
     let hours = secs / 3600;
@@ -48,6 +51,7 @@ pub fn format_duration_hms(duration: Duration) -> String {
 /// Format a duration in seconds to HH:MM:SS format (from u64).
 ///
 /// This is a convenience wrapper for `format_duration_hms`.
+#[allow(dead_code)]
 pub fn format_duration_hms_from_secs(secs: u64) -> String {
     format_duration_hms(Duration::from_secs(secs))
 }

@@ -234,7 +234,6 @@ pub fn render_snippets_view(
                                             &snippet.group
                                         );
                                     }
-                                    ui.allocate_exact_size(egui::vec2(56.0, 22.0), egui::Sense::hover());
                                 }
                             }
                             ui.add_space(12.0);
@@ -292,11 +291,8 @@ pub fn render_snippets_view(
     if let Some(id) = snippet_to_delete {
         cx.snippets.retain(|s| s.id != id);
         window.snippet_view_state.confirm_delete = None;
-        let actions = ViewActions {
-            save_hosts: true,
-            ..Default::default()
-        };
-        return actions;
+        // Persist immediately, mirroring the drawer save path.
+        crate::config::save_snippets(&crate::config::snippets_file_path(), cx.snippets);
     }
 
     ViewActions::default()
@@ -420,6 +416,14 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                             };
                             cx.snippets.push(snippet);
                         }
+                        // Persist immediately: the drawer did not previously
+                        // signal the top level to save, so edited/added snippets
+                        // lived only in memory and were lost on the next process
+                        // restart (e.g. after an in-place upgrade).
+                        crate::config::save_snippets(
+                            &crate::config::snippets_file_path(),
+                            cx.snippets,
+                        );
                         window.snippet_view_state.open = false;
                         window.snippet_view_state.editing = None;
                     }
@@ -470,7 +474,13 @@ pub fn render_snippet_list(
                         let (rect, resp) = ui.allocate_exact_size(
                             egui::vec2(width, row_h), egui::Sense::click());
                         if resp.hovered() {
-                            ui.painter().rect_filled(rect, 4.0, theme.hover_bg);
+                            // Same hover treatment as the hosts/snippets lists:
+                            // square hover_bg fill with a 1px bottom shadow line.
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - 1.0), rect.max),
+                                0.0, theme.hover_shadow,
+                            );
+                            ui.painter().rect_filled(rect, 0.0, theme.hover_bg);
                         }
                         ui.painter().text(
                             egui::pos2(rect.min.x + 12.0, rect.min.y + 16.0),

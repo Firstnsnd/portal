@@ -22,3 +22,5 @@ pub mod hosts_view;
 pub mod keychain_view;
 pub mod snippets_view;
 pub mod metrics_drawer;
+pub mod ai_drawer;
+pub mod ai_markdown;

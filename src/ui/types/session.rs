@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::config::{HostEntry, PortForwardConfig, ResolvedAuth};
+use crate::llm::types::ExecutionEnvironment;
 use crate::ssh::port_forward::ForwardState;
 use crate::ssh::{SshSession, SshConnectionState, JumpHostInfo, AppNotification};
 use crate::terminal::{TerminalGrid, RealPtySession};
@@ -48,6 +49,60 @@ impl SessionKind {
         match self {
             SessionKind::Local(_, _) => Vec::new(),
             SessionKind::Ssh(ssh, _, _) => ssh.drain_notifications(),
+        }
+    }
+
+    /// Describe the execution environment a command will run in, for the AI
+    /// system prompt. Local sessions report the host platform; SSH sessions
+    /// report the remote host plus probed OS/arch/shell. `cwd` is filled by the
+    /// caller from [`TerminalSession::cwd`] (OSC 7), since this method has no
+    /// access to it.
+    pub fn environment_summary(&self) -> ExecutionEnvironment {
+        match self {
+            SessionKind::Local(pty, fallback_shell) => {
+                let shell = pty
+                    .get_shell_name()
+                    .map(|name| {
+                        std::path::Path::new(&name)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| name.clone())
+                    })
+                    .unwrap_or_else(|| {
+                        std::path::Path::new(fallback_shell)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| fallback_shell.clone())
+                    });
+                ExecutionEnvironment {
+                    os: crate::ui::state::ai_chat::os_label().to_string(),
+                    arch: std::env::consts::ARCH.to_string(),
+                    shell,
+                    cwd: String::new(),
+                    host: None,
+                }
+            }
+            SessionKind::Ssh(ssh, host_entry, _) => {
+                let shell = ssh
+                    .shell_hint
+                    .lock()
+                    .ok()
+                    .and_then(|h| h.clone())
+                    .map(|path| {
+                        std::path::Path::new(&path)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.clone())
+                    })
+                    .unwrap_or_else(|| "sh".to_string());
+                ExecutionEnvironment {
+                    os: ssh.os_hint.lock().ok().and_then(|h| h.clone()).unwrap_or_else(|| "unknown".to_string()),
+                    arch: ssh.arch_hint.lock().ok().and_then(|h| h.clone()).unwrap_or_else(|| "unknown".to_string()),
+                    shell,
+                    cwd: String::new(),
+                    host: Some(format!("{}@{}", host_entry.username, host_entry.host)),
+                }
+            }
         }
     }
 }
@@ -144,16 +199,24 @@ impl TerminalSession {
     const PTY_RESIZE_SETTLE_MS: u64 = 150;
 
     pub fn new_local(id: usize, shell: &str) -> Self {
+        Self::new_local_in(id, shell, None)
+    }
+
+    /// Create a local session whose shell starts in `cwd` ("open terminal
+    /// here"). `None` falls back to the platform default ($HOME).
+    pub fn new_local_in(id: usize, shell: &str, cwd: Option<&str>) -> Self {
         // Load settings to get scrollback limit
         let settings = crate::config::load_settings();
         let scrollback_bytes = (settings.scrollback_limit_mb as usize) * 1024 * 1024;
 
-        let pty = RealPtySession::with_scrollback_limit(id, 80, 24, shell, scrollback_bytes)
+        let pty = RealPtySession::with_scrollback_limit(id, 80, 24, shell, scrollback_bytes, cwd)
             .expect("failed to spawn local PTY");
         let grid = pty.get_grid();
 
         // Get initial cwd
-        let cwd = std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string());
+        let cwd = cwd
+            .map(|c| c.to_string())
+            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()));
 
         Self {
             kind: SessionKind::Local(pty, shell.to_string()),

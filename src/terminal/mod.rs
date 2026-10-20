@@ -78,6 +78,22 @@ pub trait Pty {
     where
         Self: Sized;
 
+    /// Spawn a new PTY with an explicit working directory for the child.
+    /// `None` means the platform default ($HOME). Implementations that cannot
+    /// honor `cwd` may ignore it.
+    fn spawn_in(
+        command: &str,
+        args: &[&str],
+        size: PtySize,
+        cwd: Option<&str>,
+    ) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let _ = cwd;
+        Self::spawn(command, args, size)
+    }
+
     /// Write data to the PTY
     fn write(&mut self, data: &[u8]) -> Result<()>;
 

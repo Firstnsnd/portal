@@ -37,6 +37,10 @@ pub struct UnixPty {
 
 impl Pty for UnixPty {
     fn spawn(command: &str, args: &[&str], size: PtySize) -> Result<Self> {
+        Self::spawn_in(command, args, size, None)
+    }
+
+    fn spawn_in(command: &str, args: &[&str], size: PtySize, cwd: Option<&str>) -> Result<Self> {
         // forkpty() opens a PTY pair, forks, and in the CHILD does:
         //   setsid() + acquire controlling terminal (TIOCSCTTY) + dup2 the
         //   slave onto stdin/stdout/stderr. This is the exact setup the system
@@ -68,6 +72,10 @@ impl Pty for UnixPty {
             ));
         }
 
+        // Prepare the explicit cwd before the fork — CString::new allocates,
+        // which is NOT async-signal-safe in the child.
+        let cwd_c = cwd.and_then(|c| std::ffi::CString::new(c).ok());
+
         if pid == 0 {
             // ── Child process ─────────────────────────────────────────────
             // forkpty already wired up the controlling terminal + stdio.
@@ -83,12 +91,16 @@ impl Pty for UnixPty {
                 libc::setenv(c"LANG".as_ptr(), c"en_US.UTF-8".as_ptr(), 1);
                 libc::setenv(c"LC_ALL".as_ptr(), c"en_US.UTF-8".as_ptr(), 1);
 
-                // Default to the user's home directory so new terminals open at ~
+                // Explicit cwd wins ("open terminal here"); otherwise default
+                // to the user's home directory so new terminals open at ~
                 // instead of the app's working directory. getenv/chdir are
                 // async-signal-safe (allowed between fork and exec).
-                let home = libc::getenv(c"HOME".as_ptr());
-                if !home.is_null() {
-                    libc::chdir(home);
+                let dir = cwd_c
+                    .as_ref()
+                    .map(|c| c.as_ptr())
+                    .unwrap_or_else(|| libc::getenv(c"HOME".as_ptr()));
+                if !dir.is_null() {
+                    libc::chdir(dir);
                 }
             }
 
@@ -125,6 +137,15 @@ impl Pty for UnixPty {
         }
         let master_file = unsafe { File::from_raw_fd(fd_dup) };
 
+        // Set non-blocking ONCE here so `try_read` never pays per-read fcntl
+        // syscalls. The reader loop polls with a short sleep, so the master
+        // must never block the reader thread.
+        let fd = master_file.as_raw_fd();
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags >= 0 {
+            unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+        }
+
         Ok(Self {
             master: master_file,
             child_pid: pid,
@@ -147,18 +168,8 @@ impl Pty for UnixPty {
             return Ok(Vec::new());
         }
 
-        // Set non-blocking mode using libc
-        let fd = self.master.as_raw_fd();
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-        if flags < 0 {
-            return Err(Error::ReadFailed("Failed to get flags".to_string()));
-        }
-        unsafe {
-            if libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
-                return Err(Error::ReadFailed("Failed to set non-blocking".to_string()));
-            }
-        }
-
+        // The master fd is non-blocking (set once at spawn), so a plain read()
+        // returns WouldBlock when there's no data instead of blocking.
         let mut buffer = vec![0u8; 8192];
         match self.master.read(&mut buffer) {
             Ok(n) if n > 0 => {

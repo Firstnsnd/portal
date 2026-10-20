@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 use crate::config::ResolvedAuth;
-use crate::ssh::connect_and_authenticate;
+use crate::ssh::AuthPromptBridge;
 use crate::sftp::types::{SftpEntry, SftpEntryKind, SftpCommand, SftpResponse, TransferProgress};
 
 /// Variant of sftp_task that navigates to a specific path after connecting (used for auto-reconnect).
@@ -19,12 +19,19 @@ pub async fn sftp_task_with_initial_path(
     cmd_rx: mpsc::UnboundedReceiver<SftpCommand>,
     resp_tx: mpsc::UnboundedSender<SftpResponse>,
     cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    auth_prompt: std::sync::Arc<AuthPromptBridge>,
+    host_key_policy: crate::ssh::HostKeyPolicy,
     initial_path: Option<String>,
 ) {
-    sftp_task_inner(host, port, username, auth, cmd_rx, resp_tx, cancel_flag, initial_path).await
+    sftp_task_inner(
+        host, port, username, auth, cmd_rx, resp_tx, cancel_flag,
+        auth_prompt, host_key_policy, initial_path,
+    )
+    .await
 }
 
 /// The async SFTP task running on tokio.
+#[allow(clippy::too_many_arguments)]
 pub async fn sftp_task(
     host: String,
     port: u16,
@@ -33,8 +40,14 @@ pub async fn sftp_task(
     cmd_rx: mpsc::UnboundedReceiver<SftpCommand>,
     resp_tx: mpsc::UnboundedSender<SftpResponse>,
     cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    auth_prompt: std::sync::Arc<AuthPromptBridge>,
+    host_key_policy: crate::ssh::HostKeyPolicy,
 ) {
-    sftp_task_inner(host, port, username, auth, cmd_rx, resp_tx, cancel_flag, None).await
+    sftp_task_inner(
+        host, port, username, auth, cmd_rx, resp_tx, cancel_flag,
+        auth_prompt, host_key_policy, None,
+    )
+    .await
 }
 
 /// Inner implementation shared by sftp_task and sftp_task_with_initial_path.
@@ -47,6 +60,8 @@ async fn sftp_task_inner(
     mut cmd_rx: mpsc::UnboundedReceiver<SftpCommand>,
     resp_tx: mpsc::UnboundedSender<SftpResponse>,
     cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    auth_prompt: std::sync::Arc<AuthPromptBridge>,
+    host_key_policy: crate::ssh::HostKeyPolicy,
     initial_path: Option<String>,
 ) {
     const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
@@ -66,11 +81,18 @@ async fn sftp_task_inner(
             || err_lower.contains("no route")
     };
 
-    // 1. Connect + authenticate (with timeout)
-    let handle = match tokio::time::timeout(
+    // 1a. Transport only, with timeout.
+    let mut handle = match tokio::time::timeout(
         CONNECT_TIMEOUT,
-        connect_and_authenticate(&host, port, &username, &auth, 0, false),
-    ).await {
+        crate::ssh::open_ssh_connection(
+            &host,
+            port,
+            host_key_policy,
+            Some((std::time::Duration::from_secs(15), 30)),
+        ),
+    )
+    .await
+    {
         Ok(Ok(h)) => h,
         Ok(Err(e)) => {
             if !cancelled() { let _ = resp_tx.send(SftpResponse::Error(e)); }
@@ -81,6 +103,14 @@ async fn sftp_task_inner(
             return;
         }
     };
+
+    // 1b. Authenticate — deliberately NOT wrapped in CONNECT_TIMEOUT:
+    // a 2FA user may take minutes to type an OTP. The bridge's cancel
+    // (pane closed / user cancel) and the cancel_flag still abort.
+    if let Err(e) = crate::ssh::authenticate(&mut handle, &username, &auth, &auth_prompt).await {
+        if !cancelled() { let _ = resp_tx.send(SftpResponse::Error(e)); }
+        return;
+    }
     if cancelled() { return; }
 
     // 2. Open a session channel and request SFTP subsystem
