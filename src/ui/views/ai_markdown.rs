@@ -275,7 +275,15 @@ fn render_inline(
                     rt = rt.italics();
                 }
                 Style::Code => {
-                    rt = rt.monospace().color(theme.accent).background_color(theme.input_bg);
+                    // Inline code keeps the SAME point size as surrounding prose
+                    // (only the font family changes to monospace) so all spans in
+                    // a wrapped line share one line height and stay baseline-
+                    // aligned. Tinting the glyphs + background marks it as code
+                    // without disturbing the layout.
+                    rt = rt
+                        .monospace()
+                        .color(theme.accent)
+                        .background_color(theme.input_bg);
                 }
                 Style::Link => {
                     rt = rt.color(theme.accent).underline();

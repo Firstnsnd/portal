@@ -83,9 +83,15 @@ pub fn render_ai_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut Wi
                             draw_bubble(ui, msg, theme, lang, &mut run_wanted);
                         }
                         if let Some(buf) = &st.streaming {
-                            draw_streaming_bubble(ui, &buf.text, theme);
+                            if buf.text.is_empty() {
+                                // No token arrived yet — show the animated
+                                // "thinking" bubble instead of an empty static one.
+                                draw_thinking_bubble(ui, theme);
+                            } else {
+                                draw_streaming_bubble(ui, &buf.text, theme);
+                            }
                         } else if st.running {
-                            draw_thinking_bubble(ui, theme, lang);
+                            draw_thinking_bubble(ui, theme);
                         }
                         if let Some(err) = &st.error {
                             draw_error(ui, theme, lang, err);
@@ -233,8 +239,11 @@ fn draw_streaming_bubble(ui: &mut egui::Ui, text: &str, theme: &crate::ui::Theme
 /// A subtle "assistant is typing…" bubble with three animated accent dots,
 /// replacing the default spinner while a reply is awaited (before any token
 /// arrives, at which point `draw_streaming_bubble` takes over).
-fn draw_thinking_bubble(ui: &mut egui::Ui, theme: &crate::ui::theme::ThemeColors, lang: crate::ui::Language) {
+fn draw_thinking_bubble(ui: &mut egui::Ui, theme: &crate::ui::theme::ThemeColors) {
     let now = ui.input(|i| i.time);
+    // The app repaints on activity, not a fixed 60 FPS, so while waiting for the
+    // first token we must keep asking for repaints or the dots freeze on frame one.
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
     ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
         egui::Frame::none()
             .inner_margin(egui::Margin { left: PAD, right: PAD, top: 0.0, bottom: 0.0 })
@@ -245,33 +254,23 @@ fn draw_thinking_bubble(ui: &mut egui::Ui, theme: &crate::ui::theme::ThemeColors
                             egui::RichText::new("\u{2726}").color(theme.accent).size(tk::FONT_XS),
                         );
                         ui.add_space(4.0);
-                        // Three dots with a staggered sine-wave offset.
+                        // Three accent dots bouncing vertically in a staggered
+                        // wave — each shifts up/down on a sine, offset per index.
                         for i in 0..3u32 {
-                            let phase = now * 2.4 + i as f64 * 0.9;
-                            let a = (phase.sin() * 0.5 + 0.5) * 0.6 + 0.4;
-                            let alpha = if a > 0.55 {
-                                255u8
-                            } else {
-                                (a * 255.0) as u8
-                            };
-                            let color = if alpha > 160 {
-                                theme.accent
-                            } else {
-                                theme.accent_alpha(alpha)
-                            };
+                            let bounce = (now * 5.0 + i as f64 * 0.9).sin();
+                            let y_off = (bounce * 2.5) as f32;
                             ui.add_space(2.0);
                             let (rect, _) = ui.allocate_exact_size(
-                                egui::vec2(5.0, 5.0),
+                                egui::vec2(6.0, 12.0),
                                 egui::Sense::hover(),
                             );
-                            ui.painter().circle_filled(rect.center(), 2.5, color);
+                            let center = egui::pos2(
+                                rect.center().x,
+                                rect.center().y + y_off,
+                            );
+                            ui.painter().circle_filled(center, 3.0, theme.accent);
                         }
                         ui.add_space(8.0);
-                        ui.label(
-                            egui::RichText::new(lang.t("loading"))
-                                .color(theme.fg_dim)
-                                .size(tk::FONT_SM),
-                        );
                     });
                 });
             });

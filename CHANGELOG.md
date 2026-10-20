@@ -2,6 +2,12 @@
 
 All notable changes to Portal will be documented in this file.
 
+## [0.16.2] - 2026-10-20
+
+### Changed
+- **Consistent inline code size** - Inline code in AI Markdown replies now uses the same point size as surrounding prose (monospace font only), keeping wrapped lines baseline-aligned instead of visually mismatched.
+- **Animated waiting bubble** - While waiting for the first token, the assistant bubble shows three accent dots bouncing in a loop (no "loading" label), replacing the previous static empty bubble.
+
 ## [0.16.1] - 2026-10-20
 
 ### Changed
