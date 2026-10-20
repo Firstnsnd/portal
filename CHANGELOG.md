@@ -2,6 +2,11 @@
 
 All notable changes to Portal will be documented in this file.
 
+## [0.16.3] - 2026-10-21
+
+### Changed
+- **Reorganized Settings page** - A left-hand navigation groups settings into five sections (General, Appearance, Terminal, AI, Shortcuts) with content on the right, replacing the previous single long scroll page. Language settings moved into General; Appearance now holds Font and Theme.
+
 ## [0.16.2] - 2026-10-20
 
 ### Changed

@@ -52,6 +52,18 @@ pub struct PortalApp {
     pub llm_config: crate::llm::types::LlmConfig,
     /// Draft API key text in the settings input (never shown back once stored).
     pub llm_key_draft: String,
+    /// Active settings page section (left-hand nav, non-persisted).
+    pub settings_section: SettingsSection,
+}
+
+/// Categories shown in the Settings page's left-hand navigation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsSection {
+    Appearance,
+    Terminal,
+    Ai,
+    Shortcuts,
+    General,
 }
 
 impl PortalApp {
@@ -162,6 +174,7 @@ impl PortalApp {
             last_dismissed_update_version,
             llm_config,
             llm_key_draft: String::new(),
+            settings_section: SettingsSection::General,
         }
     }
 
