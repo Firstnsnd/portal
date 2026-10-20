@@ -244,6 +244,11 @@ pub struct SshSession {
     pub state: Arc<Mutex<SshConnectionState>>,
     /// Remote shell path detected via exec channel (e.g. "/bin/zsh")
     pub shell_hint: Arc<Mutex<Option<String>>>,
+    /// Remote OS detected via `uname -s` (e.g. "Linux", "Darwin"); `None` if
+    /// the probe failed or hasn't completed yet.
+    pub os_hint: Arc<Mutex<Option<String>>>,
+    /// Remote architecture detected via `uname -m` (e.g. "x86_64", "aarch64").
+    pub arch_hint: Arc<Mutex<Option<String>>>,
     /// Active port forwards managed by this session
     #[allow(dead_code)]
     pub port_forwards: Arc<Mutex<Vec<PortForward>>>,
@@ -315,6 +320,8 @@ impl SshSession {
         let state = Arc::new(Mutex::new(SshConnectionState::Connecting));
         let alive = Arc::new(AtomicBool::new(true));
         let shell_hint = Arc::new(Mutex::new(None::<String>));
+        let os_hint = Arc::new(Mutex::new(None::<String>));
+        let arch_hint = Arc::new(Mutex::new(None::<String>));
         let port_forwards = Arc::new(Mutex::new(Vec::<PortForward>::new()));
         let notifications = Arc::new(Mutex::new(Vec::<AppNotification>::new()));
         let metrics = Arc::new(Mutex::new(MetricsSnapshot::new()));
@@ -324,6 +331,8 @@ impl SshSession {
         let state_clone = Arc::clone(&state);
         let alive_clone = Arc::clone(&alive);
         let shell_hint_clone = Arc::clone(&shell_hint);
+        let os_hint_clone = Arc::clone(&os_hint);
+        let arch_hint_clone = Arc::clone(&arch_hint);
         let port_forwards_clone = Arc::clone(&port_forwards);
         let notifications_clone = Arc::clone(&notifications);
         let metrics_clone = Arc::clone(&metrics);
@@ -334,7 +343,8 @@ impl SshSession {
         runtime.spawn(async move {
             Self::ssh_task(
                 host, port, username, auth, cols, rows, grid_clone, cmd_rx,
-                state_clone, alive_clone, shell_hint_clone, startup_commands,
+                state_clone, alive_clone, shell_hint_clone, os_hint_clone,
+                arch_hint_clone, startup_commands,
                 keepalive_interval, agent_forwarding, port_forward_configs,
                 port_forwards_clone, notifications_clone, metrics_clone,
                 metrics_enabled_clone, auth_prompt_clone, jump_host,
@@ -347,6 +357,8 @@ impl SshSession {
             cmd_tx,
             state,
             shell_hint,
+            os_hint,
+            arch_hint,
             port_forwards,
             notifications,
             metrics,
@@ -368,6 +380,8 @@ impl SshSession {
         state: Arc<Mutex<SshConnectionState>>,
         alive: Arc<AtomicBool>,
         shell_hint: Arc<Mutex<Option<String>>>,
+        os_hint: Arc<Mutex<Option<String>>>,
+        arch_hint: Arc<Mutex<Option<String>>>,
         startup_commands: Vec<String>,
         keepalive_interval: u32,
         agent_forwarding: bool,
@@ -511,6 +525,22 @@ impl SshSession {
         }
 
         let handle = Arc::new(handle);
+
+        // Probe remote OS and architecture (best-effort; failure only means the
+        // AI system prompt degrades to "unknown", never that connection fails).
+        // Done after Arc wrapping so we can reuse `exec_command(&handle, ..)`.
+        if let Ok(os) = exec_command(&handle, "uname -s").await {
+            let os = os.trim().to_string();
+            if !os.is_empty() {
+                if let Ok(mut h) = os_hint.lock() { *h = Some(os); }
+            }
+        }
+        if let Ok(arch) = exec_command(&handle, "uname -m").await {
+            let arch = arch.trim().to_string();
+            if !arch.is_empty() {
+                if let Ok(mut h) = arch_hint.lock() { *h = Some(arch); }
+            }
+        }
 
         // Local forwards are no longer auto-started on connect — use the
         // Tunnels tab (Start button → start_port_forward) instead.

@@ -89,6 +89,7 @@ impl PortalApp {
             keyboard_shortcuts: self.shortcut_resolver.bindings().to_vec(),
             check_for_updates: self.check_for_updates,
             last_dismissed_update_version: self.last_dismissed_update_version.clone(),
+            llm: self.llm_config.clone(),
         };
         crate::config::save_settings(&settings);
     }
@@ -344,6 +345,118 @@ impl PortalApp {
                     self.shortcut_resolver.update_bindings(crate::config::default_shortcuts());
                     changed = true;
                 }
+
+                ui.add_space(SPACE_LG);
+                ui.separator();
+                ui.add_space(SPACE_SM);
+
+                // ── LLM section ──
+                ui.label(egui::RichText::new(lang.t("llm")).color(theme.fg_primary).size(14.0).strong());
+                ui.add_space(SPACE_XS);
+
+                // Provider
+                ui.horizontal(|ui| {
+                    ui.label(widgets::field_label(lang.t("llm_provider"), &theme));
+                    ui.add_space(SPACE_SM);
+                    let backend = self.llm_config.backend;
+                    let selected = match backend {
+                        crate::llm::types::LlmBackend::OpenAiCompatible => lang.t("llm_provider_openai"),
+                        crate::llm::types::LlmBackend::Anthropic => lang.t("llm_provider_anthropic"),
+                    };
+                    egui::ComboBox::from_id_salt("llm_provider_combo")
+                        .selected_text(egui::RichText::new(selected).color(theme.fg_primary).size(FONT_BASE))
+                        .width(220.0)
+                        .show_ui(ui, |ui| {
+                            widgets::style_dropdown(ui, &theme);
+                            if ui.selectable_label(matches!(backend, crate::llm::types::LlmBackend::OpenAiCompatible), lang.t("llm_provider_openai")).clicked() {
+                                self.llm_config.backend = crate::llm::types::LlmBackend::OpenAiCompatible;
+                                changed = true;
+                            }
+                            if ui.selectable_label(matches!(backend, crate::llm::types::LlmBackend::Anthropic), lang.t("llm_provider_anthropic")).clicked() {
+                                self.llm_config.backend = crate::llm::types::LlmBackend::Anthropic;
+                                changed = true;
+                            }
+                        });
+                });
+
+                // Base URL — required for OpenAI-compatible, optional for Anthropic
+                // (blank falls back to https://api.anthropic.com).
+                let base_url_hint: &str = if self.llm_config.backend == crate::llm::types::LlmBackend::OpenAiCompatible {
+                    "https://api.openai.com/v1"
+                } else {
+                    "https://api.anthropic.com"
+                };
+                ui.horizontal(|ui| {
+                    ui.label(widgets::field_label(lang.t("llm_base_url"), &theme));
+                    ui.add_space(SPACE_SM);
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.llm_config.base_url)
+                            .hint_text(base_url_hint)
+                            .desired_width(280.0)
+                            .font(egui::FontId::proportional(FONT_BASE))
+                            .text_color(theme.fg_primary),
+                    );
+                    if resp.lost_focus() { changed = true; }
+                });
+
+                // Model
+                ui.horizontal(|ui| {
+                    ui.label(widgets::field_label(lang.t("llm_model"), &theme));
+                    ui.add_space(SPACE_SM);
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.llm_config.model)
+                            .hint_text("gpt-4o / claude-sonnet-4-5")
+                            .desired_width(280.0)
+                            .font(egui::FontId::proportional(FONT_BASE))
+                            .text_color(theme.fg_primary),
+                    );
+                    if resp.lost_focus() { changed = true; }
+                });
+
+                // API key (stored in keychain, never echoed back)
+                ui.horizontal(|ui| {
+                    ui.label(widgets::field_label(lang.t("llm_api_key"), &theme));
+                    ui.add_space(SPACE_SM);
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.llm_key_draft)
+                            .password(true)
+                            .hint_text(if self.llm_config.has_api_key { "••••••••" } else { "" })
+                            .desired_width(220.0)
+                            .font(egui::FontId::proportional(FONT_BASE))
+                            .text_color(theme.fg_primary),
+                    );
+                    let save_clicked = ui.add(
+                        egui::Button::new(egui::RichText::new(lang.t("llm_api_key_save")).color(theme.fg_primary).size(FONT_BASE))
+                            .min_size(egui::vec2(52.0, 26.0)),
+                    ).clicked();
+                    if save_clicked && !self.llm_key_draft.trim().is_empty() {
+                        let backend = match self.llm_config.backend {
+                            crate::llm::types::LlmBackend::OpenAiCompatible => "openai",
+                            crate::llm::types::LlmBackend::Anthropic => "anthropic",
+                        };
+                        if crate::config::store_llm_api_key(backend, self.llm_key_draft.trim()) {
+                            self.llm_config.has_api_key = true;
+                            self.llm_key_draft.clear();
+                            changed = true;
+                        }
+                    }
+                    let _ = resp;
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(lang.t("llm_api_key_desc")).color(theme.fg_dim).size(FONT_SM));
+                    if self.llm_config.has_api_key
+                        && ui.add(egui::Button::new(egui::RichText::new(lang.t("llm_api_key_clear")).color(theme.fg_dim).size(FONT_SM)).frame(false)).clicked()
+                    {
+                        let backend = match self.llm_config.backend {
+                            crate::llm::types::LlmBackend::OpenAiCompatible => "openai",
+                            crate::llm::types::LlmBackend::Anthropic => "anthropic",
+                        };
+                        crate::config::delete_llm_api_key(backend);
+                        self.llm_config.has_api_key = false;
+                        changed = true;
+                    }
+                });
             });
         });
 

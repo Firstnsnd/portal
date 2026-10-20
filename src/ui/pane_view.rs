@@ -58,6 +58,9 @@ pub struct WindowContext<'a> {
 
     // Font settings
     pub font_size: f32,
+
+    // LLM integration config (non-secret; API key lives in keychain)
+    pub llm_config: &'a crate::llm::types::LlmConfig,
 }
 
 impl<'a> WindowContext<'a> {
@@ -74,6 +77,7 @@ impl<'a> WindowContext<'a> {
         language: Language,
         runtime: &'a tokio::runtime::Runtime,
         font_size: f32,
+        llm_config: &'a crate::llm::types::LlmConfig,
     ) -> Self {
         Self {
             hosts,
@@ -86,6 +90,7 @@ impl<'a> WindowContext<'a> {
             language,
             runtime,
             font_size,
+            llm_config,
         }
     }
 }
@@ -149,6 +154,11 @@ impl AppWindow {
             && self.tabs[self.active_tab].tools_drawer_open
         {
             crate::ui::views::metrics_drawer::render_tools_drawer(self, ctx, cx);
+        }
+
+        // AI chat drawer (one per tab; opened via the draggable orb)
+        if self.current_view == AppView::Terminal {
+            crate::ui::views::ai_drawer::render_ai_drawer(self, ctx, cx);
         }
     }
 }

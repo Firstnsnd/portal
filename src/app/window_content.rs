@@ -388,6 +388,7 @@ impl PortalApp {
                 self.language,
                 &self.runtime,
                 self.font_size,
+                &self.llm_config,
             );
             self.windows[window_idx].render_drawers(ctx, &mut cx);
         }
@@ -420,6 +421,7 @@ impl PortalApp {
                                 self.language,
                                 &self.runtime,
                                 self.font_size,
+                                &self.llm_config,
                             );
                             self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
                         };
@@ -439,6 +441,7 @@ impl PortalApp {
                                 self.language,
                                 &self.runtime,
                                 self.font_size,
+                                &self.llm_config,
                             );
                             self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
                         };
@@ -457,6 +460,7 @@ impl PortalApp {
                                 self.language,
                                 &self.runtime,
                                 self.font_size,
+                                &self.llm_config,
                             );
                             self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
                         };
@@ -478,6 +482,7 @@ impl PortalApp {
                                 self.language,
                                 &self.runtime,
                                 self.font_size,
+                                &self.llm_config,
                             );
                             self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
                         };
@@ -734,6 +739,10 @@ impl PortalApp {
                     tools_drawer_open: false,
                     tools_tab: 0,
                     pending_snippet: None,
+                    ai_chat: std::sync::Arc::new(std::sync::Mutex::new(
+                        crate::ui::state::ai_chat::AiChatState::default(),
+                    )),
+                    pending_ai_command: None,
                 };
                 window.tabs.push(new_tab);
                 window.active_tab = window.tabs.len() - 1;
@@ -1021,6 +1030,42 @@ impl PortalApp {
                         window.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
                     }
                 }
+            }
+        }
+
+        // ── AI orb (one per tab) + pending command execution ──
+        let tab = &mut self.windows[window_idx].tabs[active];
+        let prev_offset = tab.ai_chat.lock().map(|s| s.orb_offset).unwrap_or_default();
+        // Hide the orb while the drawer is open (it overlaps the drawer area and
+        // its Foreground Area would otherwise steal the drawer's input).
+        let drawer_open = tab.ai_chat.lock().map(|s| s.open).unwrap_or(false);
+        let (orb_clicked, new_offset) = if drawer_open {
+            (false, prev_offset)
+        } else {
+            crate::ui::views::ai_drawer::render_orb(ctx, available, &self.theme, prev_offset)
+        };
+        {
+            let mut ai = tab.ai_chat.lock().unwrap();
+            if new_offset != ai.orb_offset {
+                ai.orb_offset = new_offset;
+            }
+            if orb_clicked {
+                ai.open = true;
+            }
+        }
+
+        // Execute a confirmed AI command in the focused terminal (single frame
+        // after the confirmation modal, so PTY resize/settle has happened).
+        if let Some(cmd) = tab.pending_ai_command.take() {
+            let focused = tab.focused_session;
+            if tab.broadcast_enabled {
+                for session in &mut tab.sessions {
+                    session.write(&cmd);
+                    session.write("\r");
+                }
+            } else if let Some(session) = tab.sessions.get_mut(focused) {
+                session.write(&cmd);
+                session.write("\r");
             }
         }
     }

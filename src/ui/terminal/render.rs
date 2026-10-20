@@ -208,7 +208,13 @@ pub fn render_terminal_session(
     }
     let is_focused = session_id == focused_session_id;
     if is_focused {
-        response.request_focus();
+        // Only grab keyboard focus when no other widget — e.g. the AI chat
+        // drawer's TextEdit — is already holding it. Otherwise the drawer's
+        // input box can never be clicked/typed in: the focused pane would
+        // steal focus back every frame.
+        if !ctx.wants_keyboard_input() {
+            response.request_focus();
+        }
     }
 
     let search_input_id = egui::Id::new("search_input").with(pane_id);

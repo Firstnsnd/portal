@@ -40,3 +40,4 @@ pub mod config;
 pub mod ssh;
 pub mod sftp;
 pub mod repaint;
+pub mod llm;

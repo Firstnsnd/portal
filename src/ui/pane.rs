@@ -214,6 +214,10 @@ pub struct Tab {
     pub tools_tab: u8,  // 0=Metrics 1=Snippets 2=Tunnels
     /// Pending snippet command to execute on next frame (after drawer closes and PTY resizes)
     pub pending_snippet: Option<String>,
+    /// AI chat state + draggable orb for this tab.
+    pub ai_chat: std::sync::Arc<std::sync::Mutex<crate::ui::state::ai_chat::AiChatState>>,
+    /// Command queued by the AI drawer to run on the next frame.
+    pub pending_ai_command: Option<String>,
 }
 
 /// Per-tab animation state for smooth reordering
@@ -424,6 +428,10 @@ mod tests {
             tools_drawer_open: false,
             tools_tab: 0,
             pending_snippet: None,
+            ai_chat: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::ui::state::ai_chat::AiChatState::default(),
+            )),
+            pending_ai_command: None,
         }
     }
 

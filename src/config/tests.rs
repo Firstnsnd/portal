@@ -191,6 +191,8 @@ mod tests {
         assert_eq!(settings.scrollback_limit_mb, 100);
         assert_eq!(settings.ssh_keepalive_interval, 30);
         assert!(!settings.keyboard_shortcuts.is_empty());
+        assert_eq!(settings.llm.backend, crate::llm::types::LlmBackend::OpenAiCompatible);
+        assert!(!settings.llm.has_api_key);
     }
 
     #[test]

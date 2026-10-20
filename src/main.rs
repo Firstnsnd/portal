@@ -7,6 +7,7 @@ mod app;
 mod config;
 #[cfg(unix)]
 mod ipc;
+mod llm;
 mod repaint;
 mod sftp;
 mod ssh;

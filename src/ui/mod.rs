@@ -50,6 +50,7 @@ pub mod terminal;
 pub mod views;
 pub mod widgets;
 pub mod formatting;
+pub mod state;
 
 // Re-export all public types for convenient access via `use ui::*`
 pub use theme::{ThemeColors, ThemePreset};

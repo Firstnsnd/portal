@@ -102,6 +102,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::llm::types::LlmConfig;
+
 // ── Port Forward Config Types ─────────────────────────────────────
 // Defined here so both config and ssh modules can use them without circular deps.
 
@@ -518,6 +520,55 @@ pub fn delete_credential_secrets(cred_id: &str, cred_name: &str) {
     }
 }
 
+// ── LLM API key (keychain) ──────────────────────────────────────────
+//
+// The LLM API key is a secret and never lives in settings.json. It is stored
+// per-backend in the system keychain, mirroring the credential-secret scheme
+// above.
+
+const LLM_KEYCHAIN_SERVICE: &str = "Portal: LLM API Key";
+
+fn llm_keychain_account(backend: &str) -> String {
+    format!("llm:{backend}")
+}
+
+/// Store the LLM API key for the given `backend` (`"openai"` / `"anthropic"`)
+/// in the system keychain. Returns `true` on success.
+pub fn store_llm_api_key(backend: &str, key: &str) -> bool {
+    let account = llm_keychain_account(backend);
+    let _ = Command::new("security")
+        .args(["delete-generic-password", "-a", &account, "-s", LLM_KEYCHAIN_SERVICE])
+        .output();
+    let result = Command::new("security")
+        .args(["add-generic-password", "-a", &account, "-s", LLM_KEYCHAIN_SERVICE, "-w", key, "-A"])
+        .output();
+    match result {
+        Ok(o) if o.status.success() => true,
+        Ok(o) => {
+            log::warn!("Failed to store LLM API key: {}", String::from_utf8_lossy(&o.stderr).trim());
+            false
+        }
+        Err(e) => {
+            log::warn!("Failed to run security command: {e}");
+            false
+        }
+    }
+}
+
+/// Load the LLM API key for the given `backend`, if one is stored.
+pub fn load_llm_api_key(backend: &str) -> Option<String> {
+    let account = llm_keychain_account(backend);
+    security_find_password(LLM_KEYCHAIN_SERVICE, &account)
+}
+
+/// Remove the LLM API key for the given `backend` from the keychain.
+pub fn delete_llm_api_key(backend: &str) {
+    let account = llm_keychain_account(backend);
+    let _ = Command::new("security")
+        .args(["delete-generic-password", "-a", &account, "-s", LLM_KEYCHAIN_SERVICE])
+        .output();
+}
+
 // ── resolve_auth ────────────────────────────────────────────────────
 
 /// Build a `ResolvedAuth` for a host by looking up its credential.
@@ -870,6 +921,9 @@ pub struct PortalSettings {
     /// Last version the user dismissed, so the prompt is not re-shown for it.
     #[serde(default)]
     pub last_dismissed_update_version: Option<String>,
+    /// LLM backend configuration (non-secret; the API key lives in keychain).
+    #[serde(default)]
+    pub llm: LlmConfig,
 }
 
 fn default_keepalive_interval() -> u32 {
@@ -899,6 +953,7 @@ impl Default for PortalSettings {
             keyboard_shortcuts: default_shortcuts(),
             check_for_updates: true,
             last_dismissed_update_version: None,
+            llm: LlmConfig::default(),
         }
     }
 }

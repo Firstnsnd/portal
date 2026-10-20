@@ -48,6 +48,10 @@ pub struct PortalApp {
     pub next_update_check: std::time::Instant,
     pub check_for_updates: bool,
     pub last_dismissed_update_version: Option<String>,
+    // LLM integration
+    pub llm_config: crate::llm::types::LlmConfig,
+    /// Draft API key text in the settings input (never shown back once stored).
+    pub llm_key_draft: String,
 }
 
 impl PortalApp {
@@ -77,6 +81,7 @@ impl PortalApp {
         let shortcut_resolver = ShortcutResolver::new(settings.keyboard_shortcuts.clone());
         let check_for_updates = settings.check_for_updates;
         let last_dismissed_update_version = settings.last_dismissed_update_version.clone();
+        let llm_config = settings.llm.clone();
         // Use default theme preset (Tokyo Night)
         let theme_preset = ThemePreset::TokyoNight;
         let theme = theme_preset.colors();
@@ -108,6 +113,10 @@ impl PortalApp {
             tools_drawer_open: false,
             tools_tab: 0,
             pending_snippet: None,
+            ai_chat: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::ui::state::ai_chat::AiChatState::default(),
+            )),
+            pending_ai_command: None,
         };
 
         // Create the first (main) window
@@ -151,6 +160,8 @@ impl PortalApp {
             next_update_check: std::time::Instant::now(),
             check_for_updates,
             last_dismissed_update_version,
+            llm_config,
+            llm_key_draft: String::new(),
         }
     }
 

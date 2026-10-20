@@ -39,6 +39,10 @@ impl PortalApp {
             tools_drawer_open: false,
             tools_tab: 0,
             pending_snippet: None,
+            ai_chat: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::ui::state::ai_chat::AiChatState::default(),
+            )),
+            pending_ai_command: None,
         };
         window.tabs.push(tab);
         window.active_tab = window.tabs.len() - 1;
@@ -67,6 +71,10 @@ impl PortalApp {
             tools_drawer_open: false,
             tools_tab: 0,
             pending_snippet: None,
+            ai_chat: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::ui::state::ai_chat::AiChatState::default(),
+            )),
+            pending_ai_command: None,
         };
         let viewport_id =
             egui::ViewportId::from_hash_of(format!("window_{}", self.next_viewport_id));
@@ -110,6 +118,10 @@ impl PortalApp {
             tools_drawer_open: false,
             tools_tab: 0,
             pending_snippet: None,
+            ai_chat: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::ui::state::ai_chat::AiChatState::default(),
+            )),
+            pending_ai_command: None,
         };
         let window = if let Some(w) = self.windows.get_mut(window_idx) {
             w
