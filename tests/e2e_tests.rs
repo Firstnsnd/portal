@@ -124,6 +124,43 @@ mod e2e_tests {
             "is_connected() must not flap back to true after a confirmed exit");
     }
 
+    /// Regression: keystrokes must survive a full PTY input queue. The master
+    /// fd is non-blocking (O_NONBLOCK is shared across every dup of the open
+    /// file description, including the UI thread's write end), so a naive
+    /// `write_all` returned WouldBlock once the foreground process stopped
+    /// reading input — and the UI silently dropped those keystrokes (lost
+    /// type-ahead / completion input while a command floods output). The write
+    /// path now polls POLLOUT and retries, so every write lands.
+    #[tokio::test]
+    async fn test_write_survives_full_pty_input_queue() {
+        let session = portal::terminal::RealPtySession::new(
+            44, 80, 24, "/bin/zsh"
+        ).expect("Failed to create PTY session");
+
+        // A foreground `sleep` does not read stdin, so the tty input queue
+        // stops draining. Flood it several times over (a typical queue is
+        // ~4KB): each write must eventually succeed instead of failing with
+        // EAGAIN.
+        session.write(b"sleep 2\n").expect("initial write");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let chunk = vec![b'#'; 8192];
+        let start = std::time::Instant::now();
+        for _ in 0..8 {
+            session.write(&chunk)
+                .expect("write into a full PTY queue must not drop data");
+        }
+        // The queue drains again once `sleep` exits and zsh resumes reading;
+        // total time must be on the order of the sleep, never an error.
+        assert!(start.elapsed() < Duration::from_secs(15),
+            "PTY writes should complete shortly after the foreground command exits");
+
+        // Sanity: the shell still accepts input after the flood.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        session.write(b"true\n").expect("shell accepts input after the flood");
+        assert!(session.is_alive(), "shell must stay alive after queue flood");
+    }
+
     /// Regression: `curl -s https://vaniot.net` produces ~5K of single-line
     /// HTML (Cloudflare challenge page). The entire output wrapped into ~67
     /// rows at 80 cols. Before the fix, `erase_below` recursively cleared
@@ -214,6 +251,7 @@ mod e2e_tests {
                 auth: portal::config::AuthMethod::None,
                 startup_commands: vec![],
                 agent_forwarding: false,
+                auto_record: false,
                 jump_host: None,
                 port_forwards: vec![
                     portal::config::PortForwardConfig {

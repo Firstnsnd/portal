@@ -2,7 +2,7 @@
 
 use super::{Error, Pty, PtySize, Result};
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
@@ -23,6 +23,47 @@ fn ps_comm(pid: u32) -> Option<String> {
         }
     }
     None
+}
+
+/// Write all of `data` to the PTY master fd, tolerating non-blocking mode.
+///
+/// The master's `O_NONBLOCK` flag (set once at spawn so the reader can poll)
+/// is a property of the open file description, shared by EVERY dup of that
+/// fd — including the UI thread's write end (`PtyWriter`). A plain
+/// `write_all` therefore fails with `WouldBlock` whenever the PTY input
+/// queue is momentarily full (shell busy producing output, flow-controlled
+/// or stopped foreground app) — and the caller would silently drop those
+/// keystrokes. Instead: retry partial writes and, on WouldBlock/EINTR, wait
+/// for `POLLOUT` with a bounded timeout so a wedged PTY can't freeze the UI
+/// thread forever.
+pub fn write_all_pty(fd: RawFd, mut data: &[u8]) -> io::Result<()> {
+    while !data.is_empty() {
+        let n = unsafe {
+            libc::write(fd, data.as_ptr() as *const libc::c_void, data.len())
+        };
+        if n >= 0 {
+            data = &data[n as usize..];
+            continue;
+        }
+        let err = io::Error::last_os_error();
+        match err.raw_os_error() {
+            Some(libc::EAGAIN) | Some(libc::EINTR) => {
+                let mut pfd = libc::pollfd {
+                    fd,
+                    events: libc::POLLOUT,
+                    revents: 0,
+                };
+                // Bounded wait: 1s per retry. A healthy shell drains its
+                // input queue in microseconds once it reads again; a PTY
+                // that stays unwritable for a second is effectively dead
+                // (stopped child, closed slave) — surface the error instead
+                // of spinning.
+                unsafe { libc::poll(&mut pfd, 1, 1000) };
+            }
+            _ => return Err(err),
+        }
+    }
+    Ok(())
 }
 
 /// Unix PTY implementation
@@ -157,8 +198,7 @@ impl Pty for UnixPty {
         if !self.alive.load(Ordering::Relaxed) {
             return Err(Error::AlreadyClosed);
         }
-        self.master
-            .write_all(data)
+        write_all_pty(self.master.as_raw_fd(), data)
             .map_err(|e| Error::WriteFailed(e.to_string()))?;
         Ok(())
     }

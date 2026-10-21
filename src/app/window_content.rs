@@ -494,6 +494,16 @@ impl PortalApp {
                         };
                         self.handle_view_actions(view_actions, window_idx, ctx);
                     }
+                    AppView::Replay => {
+                        crate::ui::views::replay_view::render_replay_view(
+                            &mut self.windows[window_idx],
+                            ctx,
+                            ui,
+                            &self.theme,
+                            self.font_size,
+                            self.language,
+                        );
+                    }
                 }
             });
 
@@ -824,6 +834,12 @@ impl PortalApp {
         let broadcast_enabled = self.windows[window_idx].tabs.get(self.windows[window_idx].active_tab)
             .map(|t| t.broadcast_enabled)
             .unwrap_or(false);
+        // Recording state of the focused pane (for the REC status indicator).
+        let recording_active = self.windows[window_idx].tabs
+            .get(self.windows[window_idx].active_tab)
+            .and_then(|t| t.sessions.get(t.focused_session))
+            .map(|s| s.kind.is_recording())
+            .unwrap_or(false);
 
         egui::TopBottomPanel::bottom(status_bar_id)
             .exact_height(STATUS_BAR_HEIGHT)
@@ -855,6 +871,76 @@ impl PortalApp {
                         ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
                         ui.add_space(12.0);
                         ui.label(egui::RichText::new(self.language.t("broadcast")).color(self.theme.accent).size(font_size));
+                    }
+                    // Recording indicator (focused pane) — clickable, jumps to
+                    // this host's recordings in the replay library.
+                    if recording_active {
+                        ui.add_space(12.0);
+                        ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
+                        ui.add_space(12.0);
+                        // Red REC label; keep it ticking so the dot can't appear stale.
+                        let rec_host = self.windows[window_idx].tabs
+                            .get(self.windows[window_idx].active_tab)
+                            .and_then(|t| t.sessions.get(t.focused_session))
+                            .map(|s| s.kind.recording_host());
+                        ui.label(egui::RichText::new("●").color(self.theme.red).size(font_size));
+                        ui.add_space(4.0);
+                        let rec_resp = status_btn(ui, self.language.t("recording"), self.theme.red);
+                        if rec_resp.clicked() {
+                            if let Some(host) = rec_host {
+                                let w = &mut self.windows[window_idx];
+                                w.replay_host_filter = Some(host);
+                                w.replay = None;
+                                w.current_view = AppView::Replay;
+                            }
+                        }
+                        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+                    }
+                    // Recording failure toast (5s, right in the status bar)
+                    if let Some((err, at)) = &self.windows[window_idx].recording_error {
+                        if at.elapsed() < std::time::Duration::from_secs(5) {
+                            ui.add_space(12.0);
+                            ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
+                            ui.add_space(12.0);
+                            ui.label(egui::RichText::new(
+                                self.language.tf("recording_failed", err),
+                            ).color(self.theme.red).size(font_size));
+                            ctx.request_repaint_after(std::time::Duration::from_millis(
+                                5000 - at.elapsed().as_millis().min(4999) as u64 + 1,
+                            ));
+                        } else {
+                            self.windows[window_idx].recording_error = None;
+                        }
+                    }
+                    // Recording saved notice (8s): click to open the replay
+                    // player on the file that was just written.
+                    if let Some((path, at)) = &self.windows[window_idx].recording_saved {
+                        let (saved_path, saved_at) = (path.clone(), *at);
+                        if saved_at.elapsed() < std::time::Duration::from_secs(8) {
+                            ui.add_space(12.0);
+                            ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
+                            ui.add_space(12.0);
+                            let name = saved_path.file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            let saved = status_btn(
+                                ui,
+                                &self.language.tf("recording_saved", &name),
+                                self.theme.green,
+                            ).on_hover_text(self.language.t("replay"));
+                            if saved.clicked() {
+                                let w = &mut self.windows[window_idx];
+                                w.replay = Some(crate::ui::views::replay_view::ReplayState::load(&saved_path));
+                                w.replay_host_filter = None;
+                                w.current_view = AppView::Replay;
+                                w.recording_saved = None;
+                            }
+                            ctx.request_repaint_after(std::time::Duration::from_millis(
+                                8000 - saved_at.elapsed().as_millis().min(7999) as u64 + 1,
+                            ));
+                        } else {
+                            self.windows[window_idx].recording_saved = None;
+                        }
                     }
                     ui.add_space(12.0);
                     ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
@@ -903,12 +989,21 @@ impl PortalApp {
             let temp_broadcast = BroadcastState {
                 enabled: tab.broadcast_enabled,
             };
+            // The AI chat drawer's TextEdit must be able to hold keyboard
+            // focus; while it's open the terminal panes stand down from
+            // re-claiming focus every frame (see render_terminal_session).
+            let ai_drawer_open = tab
+                .ai_chat
+                .lock()
+                .map(|s| s.open)
+                .unwrap_or(false);
             render_pane_tree(
                 ui, ctx,
                 &mut tab.layout,
                 available,
                 &mut tab.sessions,
                 focused,
+                ai_drawer_open,
                 &temp_broadcast,
                 &mut window.ime_composing,
                 &mut window.ime_preedit,
@@ -1022,6 +1117,44 @@ impl PortalApp {
                 PaneAction::ToggleBroadcast => {
                     self.windows[window_idx].tabs[active].broadcast_enabled =
                         !self.windows[window_idx].tabs[active].broadcast_enabled;
+                }
+                PaneAction::ToggleRecording => {
+                    let window = &mut self.windows[window_idx];
+                    if let Some(session) = window.tabs[active].sessions.get_mut(idx) {
+                        if session.kind.is_recording() {
+                            // Surface the finished file: the status bar shows a
+                            // clickable "saved" notice that opens the player.
+                            if let Some(path) = session.kind.stop_recording() {
+                                window.recording_saved =
+                                    Some((path, std::time::Instant::now()));
+                            }
+                        } else {
+                            let label = session.kind.recording_label();
+                            match crate::terminal::cast::new_recording_path(&label)
+                                .and_then(|path| {
+                                    session.kind.start_recording(&path)?;
+                                    Ok(path)
+                                }) {
+                                Ok(_path) => {}
+                                Err(e) => {
+                                    window.recording_error =
+                                        Some((e.to_string(), std::time::Instant::now()));
+                                }
+                            }
+                        }
+                    }
+                }
+                PaneAction::ViewHostRecordings => {
+                    let window = &mut self.windows[window_idx];
+                    if let Some(host) = window.tabs[active]
+                        .sessions
+                        .get(idx)
+                        .map(|s| s.kind.recording_host())
+                    {
+                        window.replay_host_filter = Some(host);
+                        window.replay = None; // library, not the player
+                        window.current_view = AppView::Replay;
+                    }
                 }
                 PaneAction::RemoveHostKey => {
                     let window = &mut self.windows[window_idx];

@@ -24,6 +24,13 @@ A modern GUI terminal emulator built with Rust and egui, inspired by Termius.
 - **Clickable URLs** - Auto-detect URLs in terminal output, hover to highlight, click to open in browser
 - **Click to Focus** - Click terminal pane to focus and type
 
+### Session Recording & Replay
+- **Asciicast Recording** - Record any local or SSH session to `.cast` (asciicast v2) via the terminal right-click menu; auto-record every new session optionally (globally or per host)
+- **Built-in Player** - Replay page plays recordings with play/pause and 0.5x–4x speed; mid-session recordings start on the exact screen you saw
+- **Recording Library** - Hosts-page-style list with usage bar, host filter chips, rename, reveal in Finder, and batch delete
+- **Host Association** - Recordings carry a `portal_host` header; the context menu and REC indicator jump straight to a host's recordings
+- **Retention Policy** - Auto-delete recordings older than N days and/or over a total size budget (Settings → Terminal → Recordings)
+
 ### SSH
 - **SSH Connections** - Password and SSH key authentication (russh)
 - **Connection State UI** - Connecting/Authenticating/Connected/Error overlays
@@ -66,7 +73,7 @@ A modern GUI terminal emulator built with Rust and egui, inspired by Termius.
 ### UI / Theme
 - **Dark Themes** - Tokyo Night, Dracula, One Dark, Solarized Dark, Nord
 - **Light Themes** - Solarized Light, GitHub Light, One Light
-- **Navigation Bar** - Hosts / Terminal / SFTP / Tunnels / Snippets / Keychain / Settings
+- **Navigation Bar** - Hosts / Terminal / SFTP / Tunnels / Snippets / Replay / Keychain / Settings
 - **Tab Status Indicators** - Green=connected, Blue=connecting, Red=error
 - **Bottom Status Bar** - Connection type, shell, encoding
 - **Multi-language** - English, Chinese, Japanese, Korean, French, Spanish, Russian
@@ -140,6 +147,7 @@ src/
 - **arboard** - Clipboard access
 - **ureq** - HTTP client for the AI assistant (rustls TLS) and update checks
 - **serde / serde_json** - Configuration persistence and LLM JSON bodies
+- **rfd** - Native file dialogs (recording picker)
 - **cocoa** - macOS specific APIs (app activation, NSPanel)
 
 ## Building
@@ -209,6 +217,10 @@ Once configured, drag the assistant orb in any terminal tab to open the chat dra
 ### Hosts & Credentials
 
 Host connections are stored in `~/Library/Application Support/portal/hosts.json`. Passwords, key passphrases, and private key contents are stored securely in the macOS Keychain. Each host's credentials appear under `Portal: <host name>` in Keychain Access. The JSON file never contains plaintext secrets.
+
+### Recordings
+
+Session recordings are saved as asciicast v2 (`.cast`) under `~/Library/Application Support/portal/recordings/`. Retention is configured in **Settings → Terminal → Recordings**: recordings older than the retention limit (days) or over the storage budget (MB, oldest deleted first) are removed at startup and swept hourly. Both limits default to 0 (keep everything forever).
 
 ## Security Features
 

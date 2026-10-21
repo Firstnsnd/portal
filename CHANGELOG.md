@@ -2,6 +2,21 @@
 
 All notable changes to Portal will be documented in this file.
 
+## [0.16.4] - 2026-10-21
+
+### Added
+- **Session recording (asciicast v2)** - Record any local or SSH session to a `.cast` file via the terminal right-click menu; recordings capture the PTY output stream with timestamps (no video, tiny files). A red REC indicator shows in the status bar while recording.
+- **Replay library & player** - New Replay page: built-in player with play/pause and 0.5x–4x speed, plus a library rendered in the hosts-page design language with a usage bar (count · total size · Open Folder), host filter chips, inline rename (rewrites the recording's title header), reveal in Finder, and batch multi-select delete.
+- **Recording entry points** - Stopping a recording shows a clickable saved-toast that opens it in the player; the terminal context menu and the REC indicator both link to "this host's recordings" with the library pre-filtered to that host.
+- **Host association** - Recordings carry a `portal_host` header field so they stay associated with their host even after renaming the file.
+- **Retention policy** - Settings → Terminal → Recordings: delete recordings older than N days and/or cap total storage (oldest deleted first). Enforced at startup and swept hourly; 0 = keep forever.
+- **Auto-record** - Optionally record every new session automatically (globally or per host).
+
+### Fixed
+- **Replay of mid-session recordings no longer loses the prompt** - Starting a recording mid-session snapshots the current screen as the first event, so replay opens on exactly what was visible (prompt included).
+- **Keyboard input no longer dies after Tab** - Terminal panes re-claim focus every frame instead of gating on `wants_keyboard_input()`, which silently dropped all keystrokes after Tab completion.
+- **PTY writes no longer drop keystrokes under output pressure** - Non-blocking master-fd writes now poll POLLOUT and retry instead of failing with EAGAIN.
+
 ## [0.16.3] - 2026-10-21
 
 ### Changed

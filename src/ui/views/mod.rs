@@ -24,3 +24,4 @@ pub mod snippets_view;
 pub mod metrics_drawer;
 pub mod ai_drawer;
 pub mod ai_markdown;
+pub mod replay_view;

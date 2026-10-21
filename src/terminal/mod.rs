@@ -5,6 +5,7 @@ mod types;
 mod grid;
 mod vte;
 mod session;
+pub mod cast;
 pub mod url;
 pub mod metrics;
 

@@ -29,6 +29,28 @@ pub enum SessionKind {
     Ssh(SshSession, HostEntry, ResolvedAuth),
 }
 
+/// Serialize the visible screen to plain text (one line per grid row, trailing
+/// whitespace and empty trailing rows trimmed) — the opening frame written
+/// when a recording starts mid-session, so replay shows the screen (prompt
+/// included) as the user saw it. Styling is intentionally dropped: the
+/// replayed content is what matters, not the exact pre-start colors.
+fn snapshot_screen(grid: &TerminalGrid) -> String {
+    let mut lines: Vec<String> = Vec::with_capacity(grid.rows);
+    for row in &grid.cells {
+        let mut line = String::new();
+        for cell in row {
+            if !cell.wide_continuation {
+                line.push(cell.c);
+            }
+        }
+        lines.push(line.trim_end().to_string());
+    }
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    lines.join("\r\n")
+}
+
 impl SessionKind {
     pub fn write(&mut self, data: &[u8]) -> std::io::Result<()> {
         match self {
@@ -38,9 +60,122 @@ impl SessionKind {
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> std::io::Result<()> {
+        // Asciicast tap: both backends' resizes funnel through here (the local
+        // path is already debounced), so one tap point captures every settle.
         match self {
-            SessionKind::Local(s, _) => s.resize(cols, rows),
-            SessionKind::Ssh(s, _, _) => s.resize(cols, rows),
+            SessionKind::Local(s, _) => {
+                s.record_resize(cols, rows);
+                s.resize(cols, rows)
+            }
+            SessionKind::Ssh(s, _, _) => {
+                s.record_resize(cols, rows);
+                s.resize(cols, rows)
+            }
+        }
+    }
+
+    /// True while an asciicast recording is active on this session.
+    pub fn is_recording(&self) -> bool {
+        match self {
+            SessionKind::Local(s, _) => s.recorder.lock().map(|r| r.is_some()).unwrap_or(false),
+            SessionKind::Ssh(s, _, _) => s.recorder.lock().map(|r| r.is_some()).unwrap_or(false),
+        }
+    }
+
+    /// Start recording output to `path` as asciicast v2. Fails if a recording
+    /// is already active or the file cannot be created.
+    ///
+    /// A mid-session start cannot recover bytes emitted before it began, so
+    /// the CURRENT visible screen is written as the very first output event:
+    /// replay opens on the screen as the user saw it (prompt included) and
+    /// subsequent PTY chunks continue from there. Auto-record (from spawn)
+    /// captures byte zero and doesn't need this.
+    pub fn start_recording(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let (cols, rows, screen) = match self {
+            SessionKind::Local(s, _) => {
+                let g = s.grid.lock().map_err(|_| std::io::Error::other("grid lock poisoned"))?;
+                (g.cols as u16, g.rows as u16, snapshot_screen(&g))
+            }
+            SessionKind::Ssh(s, _, _) => {
+                let g = s.grid.lock().map_err(|_| std::io::Error::other("grid lock poisoned"))?;
+                (g.cols as u16, g.rows as u16, snapshot_screen(&g))
+            }
+        };
+        let slot = match self {
+            SessionKind::Local(s, _) => &s.recorder,
+            SessionKind::Ssh(s, _, _) => &s.recorder,
+        };
+        let mut guard = slot
+            .lock()
+            .map_err(|_| std::io::Error::other("recorder lock poisoned"))?;
+        if guard.is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "recording already active",
+            ));
+        }
+        let title = Some(self.recording_label());
+        let host = Some(self.recording_host());
+        let mut recorder =
+            crate::terminal::cast::CastRecorder::create(path, cols, rows, title, host)?;
+        // Snapshot BEFORE publishing the slot, so it is strictly the first
+        // event — no reader chunk can slip in ahead of it.
+        if !screen.is_empty() {
+            recorder.output(screen.as_bytes());
+        }
+        *guard = Some(recorder);
+        Ok(())
+    }
+
+    /// Stop the active recording, flushing the file. Returns its path, or
+    /// `None` if the session wasn't recording.
+    pub fn stop_recording(&self) -> Option<std::path::PathBuf> {
+        let slot = match self {
+            SessionKind::Local(s, _) => &s.recorder,
+            SessionKind::Ssh(s, _, _) => &s.recorder,
+        };
+        let mut guard = slot.lock().ok()?;
+        guard.take()?.finish().ok()
+    }
+
+    /// Short label identifying this session ("zsh", "myhost") — used as the
+    /// recording filename segment and header title, so a `.cast` file says
+    /// what it recorded without being opened.
+    pub fn recording_label(&self) -> String {
+        match self {
+            SessionKind::Local(pty, fallback) => {
+                let base_of = |p: &str| {
+                    std::path::Path::new(p)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| p.to_string())
+                };
+                pty.get_shell_name()
+                    .map(|n| base_of(&n))
+                    .unwrap_or_else(|| base_of(fallback))
+            }
+            SessionKind::Ssh(_, host, _) => {
+                if host.name.is_empty() {
+                    host.host.clone()
+                } else {
+                    host.name.clone()
+                }
+            }
+        }
+    }
+
+    /// Which host this session runs on — written as the recording's
+    /// `portal_host` header field so the replay library can group by machine.
+    pub fn recording_host(&self) -> String {
+        match self {
+            SessionKind::Local(_, _) => "localhost".to_string(),
+            SessionKind::Ssh(_, host, _) => {
+                if host.username.is_empty() {
+                    format!("{}:{}", host.host, host.port)
+                } else {
+                    format!("{}@{}:{}", host.username, host.host, host.port)
+                }
+            }
         }
     }
 
@@ -209,8 +344,10 @@ impl TerminalSession {
         let settings = crate::config::load_settings();
         let scrollback_bytes = (settings.scrollback_limit_mb as usize) * 1024 * 1024;
 
-        let pty = RealPtySession::with_scrollback_limit(id, 80, 24, shell, scrollback_bytes, cwd)
-            .expect("failed to spawn local PTY");
+        let pty = RealPtySession::with_scrollback_limit(
+            id, 80, 24, shell, scrollback_bytes, cwd, settings.auto_record_sessions,
+        )
+        .expect("failed to spawn local PTY");
         let grid = pty.get_grid();
 
         // Get initial cwd
@@ -283,6 +420,7 @@ impl TerminalSession {
             host.agent_forwarding,
             host.port_forwards.clone(),
             jump_host,
+            host.auto_record || settings.auto_record_sessions,
         );
         let grid = ssh.get_grid();
         Self {
@@ -332,6 +470,9 @@ impl TerminalSession {
         if let SessionKind::Ssh(_, host, auth) = &self.kind {
             let host = host.clone();
             let auth = auth.clone();
+            // Keep recording across a reconnect (it ends at the old backend's
+            // Drop), and honor the auto-record setting for the new session.
+            let was_recording = self.kind.is_recording();
             let settings = crate::config::load_settings();
             let ssh = SshSession::connect(
                 runtime,
@@ -345,6 +486,7 @@ impl TerminalSession {
                 settings.ssh_keepalive_interval,
                 host.agent_forwarding,
                 jump_host,
+                was_recording || settings.auto_record_sessions,
             );
             self.grid = ssh.get_grid();
             self.kind = SessionKind::Ssh(ssh, host, auth);
@@ -729,5 +871,75 @@ mod sync_defer_e2e {
         let n = status_count(&s.grid.lock().unwrap());
         println!("end-to-end race: status_lines={n}");
         assert!(n <= 1, "status line duplicated after grow+redraw: {n}");
+    }
+
+    /// Regression for the missing-prompt replay bug: a recording started
+    /// mid-session must open on the screen the user was looking at. The
+    /// snapshot is written as the FIRST event (before the recorder slot is
+    /// published), so the prompt precedes the first keystroke echo — replay
+    /// must not begin with "ls anaconda3…" under a prompt that was never
+    /// shown.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_mid_session_recording_snapshot_opens_replay_on_prompt() {
+        let mut s = TerminalSession::new_local(0, "/bin/zsh");
+
+        fn screen_text(session: &TerminalSession) -> String {
+            session
+                .grid
+                .lock()
+                .unwrap()
+                .cells
+                .iter()
+                .map(|row| row.iter().map(|c| c.c).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        // Wait for the shell prompt to be painted into the grid.
+        let mut prompt_ready = false;
+        for _ in 0..100 {
+            if screen_text(&s).contains('%') {
+                prompt_ready = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(prompt_ready, "zsh prompt must be visible before starting the recording");
+
+        // Start mid-session, then type a marker the replay must come after.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mid-session.cast");
+        s.kind.start_recording(&path).expect("mid-session start");
+        s.kind.write(b"echo PORTAL_SNAPSHOT_MARKER\n").expect("write marker");
+
+        let mut marker_seen = false;
+        for _ in 0..100 {
+            if screen_text(&s).contains("PORTAL_SNAPSHOT_MARKER") {
+                marker_seen = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(marker_seen, "marker must be echoed before stopping");
+        let _ = s.kind.stop_recording();
+
+        let rec = crate::terminal::cast::parse_cast(&path).unwrap();
+        let marker_idx = rec
+            .events
+            .iter()
+            .position(|e| e.data.contains("PORTAL_SNAPSHOT_MARKER"))
+            .expect("marker must be recorded");
+        let first = rec.events.first().expect("recording must not be empty");
+        assert!(!first.data.is_empty(), "first event must be the screen snapshot, not blank");
+        assert!(
+            first.data.contains('%'),
+            "first event must contain the pre-start prompt, got {:?}",
+            first.data
+        );
+        assert!(
+            marker_idx > 0,
+            "snapshot must precede the typed marker (replay must open on the prompt)"
+        );
     }
 }

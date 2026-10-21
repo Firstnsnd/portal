@@ -57,6 +57,9 @@ pub fn show_nav_panel(
             if nav_button(ui, "\u{2318}", language.t("snippets"), current_view == AppView::Snippets, theme) {
                 clicked_view = Some(AppView::Snippets);
             }
+            if nav_button(ui, "\u{25b6}", language.t("replay"), current_view == AppView::Replay, theme) {
+                clicked_view = Some(AppView::Replay);
+            }
 
             // Settings button at bottom - fill remaining space to reach window bottom
             let available_size = ui.available_size();

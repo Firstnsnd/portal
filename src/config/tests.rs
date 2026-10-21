@@ -27,6 +27,7 @@ mod tests {
             auth: AuthMethod::None,
             startup_commands: vec!["tmux attach".to_string()],
             agent_forwarding: true,
+            auto_record: false,
             jump_host: None,
             port_forwards: vec![],
         };

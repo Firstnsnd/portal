@@ -37,6 +37,7 @@ impl eframe::App for PortalApp {
                 AppView::Keychain => self.language.t("keychain").to_string(),
                 AppView::Settings => self.language.t("settings").to_string(),
                 AppView::Snippets => "Snippets".to_string(),
+                AppView::Replay => "Replay".to_string(),
             };
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
         }
@@ -51,6 +52,21 @@ impl eframe::App for PortalApp {
         }
 
         self.maybe_check_for_updates();
+
+        // Hourly retention sweep: auto-record accumulates .cast files while
+        // the app stays open; startup alone doesn't bound that. No-op when no
+        // policy is set (enforce_retention early-returns).
+        if std::time::Instant::now() >= self.next_retention_check {
+            self.next_retention_check = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+            let removed = portal::terminal::cast::enforce_retention(
+                &portal::terminal::cast::recordings_dir(),
+                self.recordings_retention_days,
+                self.recordings_max_total_mb,
+            );
+            if !removed.is_empty() {
+                log::info!("retention: removed {} recording(s)", removed.len());
+            }
+        }
 
         // Handle "open here" requests (from CLI at startup, or forwarded from
         // a second instance over the IPC socket).
@@ -115,6 +131,7 @@ impl eframe::App for PortalApp {
                     AppView::Keychain => self.language.t("keychain").to_string(),
                     AppView::Settings => self.language.t("settings").to_string(),
                     AppView::Snippets => "Snippets".to_string(),
+                    AppView::Replay => "Replay".to_string(),
                 };
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
             }
@@ -139,6 +156,7 @@ impl eframe::App for PortalApp {
                     AppView::Keychain => self.language.t("keychain").to_string(),
                     AppView::Settings => self.language.t("settings").to_string(),
                     AppView::Snippets => "Snippets".to_string(),
+                    AppView::Replay => "Replay".to_string(),
                 };
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 

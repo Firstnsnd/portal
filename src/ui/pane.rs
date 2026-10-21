@@ -195,6 +195,10 @@ pub enum PaneAction {
     SplitVertical,
     ClosePane,
     ToggleBroadcast,
+    /// Start/stop asciicast recording on the pane's session
+    ToggleRecording,
+    /// Open the replay library filtered to the pane session's host
+    ViewHostRecordings,
     /// Remove old SSH host key from known_hosts
     RemoveHostKey,
     /// Reconnect a disconnected SSH session
@@ -330,6 +334,28 @@ pub struct AppWindow {
     #[allow(dead_code)]
     pub broadcast_state: BroadcastState,
 
+    // Asciicast recording / replay state
+    /// Replay page state; `None` until a recording is opened.
+    pub replay: Option<crate::ui::views::replay_view::ReplayState>,
+    /// Failed-to-start recording message shown in the status bar for 5s.
+    pub recording_error: Option<(String, std::time::Instant)>,
+    /// Replay library row armed for deletion (two-step ✓/✕ confirm); `None`
+    /// when no row is armed.
+    pub replay_pending_delete: Option<std::path::PathBuf>,
+    /// Replay library batch mode: rows show checkboxes for multi-delete.
+    pub replay_select_mode: bool,
+    /// Paths ticked in batch mode.
+    pub replay_selection: std::collections::HashSet<std::path::PathBuf>,
+    /// Batch delete button armed (first click of the two-step confirm).
+    pub replay_batch_arm: bool,
+    /// In-row rename state: (file path, edited title). `None` when idle.
+    pub replay_rename: Option<(std::path::PathBuf, String)>,
+    /// Replay library host filter (`portal_host`); `None` = show all.
+    pub replay_host_filter: Option<String>,
+    /// Recently stopped recording — the status bar shows a clickable
+    /// "saved" notice that opens it in the player.
+    pub recording_saved: Option<(std::path::PathBuf, std::time::Instant)>,
+
     // SFTP state (per-window, independent connections)
     pub sftp_browser_left: Option<SftpBrowser>,   // Left panel SFTP connection
     pub sftp_browser: Option<SftpBrowser>,        // Right panel SFTP connection
@@ -383,6 +409,15 @@ impl AppWindow {
             next_id,
             tab_drag: TabDragState::default(),
             broadcast_state: BroadcastState::default(),
+            replay: None,
+            recording_error: None,
+            replay_pending_delete: None,
+            replay_select_mode: false,
+            replay_selection: std::collections::HashSet::new(),
+            replay_batch_arm: false,
+            replay_rename: None,
+            replay_host_filter: None,
+            recording_saved: None,
             sftp_browser_left: None,
             sftp_browser: None,
             local_browser_left: LocalBrowser::new(),

@@ -38,10 +38,11 @@ pub struct PtyWriter {
 #[cfg(unix)]
 impl PtyWriter {
     pub fn write(&self, data: &[u8]) -> io::Result<()> {
-        use std::mem::ManuallyDrop;
-        use std::os::unix::io::FromRawFd;
-        let mut file = ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(self.fd) });
-        std::io::Write::write_all(&mut *file, data)
+        // The master fd is non-blocking (shared O_NONBLOCK across all dups of
+        // the open file description), so a naive write_all drops keystrokes
+        // with WouldBlock whenever the PTY input queue fills. Route through
+        // the poll-retry helper instead.
+        super::unix_pty::write_all_pty(self.fd, data)
     }
 }
 
@@ -70,17 +71,20 @@ pub struct RealPtySession {
     last_shell_check: Arc<Mutex<Instant>>,
     /// Live system metrics collected from the local machine
     pub metrics: Arc<Mutex<MetricsSnapshot>>,
+    /// Asciicast recorder slot: `Some` while the session is being recorded.
+    /// Cloned into the reader thread at spawn, so the tap sees it.
+    pub recorder: Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>>,
 }
 
 impl RealPtySession {
     #[cfg(unix)]
     #[allow(dead_code)]
     pub fn new(id: usize, cols: u16, rows: u16, shell: &str) -> Result<Self> {
-        Self::with_scrollback_limit(id, cols, rows, shell, TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES, None)
+        Self::with_scrollback_limit(id, cols, rows, shell, TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES, None, false)
     }
 
     #[cfg(unix)]
-    pub fn with_scrollback_limit(id: usize, cols: u16, rows: u16, shell: &str, scrollback_limit_bytes: usize, cwd: Option<&str>) -> Result<Self> {
+    pub fn with_scrollback_limit(id: usize, cols: u16, rows: u16, shell: &str, scrollback_limit_bytes: usize, cwd: Option<&str>, record: bool) -> Result<Self> {
         use std::os::unix::io::AsRawFd;
         let _ = id;
 
@@ -102,6 +106,31 @@ impl RealPtySession {
         let grid_clone: Arc<Mutex<TerminalGrid>> = Arc::clone(&grid);
         let pty_clone = Arc::clone(&pty);
         let alive_clone = Arc::clone(&alive);
+        let recorder = Arc::new(Mutex::new(
+            if record {
+                // Zero-loss auto-record: create the recorder BEFORE the reader
+                // thread spawns so capture starts at the very first byte.
+                let title = std::path::Path::new(shell)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| shell.to_string());
+                match crate::terminal::cast::new_recording_path(&title)
+                    .and_then(|path| {
+                        crate::terminal::cast::CastRecorder::create(
+                            &path, cols, rows, Some(title.clone()), Some("localhost".into()),
+                        )
+                    }) {
+                    Ok(rec) => Some(rec),
+                    Err(e) => {
+                        log::warn!("auto-record: failed to open recording file: {e}");
+                        None
+                    }
+                }
+            } else {
+                None
+            },
+        ));
+        let recorder_clone = Arc::clone(&recorder);
 
         let reader_thread = thread::Builder::new()
             .name(format!("pty-reader-{}", id))
@@ -202,6 +231,14 @@ impl RealPtySession {
                                     // rows exactly `cols`-wide, so no per-chunk
                                     // normalization scan is needed here.
                                 }
+                                // Asciicast tap: capture the raw chunk with a
+                                // timestamp (outside the grid lock, in the
+                                // reader thread).
+                                if let Ok(mut slot) = recorder_clone.lock() {
+                                    if let Some(rec) = slot.as_mut() {
+                                        rec.output(&data);
+                                    }
+                                }
                                 // Wake the UI so the new output is painted
                                 // promptly (the app no longer repaints
                                 // unconditionally).
@@ -290,6 +327,7 @@ impl RealPtySession {
             cached_shell_name,
             last_shell_check,
             metrics,
+            recorder,
         })
     }
 
@@ -416,6 +454,15 @@ impl RealPtySession {
     pub fn get_grid(&self) -> Arc<Mutex<TerminalGrid>> {
         Arc::clone(&self.grid)
     }
+
+    /// Record a resize event into the active asciicast, if any.
+    pub fn record_resize(&self, cols: u16, rows: u16) {
+        if let Ok(mut slot) = self.recorder.lock() {
+            if let Some(rec) = slot.as_mut() {
+                rec.resize(cols, rows);
+            }
+        }
+    }
 }
 
 impl Drop for RealPtySession {
@@ -454,6 +501,7 @@ mod tests {
             "/bin/sh",
             1024 * 1024,
             Some(&cwd),
+            false,
         )
         .expect("spawn sh");
 
@@ -479,6 +527,144 @@ mod tests {
         }
     }
 
+    /// E2E: the PTY output tap lands in a `.cast` file — start recording,
+    /// run `echo hi`, stop, and the parsed recording contains an Output event
+    /// with the echoed text.
+    #[cfg(unix)]
+    #[test]
+    fn recording_captures_pty_output_as_cast() {
+        use crate::terminal::cast::{parse_cast, CastRecorder, EventKind};
+
+        let session = RealPtySession::with_scrollback_limit(
+            1,
+            80,
+            24,
+            "/bin/sh",
+            1024 * 1024,
+            None,
+            false,
+        )
+        .expect("spawn sh");
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("e2e.cast");
+        let recorder = CastRecorder::create(&path, 80, 24, Some("sh".into()), None).expect("create recorder");
+        // Populate the EXISTING slot Arc — the reader thread holds a clone of
+        // it, so replacing the field would strand the tap on the old slot.
+        *session.recorder.lock().unwrap() = Some(recorder);
+
+        session.write(b"echo hi\n").expect("write echo");
+
+        // Wait until the grid shows the echo. The tap fires in the same
+        // reader-loop iteration as the grid update (just after the grid lock),
+        // so give it a beat to land in the recorder's BufWriter before we take
+        // the slot away.
+        let grid = session.get_grid();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let found = {
+                let g = grid.lock().unwrap();
+                g.cells.iter().any(|row| {
+                    let line: String = row.iter().map(|c| c.c).collect();
+                    line.contains("hi")
+                })
+            };
+            if found {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "`echo hi` output not seen within 5s"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        // Stop: take the recorder out of the slot and flush.
+        let recorder = session
+            .recorder
+            .lock()
+            .unwrap()
+            .take()
+            .expect("recorder still in slot");
+        recorder.finish().expect("flush cast");
+
+        let cast = parse_cast(&path).expect("parse cast");
+        assert_eq!(cast.header.version, 2);
+        assert_eq!(cast.header.width, 80);
+        assert!(!cast.events.is_empty(), "no events recorded");
+        assert!(
+            cast.events
+                .iter()
+                .any(|e| e.kind == EventKind::Output && e.data.contains("hi")),
+            "no Output event contains \"hi\""
+        );
+        // Times must be monotonic non-decreasing.
+        for pair in cast.events.windows(2) {
+            assert!(pair[0].time <= pair[1].time, "non-monotonic event times");
+        }
+    }
+
+    /// Auto-record: constructing with `record: true` has the recorder in the
+    /// slot the moment the constructor returns (before the reader thread can
+    /// lose bytes), and the file header carries the session title.
+    #[cfg(unix)]
+    #[test]
+    fn auto_record_starts_at_spawn_with_title() {
+        use crate::terminal::cast::parse_cast;
+
+        let session = RealPtySession::with_scrollback_limit(
+            1,
+            80,
+            24,
+            "/bin/sh",
+            1024 * 1024,
+            None,
+            true,
+        )
+        .expect("spawn sh");
+
+        // The recorder must be in the slot the instant the constructor
+        // returns — that's what makes capture lossless from byte zero.
+        assert!(
+            session.recorder.lock().unwrap().is_some(),
+            "recorder auto-started with record=true"
+        );
+
+        session.write(b"echo hi\n").expect("write echo");
+        let grid = session.get_grid();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let found = {
+                let g = grid.lock().unwrap();
+                g.cells.iter().any(|row| {
+                    let line: String = row.iter().map(|c| c.c).collect();
+                    line.contains("hi")
+                })
+            };
+            if found {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "`echo hi` output not seen within 5s"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        let recorder = session
+            .recorder
+            .lock()
+            .unwrap()
+            .take()
+            .expect("recorder still in slot");
+        let path = recorder.finish().expect("flush cast");
+        let cast = parse_cast(&path).expect("parse cast");
+        assert_eq!(cast.header.title.as_deref(), Some("sh"));
+        assert!(!cast.events.is_empty(), "shell output captured from the start");
+    }
+
     /// Verify that is_connected() returns false when the alive flag is false.
     /// This simulates what happens when the reader thread encounters a read error
     /// and sets alive to false before exiting.
@@ -501,6 +687,7 @@ mod tests {
             cached_shell_name: Arc::new(Mutex::new(None)),
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
+            recorder: Arc::new(Mutex::new(None)),
         };
 
         assert!(!session.is_connected(), "is_connected() must return false when alive flag is false");
@@ -529,6 +716,7 @@ mod tests {
             cached_shell_name: Arc::new(Mutex::new(None)),
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
+            recorder: Arc::new(Mutex::new(None)),
         };
 
         assert!(!session.is_connected(), "is_connected() must return false when alive flag is false");
@@ -556,6 +744,7 @@ mod tests {
             cached_shell_name: Arc::new(Mutex::new(None)),
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
+            recorder: Arc::new(Mutex::new(None)),
         };
 
         assert!(session.is_connected(),
@@ -584,6 +773,7 @@ mod tests {
                 cached_shell_name: Arc::new(Mutex::new(None)),
                 last_shell_check: Arc::new(Mutex::new(Instant::now())),
                 metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
+                recorder: Arc::new(Mutex::new(None)),
             };
             // session is alive while in scope
             assert!(alive.load(Ordering::Relaxed));

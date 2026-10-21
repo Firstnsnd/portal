@@ -262,6 +262,9 @@ pub struct HostEntry {
     pub startup_commands: Vec<String>,
     #[serde(default)]
     pub agent_forwarding: bool,
+    /// Record this host's sessions as asciicast from their first byte.
+    #[serde(default)]
+    pub auto_record: bool,
     #[serde(default)]
     pub jump_host: Option<String>,
     #[serde(default)]
@@ -286,6 +289,7 @@ impl HostEntry {
             auth: AuthMethod::None,
             startup_commands: Vec::new(),
             agent_forwarding: false,
+            auto_record: false,
             jump_host: None,
             port_forwards: Vec::new(),
         }
@@ -304,6 +308,7 @@ impl HostEntry {
             auth: AuthMethod::None,
             startup_commands,
             agent_forwarding: false,
+            auto_record: false,
             jump_host: None,
             port_forwards: Vec::new(),
         }
@@ -924,6 +929,20 @@ pub struct PortalSettings {
     /// LLM backend configuration (non-secret; the API key lives in keychain).
     #[serde(default)]
     pub llm: LlmConfig,
+    /// Auto-record every new session (local + SSH) as asciicast from its
+    /// first byte. Mid-session recording via the context menu still works
+    /// when this is off.
+    #[serde(default)]
+    pub auto_record_sessions: bool,
+    /// Recording retention: delete recordings older than this many days
+    /// (0 = keep forever). The safety net for auto-record, which otherwise
+    /// accumulates files forever.
+    #[serde(default)]
+    pub recordings_retention_days: u32,
+    /// Recording storage budget: prune oldest recordings first once the
+    /// recordings directory exceeds this many MB (0 = unlimited).
+    #[serde(default)]
+    pub recordings_max_total_mb: u32,
 }
 
 fn default_keepalive_interval() -> u32 {
@@ -954,6 +973,9 @@ impl Default for PortalSettings {
             check_for_updates: true,
             last_dismissed_update_version: None,
             llm: LlmConfig::default(),
+            auto_record_sessions: false,
+            recordings_retention_days: 0,
+            recordings_max_total_mb: 0,
         }
     }
 }

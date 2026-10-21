@@ -48,6 +48,14 @@ pub struct PortalApp {
     pub next_update_check: std::time::Instant,
     pub check_for_updates: bool,
     pub last_dismissed_update_version: Option<String>,
+    /// Mirror of PortalSettings.auto_record_sessions (Settings → Terminal).
+    pub auto_record_sessions: bool,
+    /// Mirror of PortalSettings.recordings_retention_days (Settings → Terminal).
+    pub recordings_retention_days: u32,
+    /// Mirror of PortalSettings.recordings_max_total_mb (Settings → Terminal).
+    pub recordings_max_total_mb: u32,
+    /// Next periodic retention sweep (hourly; startup already swept).
+    pub next_retention_check: std::time::Instant,
     // LLM integration
     pub llm_config: crate::llm::types::LlmConfig,
     /// Draft API key text in the settings input (never shown back once stored).
@@ -93,6 +101,20 @@ impl PortalApp {
         let shortcut_resolver = ShortcutResolver::new(settings.keyboard_shortcuts.clone());
         let check_for_updates = settings.check_for_updates;
         let last_dismissed_update_version = settings.last_dismissed_update_version.clone();
+        let auto_record_sessions = settings.auto_record_sessions;
+        let recordings_retention_days = settings.recordings_retention_days;
+        let recordings_max_total_mb = settings.recordings_max_total_mb;
+
+        // Retention sweep at startup: with auto-record on, recordings would
+        // otherwise accumulate forever. Cheap no-op when both limits are 0.
+        let removed = crate::terminal::cast::enforce_retention(
+            &crate::terminal::cast::recordings_dir(),
+            recordings_retention_days,
+            recordings_max_total_mb,
+        );
+        if !removed.is_empty() {
+            log::info!("retention: removed {} recording(s) at startup", removed.len());
+        }
         let llm_config = settings.llm.clone();
         // Use default theme preset (Tokyo Night)
         let theme_preset = ThemePreset::TokyoNight;
@@ -172,6 +194,11 @@ impl PortalApp {
             next_update_check: std::time::Instant::now(),
             check_for_updates,
             last_dismissed_update_version,
+            auto_record_sessions,
+            recordings_retention_days,
+            recordings_max_total_mb,
+            // First periodic sweep one hour after launch (startup already swept).
+            next_retention_check: std::time::Instant::now() + std::time::Duration::from_secs(3600),
             llm_config,
             llm_key_draft: String::new(),
             settings_section: SettingsSection::General,

@@ -415,6 +415,7 @@ pub fn render_hosts_view(
                         let name_w = ui.fonts(|f| f.layout_no_wrap(
                             host.name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).rect.width());
                         forward_badge(ui, window, host, rect.min.x + 46.0 + name_w + 8.0, rect.min.y + 18.0, cx.theme);
+                        record_badge(ui, host, rect, cx.theme);
                         let detail = if host.username.is_empty() {
                             format!("{}:{}", host.host, host.port)
                         } else {
@@ -516,6 +517,7 @@ pub fn render_hosts_view(
                             let name_w = ui.fonts(|f| f.layout_no_wrap(
                                 host.name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).rect.width());
                             forward_badge(ui, window, host, rect.min.x + 46.0 + name_w + 8.0, rect.min.y + 18.0, cx.theme);
+                            record_badge(ui, host, rect, cx.theme);
                             let detail = if host.username.is_empty() {
                                 format!("{}:{}", host.host, host.port)
                             } else {
@@ -905,6 +907,14 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                 }
                             }
 
+                            // Session recording
+                            ui.add_space(widgets::SPACING_FIELD);
+                            ui.checkbox(&mut window.add_host_dialog.auto_record, cx.language.t("record_this_host"));
+                            ui.label(egui::RichText::new(cx.language.t("record_this_host_desc"))
+                                .color(cx.theme.fg_dim)
+                                .size(11.0));
+                            ui.add_space(widgets::SPACING_FIELD);
+
                             widgets::form_separator(ui);
 
                             // Port Forwards section
@@ -1270,6 +1280,7 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
         );
 
         entry.agent_forwarding = window.add_host_dialog.agent_forwarding;
+        entry.auto_record = window.add_host_dialog.auto_record;
         entry.jump_host = window.add_host_dialog.jump_host.clone();
         entry.port_forwards = window.add_host_dialog.port_forwards.clone();
 
@@ -1320,5 +1331,20 @@ fn forward_badge(ui: &egui::Ui, window: &AppWindow, host: &HostEntry, x: f32, y:
         format!("\u{21AA}{}", active),
         egui::FontId::proportional(10.0),
         color,
+    );
+}
+
+/// Paint a "\u{25cf} REC" badge at the row's right edge when the host is
+/// configured to auto-record its sessions.
+fn record_badge(ui: &egui::Ui, host: &HostEntry, rect: egui::Rect, theme: &crate::ui::theme::ThemeColors) {
+    if !host.auto_record {
+        return;
+    }
+    ui.painter().text(
+        egui::pos2(rect.max.x - 76.0, rect.min.y + 18.0),
+        egui::Align2::RIGHT_CENTER,
+        "\u{25cf} REC",
+        egui::FontId::proportional(9.0),
+        theme.red,
     );
 }

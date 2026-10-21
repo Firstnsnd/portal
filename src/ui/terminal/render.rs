@@ -120,6 +120,7 @@ pub fn render_terminal_session(
     session: &mut TerminalSession,
     session_id: usize,
     focused_session_id: usize,
+    ai_drawer_open: bool,
     broadcast_state: &BroadcastState,
     ime_composing: &mut bool,
     ime_preedit: &mut String,
@@ -207,14 +208,18 @@ pub fn render_terminal_session(
         }
     }
     let is_focused = session_id == focused_session_id;
-    if is_focused {
-        // Only grab keyboard focus when no other widget — e.g. the AI chat
-        // drawer's TextEdit — is already holding it. Otherwise the drawer's
-        // input box can never be clicked/typed in: the focused pane would
-        // steal focus back every frame.
-        if !ctx.wants_keyboard_input() {
-            response.request_focus();
-        }
+    if is_focused && !ai_drawer_open {
+        // Re-claim keyboard focus every frame so egui's own focus reshuffles
+        // (its Tab-key widget navigation, popup menus, newly shown widgets)
+        // can never orphan it. This MUST be unconditional: gating on
+        // `ctx.wants_keyboard_input()` is wrong — that returns true while the
+        // terminal ITSELF holds focus, so after Tab moved focus to some UI
+        // button, `response.has_focus()` went false and the terminal could
+        // never take it back — every keystroke (including more Tabs) was
+        // silently dropped. The only overlay that must win this fight is the
+        // AI chat drawer's TextEdit; the caller tells us when it's open via
+        // `ai_drawer_open` and we stand down for those frames.
+        response.request_focus();
     }
 
     let search_input_id = egui::Id::new("search_input").with(pane_id);
@@ -359,6 +364,8 @@ pub fn render_terminal_session(
     let mut ctx_paste = false;
     let mut ctx_select_all = false;
     let mut ctx_broadcast = false;
+    let mut ctx_record = false;
+    let mut ctx_view_recordings = false;
     let mut ctx_split_h = false;
     let mut ctx_split_v = false;
     let mut ctx_close = false;
@@ -387,6 +394,22 @@ pub fn render_terminal_session(
         };
         if ui.button(broadcast_label).clicked() {
             ctx_broadcast = true;
+            ui.close_menu();
+        }
+        // Recording toggle — same pattern as broadcast: label reflects the
+        // current state so the menu always shows a clear start/stop action.
+        let record_label = if session.kind.is_recording() {
+            language.t("recording_stop")
+        } else {
+            language.t("recording_start")
+        };
+        if ui.button(record_label).clicked() {
+            ctx_record = true;
+            ui.close_menu();
+        }
+        // Jump to the replay library, filtered to this session's host.
+        if ui.button(language.t("recordings_of_host")).clicked() {
+            ctx_view_recordings = true;
             ui.close_menu();
         }
         ui.separator();
@@ -436,6 +459,8 @@ pub fn render_terminal_session(
     if ctx_split_h { action = Some(PaneAction::SplitHorizontal); }
     if ctx_split_v { action = Some(PaneAction::SplitVertical); }
     if ctx_broadcast { action = Some(PaneAction::ToggleBroadcast); }
+    if ctx_record    { action = Some(PaneAction::ToggleRecording); }
+    if ctx_view_recordings { action = Some(PaneAction::ViewHostRecordings); }
     if ctx_close   { action = Some(PaneAction::ClosePane); }
 
     // Keyboard input — only for the focused pane
@@ -1667,6 +1692,7 @@ pub fn render_terminal_pane(
     session_idx: usize,
     sessions: &mut [TerminalSession],
     focused_session: usize,
+    ai_drawer_open: bool,
     broadcast_state: &BroadcastState,
     ime_composing: &mut bool,
     ime_preedit: &mut String,
@@ -1687,6 +1713,7 @@ pub fn render_terminal_pane(
         &mut sessions[session_idx],
         session_idx,
         focused_session,
+        ai_drawer_open,
         broadcast_state,
         ime_composing, ime_preedit,
         pane_rect, pane_id,
@@ -1706,6 +1733,7 @@ pub fn render_pane_tree(
     rect: egui::Rect,
     sessions: &mut [TerminalSession],
     focused_session: usize,
+    ai_drawer_open: bool,
     broadcast_state: &BroadcastState,
     ime_composing: &mut bool,
     ime_preedit: &mut String,
@@ -1718,7 +1746,7 @@ pub fn render_pane_tree(
     match node {
         PaneNode::Terminal(idx) => {
             let (action, input_bytes) = render_terminal_pane(
-                ui, ctx, *idx, sessions, focused_session, broadcast_state,
+                ui, ctx, *idx, sessions, focused_session, ai_drawer_open, broadcast_state,
                 ime_composing, ime_preedit, rect,
                 sessions.len() > 1,
                 can_close_pane,
@@ -1772,8 +1800,8 @@ pub fn render_pane_tree(
                 ctx.set_cursor_icon(icon);
             }
 
-            let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language, shortcut_resolver);
-            let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language, shortcut_resolver);
+            let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, ai_drawer_open, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language, shortcut_resolver);
+            let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, ai_drawer_open, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language, shortcut_resolver);
 
             let result = match (f1, f2) {
                 (Some((_, PaneAction::Focus, _)), Some(other)) => Some(other),

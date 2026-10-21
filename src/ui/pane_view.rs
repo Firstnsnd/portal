@@ -124,6 +124,9 @@ impl AppWindow {
             AppView::Snippets => {
                 snippets_view::render_snippets_view(self, ctx, ui, cx)
             }
+            // Replay is dispatched directly in window_content (its state lives
+            // on the window itself, not in the shared WindowContext).
+            AppView::Replay => ViewActions::default(),
         }
     }
 

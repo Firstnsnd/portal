@@ -261,6 +261,9 @@ pub struct SshSession {
     metrics_enabled: Arc<AtomicBool>,
     /// Keyboard-interactive (2FA) prompt mailbox shared with the UI.
     pub auth_prompt: Arc<super::auth_prompt::AuthPromptBridge>,
+    /// Asciicast recorder slot: `Some` while the session is being recorded.
+    /// Cloned into ssh_task at spawn, so the data taps see it.
+    pub recorder: Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>>,
 }
 
 impl SshSession {
@@ -277,6 +280,7 @@ impl SshSession {
         keepalive_interval: u32,
         agent_forwarding: bool,
         jump_host: Option<JumpHostInfo>,
+        record: bool,
     ) -> Self {
         Self::with_scrollback_limit(
             runtime,
@@ -292,6 +296,7 @@ impl SshSession {
             agent_forwarding,
             Vec::new(),
             jump_host,
+            record,
         )
     }
 
@@ -310,6 +315,7 @@ impl SshSession {
         agent_forwarding: bool,
         port_forward_configs: Vec<PortForwardConfig>,
         jump_host: Option<JumpHostInfo>,
+        record: bool,
     ) -> Self {
         let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
             cols as usize,
@@ -339,6 +345,33 @@ impl SshSession {
         let metrics_enabled_clone = Arc::clone(&metrics_enabled);
         let auth_prompt = Arc::new(super::auth_prompt::AuthPromptBridge::new());
         let auth_prompt_clone = Arc::clone(&auth_prompt);
+        let recorder = Arc::new(Mutex::new(
+            if record {
+                // Zero-loss auto-record: create the recorder BEFORE ssh_task
+                // spawns so capture starts at the very first byte of output.
+                let title = format!("{username}@{host}");
+                let portal_host = if username.is_empty() {
+                    format!("{host}:{port}")
+                } else {
+                    format!("{username}@{host}:{port}")
+                };
+                match crate::terminal::cast::new_recording_path(&host)
+                    .and_then(|path| {
+                        crate::terminal::cast::CastRecorder::create(
+                            &path, cols, rows, Some(title), Some(portal_host),
+                        )
+                    }) {
+                    Ok(rec) => Some(rec),
+                    Err(e) => {
+                        log::warn!("auto-record: failed to open recording file: {e}");
+                        None
+                    }
+                }
+            } else {
+                None
+            },
+        ));
+        let recorder_clone = Arc::clone(&recorder);
 
         runtime.spawn(async move {
             Self::ssh_task(
@@ -347,7 +380,7 @@ impl SshSession {
                 arch_hint_clone, startup_commands,
                 keepalive_interval, agent_forwarding, port_forward_configs,
                 port_forwards_clone, notifications_clone, metrics_clone,
-                metrics_enabled_clone, auth_prompt_clone, jump_host,
+                metrics_enabled_clone, auth_prompt_clone, recorder_clone, jump_host,
             )
             .await;
         });
@@ -364,6 +397,7 @@ impl SshSession {
             metrics,
             metrics_enabled,
             auth_prompt,
+            recorder,
         }
     }
 
@@ -391,6 +425,7 @@ impl SshSession {
         metrics: Arc<Mutex<MetricsSnapshot>>,
         metrics_enabled: Arc<AtomicBool>,
         auth_bridge: Arc<super::auth_prompt::AuthPromptBridge>,
+        recorder: Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>>,
         jump_host: Option<JumpHostInfo>,
     ) {
         let set_state = |s: SshConnectionState| {
@@ -610,6 +645,12 @@ impl SshSession {
                                     parser.advance(&mut handler, *byte);
                                 }
                             }
+                            // Asciicast tap (outside the grid lock).
+                            if let Ok(mut slot) = recorder.lock() {
+                                if let Some(rec) = slot.as_mut() {
+                                    rec.output(&data);
+                                }
+                            }
                             crate::repaint::notify_repaint();
                         }
                         Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
@@ -620,6 +661,12 @@ impl SshSession {
                                 };
                                 for byte in &*data {
                                     parser.advance(&mut handler, *byte);
+                                }
+                            }
+                            // Asciicast tap (stderr merged into the same stream).
+                            if let Ok(mut slot) = recorder.lock() {
+                                if let Some(rec) = slot.as_mut() {
+                                    rec.output(&data);
                                 }
                             }
                             crate::repaint::notify_repaint();
@@ -821,6 +868,15 @@ impl SshSession {
         self.notifications.lock()
             .map(|mut ns| std::mem::take(&mut *ns))
             .unwrap_or_default()
+    }
+
+    /// Record a resize event into the active asciicast, if any.
+    pub fn record_resize(&self, cols: u16, rows: u16) {
+        if let Ok(mut slot) = self.recorder.lock() {
+            if let Some(rec) = slot.as_mut() {
+                rec.resize(cols, rows);
+            }
+        }
     }
 }
 

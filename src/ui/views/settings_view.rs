@@ -90,6 +90,9 @@ impl PortalApp {
             keyboard_shortcuts: self.shortcut_resolver.bindings().to_vec(),
             check_for_updates: self.check_for_updates,
             last_dismissed_update_version: self.last_dismissed_update_version.clone(),
+            auto_record_sessions: self.auto_record_sessions,
+            recordings_retention_days: self.recordings_retention_days,
+            recordings_max_total_mb: self.recordings_max_total_mb,
             llm: self.llm_config.clone(),
         };
         crate::config::save_settings(&settings);
@@ -275,6 +278,85 @@ impl PortalApp {
             if slider.changed() {
                 *changed = true;
             }
+        });
+
+        // Auto-record: every new session records as asciicast from byte zero.
+        ui.add_space(SPACE_SM);
+        if ui.checkbox(&mut self.auto_record_sessions, lang.t("auto_record")).changed() {
+            *changed = true;
+        }
+        ui.label(egui::RichText::new(lang.t("auto_record_desc")).color(theme.fg_dim).size(FONT_SM));
+
+        // Recordings: retention policy — the safety net for auto-record,
+        // which otherwise accumulates .cast files forever.
+        ui.add_space(SPACE_LG);
+        ui.separator();
+        ui.add_space(SPACE_SM);
+
+        ui.label(egui::RichText::new(lang.t("recordings_section")).color(theme.fg_primary).size(14.0).strong());
+        ui.add_space(SPACE_XS);
+
+        ui.horizontal(|ui| {
+            ui.label(widgets::field_label(lang.t("recordings_retention"), theme));
+            ui.add_space(SPACE_SM);
+            let slider = ui.add(
+                egui::Slider::new(&mut self.recordings_retention_days, 0..=365)
+                    .step_by(1.0)
+                    .text(lang.t("unit_days"))
+            );
+            if slider.changed() {
+                *changed = true;
+            }
+        });
+        ui.label(egui::RichText::new(lang.t("recordings_retention_desc")).color(theme.fg_dim).size(FONT_SM));
+
+        ui.add_space(SPACE_SM);
+        ui.horizontal(|ui| {
+            ui.label(widgets::field_label(lang.t("recordings_max_total"), theme));
+            ui.add_space(SPACE_SM);
+            let slider = ui.add(
+                egui::Slider::new(&mut self.recordings_max_total_mb, 0..=10240)
+                    .step_by(100.0)
+                    .text("MB")
+            );
+            if slider.changed() {
+                *changed = true;
+            }
+        });
+        ui.label(egui::RichText::new(lang.t("recordings_max_total_desc")).color(theme.fg_dim).size(FONT_SM));
+
+        // Current usage + a shortcut to the folder (the replay library is the
+        // content manager; this is the policy page's reality check).
+        ui.add_space(SPACE_SM);
+        ui.horizontal(|ui| {
+            let dir = portal::terminal::cast::recordings_dir();
+            if ui.button(lang.t("replay_open_folder")).clicked() {
+                #[cfg(target_os = "macos")]
+                let _ = std::process::Command::new("open").arg(&dir).spawn();
+                #[cfg(not(target_os = "macos"))]
+                let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+            }
+            let mut count = 0usize;
+            let mut total: u64 = 0;
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for e in entries.flatten() {
+                    if e.path().extension().and_then(|x| x.to_str()) == Some("cast") {
+                        if let Ok(m) = e.metadata() {
+                            count += 1;
+                            total += m.len();
+                        }
+                    }
+                }
+            }
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} · {}",
+                    lang.tf("recordings_files", &count.to_string()),
+                    crate::ui::views::replay_view::fmt_size(total)
+                ))
+                .color(theme.fg_dim)
+                .size(FONT_SM),
+            );
         });
 
         ui.add_space(SPACE_LG);

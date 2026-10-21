@@ -70,6 +70,8 @@ pub struct AddHostDialog {
     pub key_in_keychain: bool,
     pub startup_commands: String,
     pub agent_forwarding: bool,
+    /// Record this host's sessions from their first byte.
+    pub auto_record: bool,
     pub test_conn_state: TestConnState,
     pub test_conn_result: TestConnResult,
     /// Show "Remove old key" button when host key verification fails
@@ -112,6 +114,7 @@ impl Default for AddHostDialog {
             key_in_keychain: false,
             startup_commands: String::new(),
             agent_forwarding: false,
+            auto_record: false,
             test_conn_state: TestConnState::Idle,
             test_conn_result: None,
             show_remove_key_button: false,
@@ -149,6 +152,7 @@ impl AddHostDialog {
         self.key_in_keychain = false;
         self.startup_commands.clear();
         self.agent_forwarding = false;
+        self.auto_record = false;
         self.test_conn_state = TestConnState::Idle;
         self.test_conn_result = None;
         self.show_remove_key_button = false;
@@ -181,6 +185,7 @@ impl AddHostDialog {
         self.tags = host.tags.join(", ");
         self.startup_commands = host.startup_commands.join("\n");
         self.agent_forwarding = host.agent_forwarding;
+        self.auto_record = host.auto_record;
         self.jump_host = host.jump_host.clone();
         self.port_forwards = host.port_forwards.clone();
         self.error = String::new();
@@ -461,6 +466,7 @@ pub enum AppView {
     Keychain,
     Snippets,
     Settings,
+    Replay,
 }
 
 /// Broadcast state - for Tab-internal continuous interactive operations
