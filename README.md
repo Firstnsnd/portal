@@ -91,7 +91,7 @@ cargo build --release
 
 ## Architecture
 
-```
+```text
 src/
 ├── main.rs              # Entry point, eframe::App update logic
 ├── app/
