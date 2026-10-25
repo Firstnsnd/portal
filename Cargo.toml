@@ -1,6 +1,6 @@
 [package]
 name = "portal"
-version = "0.16.4"
+version = "0.17.0"
 edition = "2021"
 description = "A modern terminal emulator with GUI"
 
@@ -72,7 +72,7 @@ rzsz = "=0.1.4"
 [package.metadata.bundle]
 name = "Portal"
 identifier = "com.portal.app"
-version = "0.16.4"
+version = "0.17.0"
 copyright = "Copyright © 2024 Portal"
 category = "public.app-category.developer-tools"
 short_description = "A modern terminal emulator with GUI"
