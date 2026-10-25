@@ -33,9 +33,12 @@ echo "==> Updating Cargo.toml..."
 sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
 rm -f Cargo.toml.bak
 
-# Update Cargo.lock (cargo will do this automatically)
-echo "==> Updating Cargo.lock..."
-cargo update
+# Update Cargo.lock — workspace entries only. A plain `cargo update` here
+# upgrades every third-party dependency to latest, which can drag transitive
+# deps past what the pinned crates compile against (e.g. rsa 0.10.0-rc failed
+# CI on a mass update) and break the release build.
+echo "==> Updating Cargo.lock (workspace entries only)..."
+cargo update --workspace
 
 # Commit the version changes
 echo "==> Committing version changes..."
