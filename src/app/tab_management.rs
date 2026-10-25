@@ -1,6 +1,6 @@
 //! Tab management functionality for PortalApp
 
-use crate::config::{HostEntry, resolve_auth, ResolvedAuth};
+use crate::config::{HostEntry, resolve_auth, resolve_proxy, ResolvedAuth};
 use crate::ssh::JumpHostInfo;
 use crate::ui::pane::{SplitDirection, PaneNode, Tab};
 use crate::ui::types::{session::{TerminalSession, SessionKind}, dialogs::AppView};
@@ -47,6 +47,7 @@ impl PortalApp {
         window.tabs.push(tab);
         window.active_tab = window.tabs.len() - 1;
         window.current_view = AppView::Terminal;
+        self.mark_sessions_dirty();
     }
 
     /// Open a new native window with a single local terminal tab running in
@@ -81,6 +82,7 @@ impl PortalApp {
         self.next_viewport_id += 1;
         let window = crate::ui::pane::AppWindow::new_window(viewport_id, "Portal", tab, id + 1);
         self.windows.push(window);
+        self.mark_sessions_dirty();
     }
 
     pub(crate) fn resolve_jump_host(&self, host: &HostEntry) -> Option<JumpHostInfo> {
@@ -95,6 +97,7 @@ impl PortalApp {
             port: jump_entry.port,
             username: TerminalSession::get_effective_username(&jump_entry.username),
             auth: jump_auth,
+            proxy: resolve_proxy(jump_entry),
         })
     }
 
@@ -132,6 +135,7 @@ impl PortalApp {
         window.active_tab = window.tabs.len() - 1;
         window.current_view = AppView::Terminal;
         self.connection_history = crate::config::load_history();
+        self.mark_sessions_dirty();
     }
 
     /// Split the currently focused pane in a specific window
@@ -183,6 +187,7 @@ impl PortalApp {
             second: Box::new(PaneNode::Terminal(new_idx)),
         });
         tab.focused_session = new_idx;
+        self.mark_sessions_dirty();
     }
 
     /// Save hosts to disk

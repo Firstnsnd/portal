@@ -13,6 +13,7 @@ pub enum AuthMethodChoice {
     #[default]
     Password,
     Key,
+    Agent,
 }
 
 /// Key source choice for SSH key authentication
@@ -79,6 +80,17 @@ pub struct AddHostDialog {
     /// Message to display after removing a key
     pub remove_key_message: String,
     pub jump_host: Option<String>,
+    /// Proxy selection: None = connect directly, Some(kind) = tunnel
+    /// through an HTTP CONNECT or SOCKS5 proxy.
+    pub proxy_kind: Option<crate::config::ProxyKind>,
+    pub proxy_host: String,
+    pub proxy_port: String,
+    pub proxy_username: String,
+    /// Typed only; persisted to the keychain on save, never to hosts.json.
+    pub proxy_password: String,
+    /// True when the saved host already has a proxy password in the
+    /// keychain — an empty password field on save then means "keep it".
+    pub proxy_password_in_keychain: bool,
     /// Port forward rules configured for this host
     pub port_forwards: Vec<crate::config::PortForwardConfig>,
     /// Editing state for a new port forward being added
@@ -120,6 +132,12 @@ impl Default for AddHostDialog {
             show_remove_key_button: false,
             remove_key_message: String::new(),
             jump_host: None,
+            proxy_kind: None,
+            proxy_host: String::new(),
+            proxy_port: String::new(),
+            proxy_username: String::new(),
+            proxy_password: String::new(),
+            proxy_password_in_keychain: false,
             port_forwards: Vec::new(),
             new_forward_kind: crate::config::ForwardKind::Local,
             new_forward_local_host: "127.0.0.1".to_owned(),
@@ -131,6 +149,24 @@ impl Default for AddHostDialog {
 }
 
 impl AddHostDialog {
+    /// Proxy resolved from the current form fields (test-connection and
+    /// save paths). The keychain-held password cannot participate here —
+    /// only what's typed in the form is used; the save path re-stores the
+    /// keychain entry separately.
+    pub fn resolved_proxy(&self) -> Option<crate::config::ResolvedProxy> {
+        let kind = self.proxy_kind?;
+        let host = self.proxy_host.trim();
+        let port: u16 = self.proxy_port.trim().parse().unwrap_or(0);
+        if host.is_empty() || port == 0 {
+            return None;
+        }
+        let username = (!self.proxy_username.trim().is_empty())
+            .then(|| self.proxy_username.trim().to_owned());
+        let password =
+            (!self.proxy_password.is_empty()).then(|| self.proxy_password.clone());
+        Some(crate::config::ResolvedProxy { kind, host: host.to_owned(), port, username, password })
+    }
+
     pub fn reset(&mut self) {
         self.open = false;
         self.edit_index = None;
@@ -158,6 +194,12 @@ impl AddHostDialog {
         self.show_remove_key_button = false;
         self.remove_key_message.clear();
         self.jump_host = None;
+        self.proxy_kind = None;
+        self.proxy_host.clear();
+        self.proxy_port.clear();
+        self.proxy_username.clear();
+        self.proxy_password.clear();
+        self.proxy_password_in_keychain = false;
         self.port_forwards.clear();
         self.new_forward_kind = crate::config::ForwardKind::Local;
         self.new_forward_local_host = "127.0.0.1".to_owned();
@@ -187,6 +229,18 @@ impl AddHostDialog {
         self.agent_forwarding = host.agent_forwarding;
         self.auto_record = host.auto_record;
         self.jump_host = host.jump_host.clone();
+        // Proxy config: host/port/username live in hosts.json; the password
+        // stays in the keychain and is not echoed back into the form.
+        self.proxy_kind = host.proxy.as_ref().map(|p| p.kind);
+        self.proxy_host = host.proxy.as_ref().map(|p| p.host.clone()).unwrap_or_default();
+        self.proxy_port = host.proxy.as_ref().map(|p| p.port.to_string()).unwrap_or_default();
+        self.proxy_username = host.proxy.as_ref().map(|p| p.username.clone()).unwrap_or_default();
+        self.proxy_password.clear();
+        self.proxy_password_in_keychain = host
+            .proxy
+            .as_ref()
+            .map(|p| p.password_in_keychain)
+            .unwrap_or(false);
         self.port_forwards = host.port_forwards.clone();
         self.error = String::new();
 
@@ -214,6 +268,9 @@ impl AddHostDialog {
                     } else {
                         KeySourceChoice::LocalFile
                     };
+                }
+                crate::config::AuthMethod::Agent => {
+                    self.auth_method = AuthMethodChoice::Agent;
                 }
                 crate::config::AuthMethod::None => {}
             }
@@ -278,6 +335,7 @@ pub enum CredentialTypeChoice {
     #[default]
     Password,
     SshKey,
+    Agent,
 }
 
 /// Credential create/edit dialog state
@@ -353,6 +411,10 @@ impl CredentialDialog {
                 } else {
                     String::new()
                 };
+            }
+            crate::config::CredentialType::Agent { username } => {
+                self.cred_type = CredentialTypeChoice::Agent;
+                self.username = username.clone();
             }
         }
     }

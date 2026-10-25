@@ -41,17 +41,34 @@ pub enum MockAuthMode {
 
 /// Every answer round the server received, for assertions.
 type SeenAnswers = Arc<Mutex<Vec<Vec<String>>>>;
+/// Every (address, port) tcpip-forward / cancel request, for -R assertions.
+type SeenForwards = Arc<Mutex<Vec<(String, u32)>>>;
 
 pub struct MockSshServer {
     pub port: u16,
     handle: russh::server::RunningServerHandle,
     task: tokio::task::JoinHandle<std::io::Result<()>>,
     seen: SeenAnswers,
+    forwards: SeenForwards,
+    cancels: SeenForwards,
 }
 
 impl MockSshServer {
     /// Bind an ephemeral localhost port and start serving `mode`.
+    ///
+    /// Session channels (PTY/shell/exec) are refused — tests that need a
+    /// full SshSession connect must use [`MockSshServer::start_with_session_channels`].
     pub async fn start(mode: MockAuthMode) -> std::io::Result<Self> {
+        Self::start_with(mode, false).await
+    }
+
+    /// Like [`MockSshServer::start`], but session channels are granted so a
+    /// full `SshSession` (shell-hint exec, PTY, shell) can connect.
+    pub async fn start_with_session_channels(mode: MockAuthMode) -> std::io::Result<Self> {
+        Self::start_with(mode, true).await
+    }
+
+    async fn start_with(mode: MockAuthMode, session_channels: bool) -> std::io::Result<Self> {
         let key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
             .map_err(|e| std::io::Error::other(format!("keygen: {}", e)))?;
 
@@ -73,23 +90,47 @@ impl MockSshServer {
         let port = listener.local_addr()?.port();
 
         let seen: SeenAnswers = Arc::new(Mutex::new(Vec::new()));
+        let forwards: SeenForwards = Arc::new(Mutex::new(Vec::new()));
+        let cancels: SeenForwards = Arc::new(Mutex::new(Vec::new()));
         // `run_on_socket`'s accept loop borrows the server and listener
         // for `'static` (it outlives `start`). Leak them — a bounded,
         // test-only cost of a few hundred bytes per server.
-        let server: &'static mut MockSshd =
-            Box::leak(Box::new(MockSshd { mode, seen: Arc::clone(&seen) }));
+        let server: &'static mut MockSshd = Box::leak(Box::new(MockSshd {
+            mode,
+            session_channels,
+            seen: Arc::clone(&seen),
+            forwards: Arc::clone(&forwards),
+            cancels: Arc::clone(&cancels),
+        }));
         let listener: &'static tokio::net::TcpListener = Box::leak(Box::new(listener));
 
         let running = server.run_on_socket(Arc::new(config), listener);
         let handle = running.handle();
         let task = tokio::spawn(running);
 
-        Ok(Self { port, handle, task, seen })
+        Ok(Self {
+            port,
+            handle,
+            task,
+            seen,
+            forwards,
+            cancels,
+        })
     }
 
     /// All answer rounds the server has received so far.
     pub fn answers_seen(&self) -> Vec<Vec<String>> {
         self.seen.lock().map(|s| s.clone()).unwrap_or_default()
+    }
+
+    /// All tcpip-forward global requests the server accepted so far.
+    pub fn forwards_seen(&self) -> Vec<(String, u32)> {
+        self.forwards.lock().map(|f| f.clone()).unwrap_or_default()
+    }
+
+    /// All cancel-tcpip-forward global requests the server accepted so far.
+    pub fn cancels_seen(&self) -> Vec<(String, u32)> {
+        self.cancels.lock().map(|f| f.clone()).unwrap_or_default()
     }
 
     /// Graceful shutdown; waits for the accept loop to finish.
@@ -101,7 +142,10 @@ impl MockSshServer {
 
 struct MockSshd {
     mode: MockAuthMode,
+    session_channels: bool,
     seen: SeenAnswers,
+    forwards: SeenForwards,
+    cancels: SeenForwards,
 }
 
 impl russh::server::Server for MockSshd {
@@ -110,8 +154,11 @@ impl russh::server::Server for MockSshd {
     fn new_client(&mut self, _peer_addr: Option<std::net::SocketAddr>) -> Self::Handler {
         MockHandler {
             mode: self.mode.clone(),
+            session_channels: self.session_channels,
             round: 0,
             seen: Arc::clone(&self.seen),
+            forwards: Arc::clone(&self.forwards),
+            cancels: Arc::clone(&self.cancels),
         }
     }
 }
@@ -133,8 +180,11 @@ fn prompt_set(items: &[(&'static str, bool)]) -> std::borrow::Cow<'static, [(std
 
 struct MockHandler {
     mode: MockAuthMode,
+    session_channels: bool,
     round: usize,
     seen: SeenAnswers,
+    forwards: SeenForwards,
+    cancels: SeenForwards,
 }
 
 impl MockHandler {
@@ -211,6 +261,109 @@ impl ServerHandler for MockHandler {
             // Pipe until either side closes (test session lifetime).
             let _ = tokio::io::copy_bidirectional(&mut tunnel, &mut upstream).await;
         });
+        Ok(true)
+    }
+
+    // ---- Session channels: granted only when the server was started with
+    // `start_with_session_channels` — enough for a full SshSession connect
+    // (PTY + shell + the `echo $SHELL` shell-hint exec) to complete. ----
+
+    async fn channel_open_session(
+        &mut self,
+        _channel: russh::Channel<russh::server::Msg>,
+        _session: &mut russh::server::Session,
+    ) -> Result<bool, Self::Error> {
+        Ok(self.session_channels)
+    }
+
+    async fn pty_request(
+        &mut self,
+        channel: russh::ChannelId,
+        _term: &str,
+        _col_width: u32,
+        _row_height: u32,
+        _pix_width: u32,
+        _pix_height: u32,
+        _modes: &[(russh::Pty, u32)],
+        session: &mut russh::server::Session,
+    ) -> Result<(), Self::Error> {
+        session.channel_success(channel)?;
+        Ok(())
+    }
+
+    async fn shell_request(
+        &mut self,
+        channel: russh::ChannelId,
+        session: &mut russh::server::Session,
+    ) -> Result<(), Self::Error> {
+        session.channel_success(channel)?;
+        Ok(())
+    }
+
+    /// Reject every subsystem like OpenSSH does for an unknown one — the
+    /// client's SFTP capability probe relies on getting an explicit
+    /// channel_failure instead of silence.
+    async fn subsystem_request(
+        &mut self,
+        channel: russh::ChannelId,
+        _name: &str,
+        session: &mut russh::server::Session,
+    ) -> Result<(), Self::Error> {
+        session.channel_failure(channel)?;
+        Ok(())
+    }
+
+    /// Answer exec requests command-aware: the probes the client runs
+    /// (shell hint, uname, ZMODEM capability) each get a plausible answer;
+    /// anything else falls back to the fixed shell path + EOF so the
+    /// client's shell-hint read loop terminates.
+    async fn exec_request(
+        &mut self,
+        channel: russh::ChannelId,
+        data: &[u8],
+        session: &mut russh::server::Session,
+    ) -> Result<(), Self::Error> {
+        session.channel_success(channel)?;
+        let cmd = String::from_utf8_lossy(data);
+        let reply: &[u8] = if cmd.contains("uname -s") {
+            b"Linux\n"
+        } else if cmd.contains("uname -m") {
+            b"x86_64\n"
+        } else if cmd.contains("command -v sz") {
+            // ZMODEM probe: `... && echo yes` on success.
+            b"yes\n"
+        } else {
+            b"/bin/mocksh\n"
+        };
+        session.data(channel, russh::CryptoVec::from(reply))?;
+        session.eof(channel)?;
+        Ok(())
+    }
+
+    // ---- Global forward requests: accept and record, so -R tests can
+    // assert the client actually asked. ----
+
+    async fn tcpip_forward(
+        &mut self,
+        address: &str,
+        port: &mut u32,
+        _session: &mut russh::server::Session,
+    ) -> Result<bool, Self::Error> {
+        if let Ok(mut f) = self.forwards.lock() {
+            f.push((address.to_string(), *port));
+        }
+        Ok(true)
+    }
+
+    async fn cancel_tcpip_forward(
+        &mut self,
+        address: &str,
+        port: u32,
+        _session: &mut russh::server::Session,
+    ) -> Result<bool, Self::Error> {
+        if let Ok(mut f) = self.cancels.lock() {
+            f.push((address.to_string(), port));
+        }
         Ok(true)
     }
 

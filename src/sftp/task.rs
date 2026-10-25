@@ -5,7 +5,7 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
-use crate::config::ResolvedAuth;
+use crate::config::{ResolvedAuth, ResolvedProxy};
 use crate::ssh::AuthPromptBridge;
 use crate::sftp::types::{SftpEntry, SftpEntryKind, SftpCommand, SftpResponse, TransferProgress};
 
@@ -22,10 +22,11 @@ pub async fn sftp_task_with_initial_path(
     auth_prompt: std::sync::Arc<AuthPromptBridge>,
     host_key_policy: crate::ssh::HostKeyPolicy,
     initial_path: Option<String>,
+    proxy: Option<ResolvedProxy>,
 ) {
     sftp_task_inner(
         host, port, username, auth, cmd_rx, resp_tx, cancel_flag,
-        auth_prompt, host_key_policy, initial_path,
+        auth_prompt, host_key_policy, initial_path, proxy,
     )
     .await
 }
@@ -42,10 +43,11 @@ pub async fn sftp_task(
     cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     auth_prompt: std::sync::Arc<AuthPromptBridge>,
     host_key_policy: crate::ssh::HostKeyPolicy,
+    proxy: Option<ResolvedProxy>,
 ) {
     sftp_task_inner(
         host, port, username, auth, cmd_rx, resp_tx, cancel_flag,
-        auth_prompt, host_key_policy, None,
+        auth_prompt, host_key_policy, None, proxy,
     )
     .await
 }
@@ -63,6 +65,7 @@ async fn sftp_task_inner(
     auth_prompt: std::sync::Arc<AuthPromptBridge>,
     host_key_policy: crate::ssh::HostKeyPolicy,
     initial_path: Option<String>,
+    proxy: Option<ResolvedProxy>,
 ) {
     const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
@@ -89,6 +92,9 @@ async fn sftp_task_inner(
             port,
             host_key_policy,
             Some((std::time::Duration::from_secs(15), 30)),
+            // SFTP connections never forward ports.
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            proxy.as_ref(),
         ),
     )
     .await

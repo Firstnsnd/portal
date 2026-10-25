@@ -309,3 +309,33 @@ mod tests {
             .unwrap();
     }
 }
+
+    /// connect_env must fail fast (not hang) when SSH_AUTH_SOCK points at a
+    /// dead path. Restores the original value so other tests/crates that
+    /// read the env var are unaffected.
+    #[test]
+    fn agent_connect_env_errors_on_dead_socket() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let saved = std::env::var("SSH_AUTH_SOCK").ok();
+        let dead = std::env::temp_dir().join(format!("portal-no-such-agent-sock-{}", std::process::id()));
+        std::env::set_var("SSH_AUTH_SOCK", &dead);
+
+        let result = rt.block_on(async {
+            russh::keys::agent::client::AgentClient::<tokio::net::UnixStream>::connect_env().await
+        });
+
+        match saved {
+            Some(v) => std::env::set_var("SSH_AUTH_SOCK", v),
+            None => std::env::remove_var("SSH_AUTH_SOCK"),
+        }
+
+        let err = result.err().expect("dead socket must be an error");
+        assert!(
+            err.to_string().contains("SSH_AUTH_SOCK"),
+            "unexpected agent error: {err}"
+        );
+    }

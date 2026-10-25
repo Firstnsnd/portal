@@ -2,6 +2,24 @@
 
 All notable changes to Portal will be documented in this file.
 
+## [0.17.0] - 2026-10-25
+
+### Added
+- **Dynamic port forwarding (-D / SOCKS5)** - New forward kind: Portal runs a local SOCKS5 server (CONNECT, no-auth) that tunnels each request through the SSH connection. Configured per host alongside local/remote forwards.
+- **Remote forwards (-R) now actually activate** - Forwards configured before connecting are registered on the server at connect time, the assigned port is shown, and stopping a remote forward now sends `cancel-tcpip-forward`. (Previously `-R` entries were stored but never opened.)
+- **ssh-agent authentication** - New credential type "SSH Agent": keys from `SSH_AUTH_SOCK` are tried in order at connect time (no key material is stored or read from disk). Falls back to keyboard-interactive when the agent has no usable key.
+- **Connections through a proxy** - Per-host HTTP CONNECT or SOCKS5 proxy (optional auth); the proxy password is stored in the keychain, never in `hosts.json`. Applies to direct connections and jump-host hops alike.
+- **Session restore** - Tabs, pane splits, local shells (with working directory) and SSH sessions are restored on the next launch. Saved on a 20s debounce and on clean quit; SSH sessions reconnect through the normal flow, and a host deleted since the snapshot falls back to a local shell with a banner line. Toggle in Settings → General (`restore_sessions`).
+- **Real ZMODEM transfers (rz/sz)** - Terminal right-click menu offers ZMODEM upload/download: lrzsz-semantics engine runs locally against the session stream, a status chip shows handshake/progress/cancel, and the download directory is configurable in Settings → Terminal. Protocol frames are diverted before the terminal grid and recordings, so scrollback and `.cast` files stay clean.
+- **SFTP / ZMODEM capability probe** - Servers are probed for the SFTP subsystem (and ZMODEM availability) after connect; the hosts list shows a "No SFTP" badge and unsupported menu actions are greyed out instead of hanging until timeout.
+
+### Fixed
+- **Startup crash loop from emptied tabs in the session snapshot** - A tab snapshotted between session teardown and tab close (`"sessions": []`) underflowed the focus-index clamp and aborted every launch (panic across the ObjC boundary → SIGABRT). Empty tabs are no longer persisted, are skipped at restore, and an all-empty snapshot falls back to a fresh window.
+- **Terminal output rendered twice** - The ZMODEM routing hook parsed every output chunk once and the legacy parse ran again: echoed characters doubled on the prompt line, shell error lines printed twice, and asciicast recordings captured every chunk twice. The routing emit is now the single render path.
+- **Doubled keystrokes under Chinese IME direct commit** - With an IME in English/direct-commit mode the keydown and the next-frame IME commit both wrote the character; a cross-frame echo-suppression queue now drops the late echo for characters already written by the key path (Enter/Tab included).
+- **Terminal focus could not return from the AI composer** - Clicking a terminal pane now unconditionally reclaims keyboard focus even while the AI input holds it.
+- **SFTP capability probe no longer stalls the session** - The probe runs on a spawned task instead of blocking the SSH command loop (a server that never replies to the subsystem request used to freeze input processing for up to 10s).
+
 ## [0.16.4] - 2026-10-21
 
 ### Added

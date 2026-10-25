@@ -262,6 +262,7 @@ mod e2e_tests {
                         remote_port: 3000,
                     }
                 ],
+                proxy: None,
             },
         ];
 

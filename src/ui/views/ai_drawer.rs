@@ -31,6 +31,10 @@ pub fn render_ai_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut Wi
     let llm_config = cx.llm_config.clone();
 
     let active = window.active_tab;
+    // Stable id for the composer TextEdit — the terminal panes check who
+    // holds keyboard focus via this id (see render_terminal_session).
+    // Computed before `tab` borrows the window mutably.
+    let composer_id = window.ai_composer_id();
     let Some(tab) = window.tabs.get_mut(active) else { return };
     let handle = tab.ai_chat.clone();
 
@@ -106,7 +110,7 @@ pub fn render_ai_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut Wi
             }
 
             // Composer — fixed block pinned to the bottom.
-            draw_composer(ui, theme, lang, &handle, &mut composer_text, &mut do_send);
+            draw_composer(ui, theme, lang, &handle, &mut composer_text, &mut do_send, composer_id);
         });
 
     // Send the message (outside the panel borrow).
@@ -452,6 +456,7 @@ fn draw_composer(
     handle: &std::sync::Arc<std::sync::Mutex<AiChatState>>,
     composer_text: &mut String,
     do_send: &mut Option<String>,
+    composer_id: egui::Id,
 ) {
     let running = handle.lock().map(|s| s.running).unwrap_or(false);
 
@@ -467,6 +472,7 @@ fn draw_composer(
                 .inner_margin(egui::Margin::symmetric(10.0, 8.0))
                 .show(ui, |ui| {
                     let edit = egui::TextEdit::multiline(composer_text)
+                        .id(composer_id)
                         .hint_text(lang.t("ai_input_placeholder"))
                         .desired_rows(2)
                         .desired_width(f32::INFINITY)

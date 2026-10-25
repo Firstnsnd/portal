@@ -74,6 +74,20 @@ pub struct RealPtySession {
     /// Asciicast recorder slot: `Some` while the session is being recorded.
     /// Cloned into the reader thread at spawn, so the tap sees it.
     pub recorder: Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>>,
+    /// ZMODEM tap: watches output for a remote `sz` ZRQINIT and, once armed
+    /// or triggered, diverts all output into the transfer bridge. Cloned
+    /// into the reader thread at spawn, like the recorder slot.
+    #[cfg(unix)]
+    pub zmodem_tap: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTap>>>,
+    /// Active ZMODEM transfer bridge (engine thread + its input path).
+    #[cfg(unix)]
+    pub zmodem_bridge: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemBridge>>>,
+    /// Chip state for the UI: what is transferring and how far it got.
+    #[cfg(unix)]
+    pub zmodem_transfer: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTransfer>>>,
+    /// ZMODEM support on this machine (PATH scan at session creation).
+    #[cfg(unix)]
+    pub zmodem_support: Arc<std::sync::atomic::AtomicU8>,
 }
 
 impl RealPtySession {
@@ -131,6 +145,20 @@ impl RealPtySession {
             },
         ));
         let recorder_clone = Arc::clone(&recorder);
+
+        // ZMODEM slots — cloned into the reader thread like the recorder.
+        let zmodem_tap: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTap>>> =
+            Arc::new(Mutex::new(None));
+        let zmodem_bridge: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemBridge>>> =
+            Arc::new(Mutex::new(None));
+        let zmodem_transfer: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTransfer>>> =
+            Arc::new(Mutex::new(None));
+        // Local shells: sz/rz are a synchronous PATH scan away — probe now.
+        let zmodem_support = Arc::new(std::sync::atomic::AtomicU8::new(
+            crate::terminal::zmodem::local_zmodem_support().to_u8(),
+        ));
+        let zmodem_tap_clone = Arc::clone(&zmodem_tap);
+        let zmodem_bridge_clone = Arc::clone(&zmodem_bridge);
 
         let reader_thread = thread::Builder::new()
             .name(format!("pty-reader-{}", id))
@@ -218,27 +246,46 @@ impl RealPtySession {
                         };
                         match data {
                             Ok(data) if !data.is_empty() => {
-                                {
-                                    let mut grid = grid_clone.lock().unwrap();
-                                    let mut handler = VteHandler {
-                                        grid: &mut grid,
-                                        attrs: &mut attrs,
-                                    };
-                                    for byte in &data {
-                                        parser.advance(&mut handler, *byte);
-                                    }
-                                    // Every write path and resize()/reflow keep
-                                    // rows exactly `cols`-wide, so no per-chunk
-                                    // normalization scan is needed here.
+                                // ZMODEM diversion runs BEFORE the VTE parse and
+                                // the asciicast tap so binary protocol frames
+                                // never reach scrollback or the recording.
+                                let diverted = crate::terminal::zmodem::route_chunk(
+                                    &zmodem_tap_clone,
+                                    &zmodem_bridge_clone,
+                                    &data,
+                                    |bytes| {
+                                        let mut grid = grid_clone.lock().unwrap();
+                                        let mut handler = VteHandler {
+                                            grid: &mut grid,
+                                            attrs: &mut attrs,
+                                        };
+                                        for byte in bytes {
+                                            parser.advance(&mut handler, *byte);
+                                        }
+                                        // Asciicast tap: capture the raw chunk
+                                        // with a timestamp (outside the grid
+                                        // lock, in the reader thread).
+                                        if let Ok(mut slot) = recorder_clone.lock() {
+                                            if let Some(rec) = slot.as_mut() {
+                                                rec.output(bytes);
+                                            }
+                                        }
+                                    },
+                                );
+                                if diverted == crate::terminal::zmodem::ChunkRoute::Diverted {
+                                    // Wake the UI (progress counter moved) and
+                                    // skip the normal path entirely.
+                                    crate::repaint::notify_repaint();
+                                    continue;
                                 }
-                                // Asciicast tap: capture the raw chunk with a
-                                // timestamp (outside the grid lock, in the
-                                // reader thread).
-                                if let Ok(mut slot) = recorder_clone.lock() {
-                                    if let Some(rec) = slot.as_mut() {
-                                        rec.output(&data);
-                                    }
-                                }
+                                // route_chunk's emit closure is the ONLY render
+                                // path for this chunk — on diversion it may have
+                                // seen just the non-protocol prefix, so callers
+                                // must never parse `data` again here (a second
+                                // parse paints every chunk twice).
+                                // Every write path and resize()/reflow keep
+                                // rows exactly `cols`-wide, so no per-chunk
+                                // normalization scan is needed.
                                 // Wake the UI so the new output is painted
                                 // promptly (the app no longer repaints
                                 // unconditionally).
@@ -328,6 +375,10 @@ impl RealPtySession {
             last_shell_check,
             metrics,
             recorder,
+            zmodem_tap,
+            zmodem_bridge,
+            zmodem_transfer,
+            zmodem_support,
         })
     }
 
@@ -462,6 +513,127 @@ impl RealPtySession {
                 rec.resize(cols, rows);
             }
         }
+    }
+
+    // ── ZMODEM (unix) ────────────────────────────────────────────────────
+
+    /// Sink for the ZMODEM engine: a fresh dup of the pty master so the
+    /// transfer thread can write protocol frames without racing the
+    /// session's own writer.
+    #[cfg(unix)]
+    fn make_zmodem_sink(&self) -> io::Result<crate::terminal::zmodem::SessionWriter> {
+        use std::os::unix::io::AsRawFd;
+        let pty = self
+            .pty
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "PTY not available"))?;
+        let master_fd = pty.lock().unwrap().master.as_raw_fd();
+        let fd_dup = unsafe { libc::dup(master_fd) };
+        if fd_dup < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let writer = PtyWriter { fd: fd_dup };
+        Ok(crate::terminal::zmodem::SessionWriter::new(move |data| {
+            writer.write(data)
+        }))
+    }
+
+    /// Start a ZMODEM upload of `path` into this session. Arms the tap (all
+    /// output diverts) and spawns the transfer engine, which types `rz\r`
+    /// into the shell itself and runs the ZRQINIT → ZRINIT handshake.
+    #[cfg(unix)]
+    pub fn start_zmodem_upload(&self, path: std::path::PathBuf) -> io::Result<()> {
+        use crate::terminal::zmodem::{TransferRequest, ZmodemBridge};
+        self.cancel_zmodem();
+        let sink = self.make_zmodem_sink()?;
+        let mut tap = crate::terminal::zmodem::ZmodemTap::new();
+        let held = tap.arm();
+        *self
+            .zmodem_tap
+            .lock()
+            .map_err(|_| io::Error::other("zmodem tap lock poisoned"))? = Some(tap);
+        let mut bridge = ZmodemBridge::spawn(
+            TransferRequest::Upload { path },
+            sink,
+            Arc::clone(&self.zmodem_transfer),
+        );
+        if !held.is_empty() {
+            bridge.feed(&held);
+        }
+        *self
+            .zmodem_bridge
+            .lock()
+            .map_err(|_| io::Error::other("zmodem bridge lock poisoned"))? = Some(bridge);
+        Ok(())
+    }
+
+    /// Start a ZMODEM download of remote `remote_path` into `local_dir`:
+    /// arm a passive tap, spawn a waiting bridge, then type `sz '<path>'`
+    /// so the remote side announces itself and the tap triggers the engine
+    /// on its first frame.
+    #[cfg(unix)]
+    pub fn start_zmodem_download(
+        &self,
+        remote_path: &str,
+        local_dir: std::path::PathBuf,
+    ) -> io::Result<()> {
+        use crate::terminal::zmodem::{shell_quote_single, TransferRequest, ZmodemBridge};
+        self.cancel_zmodem();
+        let sink = self.make_zmodem_sink()?;
+        *self
+            .zmodem_tap
+            .lock()
+            .map_err(|_| io::Error::other("zmodem tap lock poisoned"))? =
+            Some(crate::terminal::zmodem::ZmodemTap::new());
+        let bridge = ZmodemBridge::spawn(
+            TransferRequest::Download {
+                output_dir: local_dir,
+            },
+            sink,
+            Arc::clone(&self.zmodem_transfer),
+        );
+        *self
+            .zmodem_bridge
+            .lock()
+            .map_err(|_| io::Error::other("zmodem bridge lock poisoned"))? = Some(bridge);
+        self.write(format!("sz {}\r", shell_quote_single(remote_path)).as_bytes())
+    }
+
+    /// ZMODEM support on this machine (from the PATH scan at creation).
+    #[cfg(unix)]
+    pub fn zmodem_support(&self) -> crate::terminal::zmodem::ZmodemSupport {
+        crate::terminal::zmodem::ZmodemSupport::from_u8(
+            self.zmodem_support
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
+    /// Abort any ZMODEM transfer on this session (no-op when idle).
+    #[cfg(unix)]
+    pub fn cancel_zmodem(&self) {
+        if let Ok(mut b) = self.zmodem_bridge.lock() {
+            if let Some(bridge) = b.as_mut() {
+                bridge.cancel();
+            }
+            *b = None;
+        }
+        if let Ok(mut t) = self.zmodem_tap.lock() {
+            if let Some(tap) = t.as_mut() {
+                tap.reset();
+            }
+        }
+        // The transfer slot keeps its final state for the status chip until
+        // the next transfer replaces it.
+    }
+
+    /// Bytes transferred so far by the active bridge (0 when idle).
+    #[cfg(unix)]
+    pub fn zmodem_bytes(&self) -> u64 {
+        self.zmodem_bridge
+            .lock()
+            .ok()
+            .and_then(|b| b.as_ref().map(|bridge| bridge.bytes()))
+            .unwrap_or(0)
     }
 }
 
@@ -688,6 +860,14 @@ mod tests {
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
             recorder: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_tap: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_bridge: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_transfer: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         };
 
         assert!(!session.is_connected(), "is_connected() must return false when alive flag is false");
@@ -717,6 +897,14 @@ mod tests {
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
             recorder: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_tap: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_bridge: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_transfer: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         };
 
         assert!(!session.is_connected(), "is_connected() must return false when alive flag is false");
@@ -745,6 +933,14 @@ mod tests {
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
             recorder: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_tap: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_bridge: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_transfer: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         };
 
         assert!(session.is_connected(),
@@ -774,6 +970,14 @@ mod tests {
                 last_shell_check: Arc::new(Mutex::new(Instant::now())),
                 metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
                 recorder: Arc::new(Mutex::new(None)),
+                #[cfg(unix)]
+                zmodem_tap: Arc::new(Mutex::new(None)),
+                #[cfg(unix)]
+                zmodem_bridge: Arc::new(Mutex::new(None)),
+                #[cfg(unix)]
+                zmodem_transfer: Arc::new(Mutex::new(None)),
+                #[cfg(unix)]
+                zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             };
             // session is alive while in scope
             assert!(alive.load(Ordering::Relaxed));

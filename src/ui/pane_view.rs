@@ -43,6 +43,14 @@ pub struct WindowContext<'a> {
     pub snippets: &'a mut Vec<Snippet>,
     pub connection_history: &'a mut Vec<ConnectionRecord>,
 
+    /// Probed SFTP support per host ("host:port" → capability), harvested
+    /// from live SSH sessions by PortalApp each frame. Read-only here —
+    /// only the hosts-list badge consumes it.
+    pub host_sftp_support: &'a std::collections::HashMap<
+        String,
+        crate::ssh::capability::HostCapability,
+    >,
+
     // File paths
     #[allow(dead_code)]
     pub hosts_file: &'a PathBuf,
@@ -78,12 +86,17 @@ impl<'a> WindowContext<'a> {
         runtime: &'a tokio::runtime::Runtime,
         font_size: f32,
         llm_config: &'a crate::llm::types::LlmConfig,
+        host_sftp_support: &'a std::collections::HashMap<
+            String,
+            crate::ssh::capability::HostCapability,
+        >,
     ) -> Self {
         Self {
             hosts,
             credentials,
             snippets,
             connection_history,
+            host_sftp_support,
             hosts_file,
             credentials_file,
             theme,

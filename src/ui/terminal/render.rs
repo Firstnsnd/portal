@@ -99,9 +99,13 @@ fn selected_text_of(session: &TerminalSession) -> Option<String> {
 /// * `session` - Terminal session state (grid, scrollback, selection, etc.)
 /// * `session_id` - Unique identifier for this session
 /// * `focused_session_id` - Currently focused session ID
+/// * `ai_composer_holds_focus` - True while the AI composer's TextEdit holds
+///   egui keyboard focus; the pane stands down from re-claiming it
 /// * `broadcast_state` - Broadcast mode state (typing to multiple terminals)
 /// * `ime_composing` - IME composition state flag
 /// * `ime_preedit` - IME preedit text buffer
+/// * `key_char_suppress` - Cross-frame echo suppression queue (chars already
+///   written by the Key-event fallback; see `take_key_suppressed`)
 /// * `pane_rect` - Rectangle for this pane's content area
 /// * `pane_id` - egui ID for this pane
 /// * `show_close_btn` - Whether to show close button
@@ -120,10 +124,11 @@ pub fn render_terminal_session(
     session: &mut TerminalSession,
     session_id: usize,
     focused_session_id: usize,
-    ai_drawer_open: bool,
+    ai_composer_holds_focus: bool,
     broadcast_state: &BroadcastState,
     ime_composing: &mut bool,
     ime_preedit: &mut String,
+    key_char_suppress: &mut Vec<(char, std::time::Instant)>,
     pane_rect: egui::Rect,
     pane_id: egui::Id,
     show_close_btn: bool,
@@ -200,6 +205,11 @@ pub fn render_terminal_session(
     if close_btn_clicked {
         action = Some(PaneAction::ClosePane);
     } else if response.clicked() || response.drag_started() {
+        // An explicit click is an unambiguous request for keyboard focus —
+        // take it back even from the AI composer, which otherwise holds
+        // focus for as long as the drawer is open (the every-frame
+        // re-claim below stands down while it does).
+        response.request_focus();
         // Auto-reconnect disconnected SSH sessions when clicked
         if session.needs_reconnect() {
             action = Some(PaneAction::Reconnect);
@@ -208,7 +218,7 @@ pub fn render_terminal_session(
         }
     }
     let is_focused = session_id == focused_session_id;
-    if is_focused && !ai_drawer_open {
+    if is_focused && !ai_composer_holds_focus {
         // Re-claim keyboard focus every frame so egui's own focus reshuffles
         // (its Tab-key widget navigation, popup menus, newly shown widgets)
         // can never orphan it. This MUST be unconditional: gating on
@@ -217,8 +227,9 @@ pub fn render_terminal_session(
         // button, `response.has_focus()` went false and the terminal could
         // never take it back — every keystroke (including more Tabs) was
         // silently dropped. The only overlay that must win this fight is the
-        // AI chat drawer's TextEdit; the caller tells us when it's open via
-        // `ai_drawer_open` and we stand down for those frames.
+        // AI chat composer's TextEdit; the caller tells us when it holds
+        // focus via `ai_composer_holds_focus` and we stand down for those
+        // frames (a click on this pane still takes focus back — see above).
         response.request_focus();
     }
 
@@ -366,6 +377,12 @@ pub fn render_terminal_session(
     let mut ctx_broadcast = false;
     let mut ctx_record = false;
     let mut ctx_view_recordings = false;
+    #[cfg(unix)]
+    let mut ctx_zmodem_upload = false;
+    #[cfg(unix)]
+    let mut ctx_zmodem_download = false;
+    #[cfg(unix)]
+    let mut ctx_zmodem_cancel = false;
     let mut ctx_split_h = false;
     let mut ctx_split_v = false;
     let mut ctx_close = false;
@@ -411,6 +428,46 @@ pub fn render_terminal_session(
         if ui.button(language.t("recordings_of_host")).clicked() {
             ctx_view_recordings = true;
             ui.close_menu();
+        }
+        // ZMODEM transfers (rz/sz) — unix-only like the PTY/rzsz layer.
+        // Send/receive grey out when the capability probe found neither
+        // sz nor rz on the host (Unknown/Available stay enabled).
+        #[cfg(unix)]
+        {
+            ui.separator();
+            let support = session.kind.zmodem_support();
+            let zmodem_ok =
+                support != crate::terminal::zmodem::ZmodemSupport::Missing;
+            let hint = (support == crate::terminal::zmodem::ZmodemSupport::Missing)
+                .then(|| language.t("zmodem_needs_lrzsz"));
+            let mut upload = ui.add_enabled(
+                zmodem_ok,
+                egui::Button::new(language.t("zmodem_upload")),
+            );
+            let mut download = ui.add_enabled(
+                zmodem_ok,
+                egui::Button::new(language.t("zmodem_download")),
+            );
+            if let Some(h) = hint {
+                upload = upload.on_hover_text(h);
+                download = download.on_hover_text(h);
+            }
+            if upload.clicked() {
+                ctx_zmodem_upload = true;
+                ui.close_menu();
+            }
+            if download.clicked() {
+                ctx_zmodem_download = true;
+                ui.close_menu();
+            }
+            let zmodem_active = session
+                .kind
+                .zmodem_transfer()
+                .is_some_and(|t| t.is_active());
+            if zmodem_active && ui.button(language.t("zmodem_cancel")).clicked() {
+                ctx_zmodem_cancel = true;
+                ui.close_menu();
+            }
         }
         ui.separator();
         if ui.button("Split Horizontally\t⌘D").clicked() {
@@ -461,6 +518,12 @@ pub fn render_terminal_session(
     if ctx_broadcast { action = Some(PaneAction::ToggleBroadcast); }
     if ctx_record    { action = Some(PaneAction::ToggleRecording); }
     if ctx_view_recordings { action = Some(PaneAction::ViewHostRecordings); }
+    #[cfg(unix)]
+    if ctx_zmodem_upload   { action = Some(PaneAction::ZmodemUpload); }
+    #[cfg(unix)]
+    if ctx_zmodem_download { action = Some(PaneAction::ZmodemDownload); }
+    #[cfg(unix)]
+    if ctx_zmodem_cancel   { action = Some(PaneAction::ZmodemCancel); }
     if ctx_close   { action = Some(PaneAction::ClosePane); }
 
     // Keyboard input — only for the focused pane
@@ -556,8 +619,10 @@ pub fn render_terminal_session(
                             let safe_text: String = text.chars()
                                 .filter(|c| *c == '\t' || *c == '\n' || *c == '\r' || !c.is_control())
                                 .collect();
-                            session.write(&safe_text);
-                            input_bytes.extend_from_slice(safe_text.as_bytes());
+                            if !take_key_suppressed(key_char_suppress, &safe_text) {
+                                session.write(&safe_text);
+                                input_bytes.extend_from_slice(safe_text.as_bytes());
+                            }
                             ime_committed = true;
                             session.last_non_ascii_input = !safe_text.is_ascii();
                             *ime_composing = false;
@@ -573,6 +638,12 @@ pub fn render_terminal_session(
             for event in &events {
                 match event {
                     egui::Event::Text(text) => {
+                        // An echo of a char already written by the Key-event
+                        // fallback in an earlier frame (macOS IME direct
+                        // commit splits one keypress across frames) — drop it.
+                        if take_key_suppressed(key_char_suppress, text) {
+                            continue;
+                        }
                         // Skip Text events if IME is composing or if IME committed in this frame
                         // This prevents duplicate input when both IME and Text events fire
                         if *ime_composing || ime_committed {
@@ -677,9 +748,21 @@ pub fn render_terminal_session(
                             }
                         } else {
                             let special = match key {
-                                egui::Key::Enter     => { session.write("\r"); input_bytes.extend_from_slice(b"\r"); true }
+                                egui::Key::Enter     => {
+                                    session.write("\r");
+                                    input_bytes.extend_from_slice(b"\r");
+                                    // \r never arrives via Event::Text, but an
+                                    // IME direct commit can echo it next frame.
+                                    key_char_suppress.push(('\r', std::time::Instant::now()));
+                                    true
+                                }
                                 egui::Key::Backspace => { session.write("\x7f"); input_bytes.push(0x7f); true }
-                                egui::Key::Tab       => { session.write("\t"); input_bytes.push(b'\t'); true }
+                                egui::Key::Tab       => {
+                                    session.write("\t");
+                                    input_bytes.push(b'\t');
+                                    key_char_suppress.push(('\t', std::time::Instant::now()));
+                                    true
+                                }
                                 egui::Key::Escape    => { session.write("\x1b"); input_bytes.push(0x1b); true }
                                 egui::Key::ArrowUp   => { session.write("\x1b[A"); input_bytes.extend_from_slice(b"\x1b[A"); true }
                                 egui::Key::ArrowDown => { session.write("\x1b[B"); input_bytes.extend_from_slice(b"\x1b[B"); true }
@@ -725,6 +808,12 @@ pub fn render_terminal_session(
                                             let s = ch.to_string();
                                             session.write(&s);
                                             input_bytes.extend_from_slice(s.as_bytes());
+                                            // No Text event accompanied this key
+                                            // in this frame — its echo may still
+                                            // arrive in a later frame (IME
+                                            // direct commit); suppress it there.
+                                            key_char_suppress
+                                                .push((ch, std::time::Instant::now()));
                                         }
                                     }
                                 }
@@ -1684,6 +1773,34 @@ pub fn render_terminal_session(
     (action, input_bytes)
 }
 
+/// Consume one pending Key-fallback suppression matching `text`.
+///
+/// When a printable keypress produces no `Event::Text` sibling in its frame
+/// (macOS IME in direct-commit mode: keydown in frame N, commit in N+1), the
+/// Key-event fallback writes the char and enqueues it here. The echo — a
+/// single-char `Event::Text` or `ImeEvent::Commit` arriving shortly after —
+/// must then be dropped or the char lands twice. Entries expire after 250 ms
+/// so a lost echo can't eat a later genuine keystroke; multi-char text is
+/// never suppressed (real IME composition is gated elsewhere anyway).
+fn take_key_suppressed(
+    queue: &mut Vec<(char, std::time::Instant)>,
+    text: &str,
+) -> bool {
+    let mut chars = text.chars();
+    let (Some(ch), None) = (chars.next(), chars.next()) else {
+        return false;
+    };
+    let now = std::time::Instant::now();
+    queue.retain(|(_, at)| now.duration_since(*at) < std::time::Duration::from_millis(250));
+    match queue.iter().position(|(c, _)| *c == ch) {
+        Some(pos) => {
+            queue.remove(pos);
+            true
+        }
+        None => false,
+    }
+}
+
 /// Thin wrapper around `render_terminal_session` that binds a session index and pane ID.
 #[allow(clippy::too_many_arguments)]
 pub fn render_terminal_pane(
@@ -1692,10 +1809,11 @@ pub fn render_terminal_pane(
     session_idx: usize,
     sessions: &mut [TerminalSession],
     focused_session: usize,
-    ai_drawer_open: bool,
+    ai_composer_holds_focus: bool,
     broadcast_state: &BroadcastState,
     ime_composing: &mut bool,
     ime_preedit: &mut String,
+    key_char_suppress: &mut Vec<(char, std::time::Instant)>,
     pane_rect: egui::Rect,
     show_close_btn: bool,
     can_close_pane: bool,
@@ -1713,9 +1831,10 @@ pub fn render_terminal_pane(
         &mut sessions[session_idx],
         session_idx,
         focused_session,
-        ai_drawer_open,
+        ai_composer_holds_focus,
         broadcast_state,
         ime_composing, ime_preedit,
+        key_char_suppress,
         pane_rect, pane_id,
         show_close_btn,
         can_close_pane,
@@ -1733,10 +1852,11 @@ pub fn render_pane_tree(
     rect: egui::Rect,
     sessions: &mut [TerminalSession],
     focused_session: usize,
-    ai_drawer_open: bool,
+    ai_composer_holds_focus: bool,
     broadcast_state: &BroadcastState,
     ime_composing: &mut bool,
     ime_preedit: &mut String,
+    key_char_suppress: &mut Vec<(char, std::time::Instant)>,
     can_close_pane: bool,
     theme: &ThemeColors,
     font_size: f32,
@@ -1746,8 +1866,8 @@ pub fn render_pane_tree(
     match node {
         PaneNode::Terminal(idx) => {
             let (action, input_bytes) = render_terminal_pane(
-                ui, ctx, *idx, sessions, focused_session, ai_drawer_open, broadcast_state,
-                ime_composing, ime_preedit, rect,
+                ui, ctx, *idx, sessions, focused_session, ai_composer_holds_focus, broadcast_state,
+                ime_composing, ime_preedit, key_char_suppress, rect,
                 sessions.len() > 1,
                 can_close_pane,
                 theme, font_size, language,
@@ -1800,8 +1920,8 @@ pub fn render_pane_tree(
                 ctx.set_cursor_icon(icon);
             }
 
-            let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, ai_drawer_open, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language, shortcut_resolver);
-            let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, ai_drawer_open, broadcast_state, ime_composing, ime_preedit, can_close_pane, theme, font_size, language, shortcut_resolver);
+            let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, ai_composer_holds_focus, broadcast_state, ime_composing, ime_preedit, key_char_suppress, can_close_pane, theme, font_size, language, shortcut_resolver);
+            let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, ai_composer_holds_focus, broadcast_state, ime_composing, ime_preedit, key_char_suppress, can_close_pane, theme, font_size, language, shortcut_resolver);
 
             let result = match (f1, f2) {
                 (Some((_, PaneAction::Focus, _)), Some(other)) => Some(other),
@@ -1820,5 +1940,27 @@ pub fn render_pane_tree(
 
             result
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::take_key_suppressed;
+
+    #[test]
+    fn key_suppress_consumes_matching_char_once() {
+        let mut q = vec![('k', std::time::Instant::now())];
+        assert!(take_key_suppressed(&mut q, "k"), "echo of the enqueued char is suppressed");
+        assert!(!take_key_suppressed(&mut q, "k"), "each entry suppresses exactly one echo");
+        assert!(!take_key_suppressed(&mut q, "kk"), "multi-char text is never suppressed");
+        assert!(!take_key_suppressed(&mut q, "j"), "a different char is never suppressed");
+    }
+
+    #[test]
+    fn key_suppress_entries_expire() {
+        let stale = std::time::Instant::now() - std::time::Duration::from_millis(400);
+        let mut q = vec![('k', stale)];
+        assert!(!take_key_suppressed(&mut q, "k"), "expired entries must not suppress");
+        assert!(q.is_empty(), "expired entries are pruned");
     }
 }

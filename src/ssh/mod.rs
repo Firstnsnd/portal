@@ -3,7 +3,10 @@
 mod auth;
 mod auth_prompt;
 mod session;
+pub mod capability;
 pub mod port_forward;
+pub mod proxy;
+pub mod socks5;
 
 #[allow(unused_imports)]
 pub use session::{SshSession, SshConnectionState, SshClient, JumpHostInfo, connect_via_jump, test_connection, remove_known_hosts_key};

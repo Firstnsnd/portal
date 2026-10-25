@@ -21,6 +21,14 @@ async fn with_timeout<F: std::future::Future>(fut: F) -> F::Output {
         .expect("test timed out")
 }
 
+/// Like `with_timeout`, but with headroom for a full SSH handshake when
+/// the whole suite runs in parallel on loaded CI machines.
+async fn with_handshake_timeout<F: std::future::Future>(fut: F) -> F::Output {
+    tokio::time::timeout(Duration::from_secs(20), fut)
+        .await
+        .expect("test timed out")
+}
+
 /// Mirror of the production `connect_and_authenticate`, but against the
 /// ephemeral-key mock server (AcceptAll policy so tests never touch the
 /// user's real known_hosts).
@@ -34,6 +42,8 @@ async fn connect_to_mock(
         port,
         HostKeyPolicy::AcceptAll,
         Some((Duration::from_secs(15), 30)),
+        Arc::new(std::sync::Mutex::new(Vec::new())),
+        None,
     )
     .await?;
     portal::ssh::authenticate(&mut handle, "user", auth, bridge).await?;
@@ -492,6 +502,7 @@ async fn jump_target_auth_uses_same_state_machine() {
         port: jump.port,
         username: "user".into(),
         auth: ResolvedAuth::Password { password: "jumppw".into() },
+        proxy: None,
     };
 
     let result = with_timeout(portal::ssh::connect_via_jump(
@@ -504,6 +515,7 @@ async fn jump_target_auth_uses_same_state_machine() {
         false,
         &bridge,
         HostKeyPolicy::AcceptAll,
+        Arc::new(std::sync::Mutex::new(Vec::new())),
     ))
     .await;
 
@@ -543,6 +555,7 @@ async fn drive_sftp_task(
             cancel_flag,
             task_bridge,
             HostKeyPolicy::AcceptAll,
+            None,
         )
         .await
     });
@@ -651,4 +664,404 @@ async fn sftp_auth_phase_survives_slow_otp_beyond_connect_timeout() {
         SftpTerminal::Running => panic!("task never finished"),
         SftpTerminal::Disconnected => panic!("task died without a response"),
     }
+}
+
+/// A pre-configured remote forward (-R) must actually be activated on
+/// connect: the client sends the tcpip-forward global request, stores the
+/// server-allocated port, and marks the forward Active. Stopping it must
+/// send cancel-tcpip-forward. Before Phase 1 this never happened —
+/// tcpip_forward was never called anywhere.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_forward_activated_on_connect_and_cancelled_on_stop() {
+    // Full SshSession connect → the mock must grant session channels.
+    let server = with_timeout(MockSshServer::start_with_session_channels(
+        MockAuthMode::PasswordAccept { password: "pw".into() },
+    ))
+    .await
+    .expect("mock server starts");
+
+    // SshSession needs a &Runtime for its task; the #[tokio::test] runtime
+    // only hands out Handles, so build a dedicated multi-thread runtime for
+    // the session (all SSH client I/O lives there; the mock server keeps
+    // running on the test runtime).
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("session runtime");
+
+    let remote_cfg = portal::ssh::port_forward::PortForwardConfig {
+        kind: portal::ssh::port_forward::ForwardKind::Remote,
+        local_host: "127.0.0.1".into(),
+        local_port: 2200,
+        remote_host: "127.0.0.1".into(),
+        remote_port: 12345,
+    };
+    let session = portal::ssh::SshSession::with_scrollback_limit(
+        &rt,
+        "127.0.0.1".into(),
+        server.port,
+        "user".into(),
+        ResolvedAuth::Password { password: "pw".into() },
+        80,
+        24,
+        Vec::new(),
+        64 * 1024,
+        0,
+        false,
+        vec![remote_cfg.clone()],
+        None,
+        None,
+        false,
+    );
+
+    // The -R activation runs inside ssh_task; poll until it lands.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let forward_active = |session: &portal::ssh::SshSession| {
+        session
+            .port_forwards
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|pf| pf.config == remote_cfg && matches!(*pf.state.lock().unwrap(), portal::ssh::port_forward::ForwardState::Active))
+    };
+    while !forward_active(&session) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "remote forward never became Active; states={:?} server_saw={:?}",
+            session.get_port_forward_states(),
+            server.forwards_seen()
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+
+    // The server heard the global request with the requested port, and the
+    // allocated port (fixed, non-zero request → same value) was stored.
+    assert_eq!(
+        server.forwards_seen(),
+        vec![("127.0.0.1".to_string(), 12345)]
+    );
+    let allocated = *session.port_forwards.lock().unwrap()[0]
+        .allocated_port
+        .lock()
+        .unwrap();
+    assert_eq!(allocated, Some(12345));
+
+    // Stopping the forward must tell the server to stop listening.
+    session.stop_port_forward(remote_cfg.clone());
+    let cancel_deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while server.cancels_seen().is_empty() {
+        assert!(
+            std::time::Instant::now() < cancel_deadline,
+            "cancel-tcpip-forward never reached the server"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert_eq!(
+        server.cancels_seen(),
+        vec![("127.0.0.1".to_string(), 12345)]
+    );
+    let forward_removed = {
+        let fwds = session.port_forwards.lock().unwrap();
+        fwds.iter().all(|pf| pf.config != remote_cfg)
+    };
+    assert!(forward_removed, "stopped forward must be removed from the list");
+
+    session.disconnect();
+    // shutdown_background moves the blocking join off-thread — a plain drop
+    // or shutdown_timeout would panic from inside this async test.
+    rt.shutdown_background();
+    with_timeout(server.shutdown()).await;
+}
+
+/// A dynamic forward (-D) must act as a SOCKS5 proxy: greeting, CONNECT,
+/// per-connection direct-tcpip channel through the SSH server, then raw
+/// bytes bridged to the destination (here: a local echo server the mock
+/// pipes to).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dynamic_forward_serves_socks5_connections() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let server = with_timeout(MockSshServer::start(MockAuthMode::PasswordAccept {
+        password: "pw".into(),
+    }))
+    .await
+    .expect("mock server starts");
+
+    // Echo server the tunnel will target through the mock's direct-tcpip.
+    let echo = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let echo_port = echo.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = echo.accept().await else { return };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 256];
+                loop {
+                    match sock.read(&mut buf).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => {
+                            if sock.write_all(&buf[..n]).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    });
+
+    let bridge = AuthPromptBridge::new();
+    let handle = with_timeout(connect_to_mock(
+        server.port,
+        &ResolvedAuth::Password { password: "pw".into() },
+        &bridge,
+    ))
+    .await
+    .expect("connects to mock");
+
+    let config = portal::ssh::port_forward::PortForwardConfig {
+        kind: portal::ssh::port_forward::ForwardKind::Dynamic,
+        local_host: "127.0.0.1".into(),
+        local_port: socks_listener_port(),
+        remote_host: String::new(),
+        remote_port: 0,
+    };
+    let (pf, cancel_rx) = portal::ssh::port_forward::PortForward::new(config);
+    let state = Arc::clone(&pf.state);
+    let notifications = Arc::new(std::sync::Mutex::new(Vec::new()));
+    tokio::spawn(portal::ssh::port_forward::start_dynamic_forward(
+        Arc::new(handle),
+        pf.config.clone(),
+        state,
+        cancel_rx,
+        notifications,
+    ));
+
+    // The spawned forward task binds asynchronously — retry until the
+    // listener accepts (or the deadline expires).
+    let connect_deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut client = loop {
+        match tokio::net::TcpStream::connect(("127.0.0.1", pf.config.local_port)).await {
+            Ok(c) => break c,
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+                assert!(
+                    std::time::Instant::now() < connect_deadline,
+                    "SOCKS listener never came up on {}",
+                    pf.config.local_port
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Err(e) => panic!("SOCKS connect failed unexpectedly: {e}"),
+        }
+    };
+
+    // Greeting: offer no-auth.
+    client.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
+    let mut reply = [0u8; 2];
+    with_timeout(client.read_exact(&mut reply)).await.unwrap();
+    assert_eq!(reply, [0x05, 0x00], "server must pick no-auth");
+
+    // CONNECT to 127.0.0.1:echo_port via a domain-name ATYP.
+    let mut req = vec![0x05, 0x01, 0x00, 0x03, 9];
+    req.extend_from_slice(b"127.0.0.1");
+    req.extend_from_slice(&echo_port.to_be_bytes());
+    client.write_all(&req).await.unwrap();
+
+    // Success reply echoes the domain + port.
+    let mut header = [0u8; 5];
+    with_timeout(client.read_exact(&mut header)).await.unwrap();
+    assert_eq!(&header[..3], &[0x05, 0x00, 0x00]);
+    assert_eq!(header[3], 0x03);
+    let mut domain = vec![0u8; header[4] as usize + 2];
+    with_timeout(client.read_exact(&mut domain)).await.unwrap();
+    assert_eq!(&domain[..9], b"127.0.0.1");
+    assert_eq!(&domain[9..], &echo_port.to_be_bytes());
+
+    // Tunnel is live: bytes round-trip through the echo server.
+    client.write_all(b"ping-through-tunnel").await.unwrap();
+    let mut echo_back = vec![0u8; b"ping-through-tunnel".len()];
+    with_timeout(client.read_exact(&mut echo_back)).await.unwrap();
+    assert_eq!(echo_back, b"ping-through-tunnel");
+
+    pf.stop();
+}
+
+/// A free loopback port for the SOCKS listener (ephemeral range).
+fn socks_listener_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+/// Fake HTTP CONNECT proxy: verifies the CONNECT head targets
+/// `expected`, replies 200, then pipes raw bytes to the target.
+/// Returns the proxy's ephemeral port.
+async fn spawn_http_connect_proxy(expected: String) -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (mut client, _) = listener.accept().await.unwrap();
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 512];
+        // Read until the end of the request head.
+        loop {
+            let n = client.read(&mut chunk).await.unwrap_or(0);
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let head = String::from_utf8_lossy(&buf);
+        let first = head.lines().next().unwrap_or("");
+        assert_eq!(
+            first, format!("CONNECT {expected} HTTP/1.1"),
+            "client must CONNECT to the SSH server through the proxy"
+        );
+        client
+            .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+            .await
+            .unwrap();
+
+        // Tunnel to the SSH server.
+        let mut target = tokio::net::TcpStream::connect(&expected).await.unwrap();
+        let _ = tokio::io::copy_bidirectional(&mut client, &mut target).await;
+    });
+    port
+}
+
+/// Full transport path: TCP -> HTTP CONNECT proxy tunnel -> SSH handshake
+/// + password auth against the mock server, i.e. the `connect_stream`
+/// branch of `open_ssh_connection`.
+///
+/// Uses a generous wrapper: a full SSH handshake can outlive the shared
+/// 5s `with_timeout` when the whole suite runs in parallel.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ssh_connects_through_http_proxy() {
+    let server = MockSshServer::start(MockAuthMode::PasswordAccept {
+        password: "pw".into(),
+    })
+    .await
+    .unwrap();
+    let proxy_port = spawn_http_connect_proxy(format!("127.0.0.1:{}", server.port)).await;
+
+    let proxy = portal::config::ResolvedProxy {
+        kind: portal::config::ProxyKind::Http,
+        host: "127.0.0.1".into(),
+        port: proxy_port,
+        username: None,
+        password: None,
+    };
+    let bridge = AuthPromptBridge::new();
+    let mut handle = with_handshake_timeout(open_ssh_connection(
+        "127.0.0.1",
+        server.port,
+        HostKeyPolicy::AcceptAll,
+        Some((Duration::from_secs(15), 30)),
+        Arc::new(std::sync::Mutex::new(Vec::new())),
+        Some(&proxy),
+    ))
+    .await
+    .expect("SSH transport over HTTP proxy succeeds");
+    portal::ssh::authenticate(
+        &mut handle,
+        "user",
+        &ResolvedAuth::Password { password: "pw".into() },
+        &bridge,
+    )
+    .await
+    .expect("password auth through proxy succeeds");
+}
+
+/// Same path through a SOCKS5 proxy (no-auth), exercising the shared
+/// socks5 framing on the client side end to end.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ssh_connects_through_socks5_proxy() {
+    use portal::ssh::socks5 as s5;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let server = MockSshServer::start(MockAuthMode::PasswordAccept {
+        password: "pw".into(),
+    })
+    .await
+    .unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (mut client, _) = listener.accept().await.unwrap();
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 256];
+        // Greeting: client must offer no-auth.
+        loop {
+            match s5::parse_greeting(&buf, &[s5::METHOD_NO_AUTH]) {
+                Ok((consumed, method)) => {
+                    buf.drain(..consumed);
+                    assert_eq!(method, s5::METHOD_NO_AUTH);
+                    client.write_all(&[s5::SOCKS_VERSION, method]).await.unwrap();
+                    break;
+                }
+                Err(s5::SocksError::Incomplete) => {}
+                Err(_) => return,
+            }
+            let n = client.read(&mut chunk).await.unwrap_or(0);
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+        }
+        // CONNECT request (IPv4).
+        loop {
+            if buf.len() >= 10 && buf[0] == s5::SOCKS_VERSION && buf[1] == s5::CMD_CONNECT {
+                break;
+            }
+            let n = client.read(&mut chunk).await.unwrap_or(0);
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+        }
+        let target_port = u16::from_be_bytes([buf[8], buf[9]]);
+        assert_eq!(target_port, server.port, "SOCKS5 CONNECT must target the SSH server");
+        client
+            .write_all(&s5::success_reply(&s5::SocksHost::Ipv4(
+                std::net::Ipv4Addr::LOCALHOST,
+            ), 0))
+            .await
+            .unwrap();
+
+        let mut target = tokio::net::TcpStream::connect(("127.0.0.1", target_port)).await.unwrap();
+        let _ = tokio::io::copy_bidirectional(&mut client, &mut target).await;
+    });
+
+    let proxy = portal::config::ResolvedProxy {
+        kind: portal::config::ProxyKind::Socks5,
+        host: "127.0.0.1".into(),
+        port: proxy_port,
+        username: None,
+        password: None,
+    };
+    let bridge = AuthPromptBridge::new();
+    let mut handle = with_handshake_timeout(open_ssh_connection(
+        "127.0.0.1",
+        server.port,
+        HostKeyPolicy::AcceptAll,
+        Some((Duration::from_secs(15), 30)),
+        Arc::new(std::sync::Mutex::new(Vec::new())),
+        Some(&proxy),
+    ))
+    .await
+    .expect("SSH transport over SOCKS5 proxy succeeds");
+    portal::ssh::authenticate(
+        &mut handle,
+        "user",
+        &ResolvedAuth::Password { password: "pw".into() },
+        &bridge,
+    )
+    .await
+    .expect("password auth through SOCKS5 proxy succeeds");
 }

@@ -80,6 +80,7 @@ pub fn render_keychain_view(
                             let type_key = match &cred.credential_type {
                                 CredentialType::Password { .. } => "credential_password",
                                 CredentialType::SshKey { .. } => "credential_private_key",
+                                CredentialType::Agent { .. } => "credential_agent",
                             };
 
                             let subtitle = match &cred.credential_type {
@@ -95,6 +96,13 @@ pub fn render_keychain_view(
                                         cx.language.t("ssh_key").to_string()
                                     } else {
                                         format!("{}: {}", cx.language.t("key_source_path"), key_path)
+                                    }
+                                }
+                                CredentialType::Agent { username } => {
+                                    if username.is_empty() {
+                                        cx.language.t("credential_agent").to_string()
+                                    } else {
+                                        format!("{}: {}", cx.language.t("username"), username)
                                     }
                                 }
                             };
@@ -322,6 +330,7 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                                 let selected_text = match window.credential_dialog.cred_type {
                                     crate::ui::types::dialogs::CredentialTypeChoice::Password => cx.language.t("credential_password"),
                                     crate::ui::types::dialogs::CredentialTypeChoice::SshKey => cx.language.t("credential_private_key"),
+                                    crate::ui::types::dialogs::CredentialTypeChoice::Agent => cx.language.t("credential_agent"),
                                 };
                                 egui::ComboBox::from_id_salt("cred_type")
                                     .selected_text(egui::RichText::new(selected_text).size(widgets::FONT_SIZE_INPUT).color(cx.theme.fg_primary))
@@ -343,6 +352,16 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                                         ).clicked() {
                                             window.credential_dialog.cred_type = crate::ui::types::dialogs::CredentialTypeChoice::SshKey;
                                             window.credential_dialog.password.clear();
+                                        }
+                                        if ui.selectable_label(
+                                            matches!(window.credential_dialog.cred_type, crate::ui::types::dialogs::CredentialTypeChoice::Agent),
+                                            cx.language.t("credential_agent")
+                                        ).clicked() {
+                                            window.credential_dialog.cred_type = crate::ui::types::dialogs::CredentialTypeChoice::Agent;
+                                            window.credential_dialog.password.clear();
+                                            window.credential_dialog.key_path.clear();
+                                            window.credential_dialog.key_content.clear();
+                                            window.credential_dialog.key_passphrase.clear();
                                         }
                                     });
                             });
@@ -367,6 +386,16 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                                     cx.language.t("password_hint"), 125.0,
                                     cx.theme
                                 );
+                            }
+
+                            // ssh-agent fields (no secret to store)
+                            if window.credential_dialog.cred_type == crate::ui::types::dialogs::CredentialTypeChoice::Agent {
+                                widgets::form_field(ui, cx.language.t("username"), false,
+                                    &mut window.credential_dialog.username,
+                                    cx.language.t("username_hint"), cx.theme);
+                                ui.add_space(widgets::SPACING_LABEL);
+                                ui.label(egui::RichText::new(cx.language.t("auth_agent_hint"))
+                                    .size(11.0).color(cx.theme.fg_dim));
                             }
 
                             // SSH key fields
@@ -452,6 +481,8 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                                 !window.credential_dialog.key_content.trim().is_empty()
                             }
                         }
+                        // No secret required — the agent holds the keys.
+                        crate::ui::types::dialogs::CredentialTypeChoice::Agent => true,
                     };
 
                     if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() && can_save && has_auth {
@@ -483,6 +514,11 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                                         if !window.credential_dialog.key_passphrase.is_empty() {
                                             let _ = store_credential_secret(&cred.id, &cred.name, "passphrase", &window.credential_dialog.key_passphrase);
                                         }
+                                    }
+                                    crate::ui::types::dialogs::CredentialTypeChoice::Agent => {
+                                        cred.credential_type = CredentialType::Agent {
+                                            username: window.credential_dialog.username.trim().to_string(),
+                                        };
                                     }
                                 }
                             }
@@ -531,6 +567,21 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                                     if !window.credential_dialog.key_passphrase.is_empty() {
                                         let _ = store_credential_secret(&id, &name, "passphrase", &window.credential_dialog.key_passphrase);
                                     }
+                                }
+                                crate::ui::types::dialogs::CredentialTypeChoice::Agent => {
+                                    let credential_type = CredentialType::Agent {
+                                        username: window.credential_dialog.username.trim().to_string(),
+                                    };
+                                    let cred = Credential {
+                                        id: id.clone(),
+                                        name: name.clone(),
+                                        credential_type,
+                                        created_at: std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_secs(),
+                                    };
+                                    cx.credentials.push(cred);
                                 }
                             }
                         }

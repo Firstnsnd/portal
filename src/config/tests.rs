@@ -30,6 +30,7 @@ mod tests {
             auto_record: false,
             jump_host: None,
             port_forwards: vec![],
+            proxy: None,
         };
 
         // Test JSON serialization
@@ -53,6 +54,7 @@ mod tests {
     fn test_forward_kind_display() {
         assert_eq!(ForwardKind::Local.to_string(), "L");
         assert_eq!(ForwardKind::Remote.to_string(), "R");
+        assert_eq!(ForwardKind::Dynamic.to_string(), "D");
     }
 
     #[test]
@@ -82,6 +84,28 @@ mod tests {
         assert!(remote_display.contains("-R"));
         assert!(remote_display.contains("0.0.0.0:2222"));
         assert!(remote_display.contains("127.0.0.1:8080"));
+    }
+
+    #[test]
+    fn test_dynamic_forward_config() {
+        // -D only uses the local side; remote fields stay empty
+        let config = PortForwardConfig {
+            kind: ForwardKind::Dynamic,
+            local_host: "127.0.0.1".to_string(),
+            local_port: 1080,
+            remote_host: String::new(),
+            remote_port: 0,
+        };
+
+        let display = format!("{}", config);
+        assert!(display.contains("-D"));
+        assert!(display.contains("127.0.0.1:1080"));
+        assert!(display.contains("SOCKS5"));
+
+        // serde roundtrip through hosts.json
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: PortForwardConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, config);
     }
 
     #[test]
@@ -218,5 +242,120 @@ mod tests {
             CredentialType::SshKey { key_path, key_in_keychain: false, has_passphrase: true }
             if key_path == "~/.ssh/id_rsa"));
         assert!(!cred.id.is_empty());
+    }
+
+    #[test]
+    fn test_agent_credential_serde_additive_compat() {
+        let cred = Credential::new_agent("My Agent".to_string(), "ops".to_string());
+        assert!(matches!(cred.credential_type,
+            CredentialType::Agent { ref username } if username == "ops"));
+
+        // Roundtrip keeps the "agent" tag.
+        let json = serde_json::to_string(&cred).unwrap();
+        assert!(json.contains(r#""type":"agent""#), "json: {json}");
+        let parsed: Credential = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.name, cred.name);
+        assert_eq!(parsed.credential_type, cred.credential_type);
+
+        // Old credentials.json files (no agent variant) still load.
+        let legacy: Credential = serde_json::from_str(
+            r#"{"id":"abc","name":"old","credential_type":{"type":"password","username":"u"},"created_at":1}"#,
+        )
+        .unwrap();
+        assert!(matches!(legacy.credential_type, CredentialType::Password { .. }));
+
+        // Agent JSON with a missing username field defaults to empty.
+        let no_user: Credential = serde_json::from_str(
+            r#"{"id":"d","name":"agent cred","credential_type":{"type":"agent"},"created_at":2}"#,
+        )
+        .unwrap();
+        assert!(matches!(no_user.credential_type, CredentialType::Agent { username } if username.is_empty()));
+    }
+
+    #[test]
+    fn test_resolve_agent_credential_and_legacy() {
+        // Agent credential resolves without any keychain access.
+        let cred = Credential::new_agent("a".to_string(), String::new());
+        assert!(matches!(resolve_credential(&cred), ResolvedAuth::Agent));
+
+        // Legacy host-level AuthMethod::Agent resolves the same.
+        let mut host = HostEntry::new_local();
+        host.auth = AuthMethod::Agent;
+        assert!(matches!(resolve_auth(&host, &[]), ResolvedAuth::Agent));
+
+        // And serializes with the agent tag for the legacy hosts.json path.
+        let json = serde_json::to_string(&host.auth).unwrap();
+        assert_eq!(json, r#"{"type":"agent"}"#);
+        let back: AuthMethod = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, AuthMethod::Agent);
+    }
+
+    #[test]
+    fn test_proxy_config_serde_additive_compat() {
+        // Old hosts.json entries have no proxy field at all — they must
+        // still load, defaulting to direct connection.
+        let legacy: HostEntry = serde_json::from_str(
+            r#"{"name":"old","host":"h","port":22,"username":"u","group":"","tags":[],
+                "is_local":false,"auth":{"type":"none"},"startup_commands":[],
+                "agent_forwarding":false,"auto_record":false,"port_forwards":[]}"#,
+        )
+        .unwrap();
+        assert!(legacy.proxy.is_none());
+        assert!(resolve_proxy(&legacy).is_none());
+
+        // Full proxy roundtrip keeps kind + endpoint; the keychain flag too.
+        let mut host = HostEntry::new_ssh(
+            "via-proxy".to_string(),
+            "target.example.com".to_string(),
+            22,
+            "u".to_string(),
+            String::new(),
+            None,
+            Vec::new(),
+        );
+        host.proxy = Some(ProxyConfig {
+            kind: ProxyKind::Socks5,
+            host: "127.0.0.1".to_string(),
+            port: 1080,
+            username: "ops".to_string(),
+            password_in_keychain: true,
+        });
+        let json = serde_json::to_string(&host).unwrap();
+        assert!(json.contains(r#""type":"socks5""#), "json: {json}");
+        assert!(json.contains("1080"));
+        // The password must never appear in JSON even if someone stuffed it in.
+        let parsed: HostEntry = serde_json::from_str(&json).unwrap();
+        let proxy = parsed.proxy.unwrap();
+        assert_eq!(proxy.kind, ProxyKind::Socks5);
+        assert_eq!(proxy.port, 1080);
+        assert!(proxy.password_in_keychain);
+    }
+
+    #[test]
+    fn test_resolve_proxy_guards_incomplete_config() {
+        // Missing endpoint fields → not resolvable, not a connect error.
+        let mut host = HostEntry::new_local();
+        host.proxy = Some(ProxyConfig {
+            kind: ProxyKind::Http,
+            host: String::new(),
+            port: 0,
+            username: String::new(),
+            password_in_keychain: false,
+        });
+        assert!(resolve_proxy(&host).is_none());
+
+        // Valid endpoint → resolved, empty username → None (not Some("")).
+        host.proxy = Some(ProxyConfig {
+            kind: ProxyKind::Http,
+            host: "127.0.0.1".to_string(),
+            port: 3128,
+            username: String::new(),
+            password_in_keychain: false,
+        });
+        let resolved = resolve_proxy(&host).unwrap();
+        assert_eq!(resolved.kind, ProxyKind::Http);
+        assert_eq!(resolved.port, 3128);
+        assert!(resolved.username.is_none());
+        assert!(resolved.password.is_none());
     }
 }

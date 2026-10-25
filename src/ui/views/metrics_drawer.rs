@@ -273,10 +273,12 @@ fn render_tunnels_tab(ui: &mut egui::Ui, window: &mut AppWindow, active: usize, 
         let kind = match cfg.kind {
             crate::config::ForwardKind::Local => "L",
             crate::config::ForwardKind::Remote => "R",
+            crate::config::ForwardKind::Dynamic => "D",
         };
         let detail = match cfg.kind {
             crate::config::ForwardKind::Local => format!("{}:{} → {}:{}", cfg.local_host, cfg.local_port, cfg.remote_host, cfg.remote_port),
             crate::config::ForwardKind::Remote => format!("{}:{} → {}:{}", cfg.remote_host, cfg.remote_port, cfg.local_host, cfg.local_port),
+            crate::config::ForwardKind::Dynamic => format!("{}:{} → socks5", cfg.local_host, cfg.local_port),
         };
         let (status, status_color) = if in_use_elsewhere {
             ("In use by another session", cx.theme.warning)

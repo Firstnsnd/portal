@@ -138,6 +138,85 @@ impl SessionKind {
         guard.take()?.finish().ok()
     }
 
+    // ── ZMODEM (unix) ────────────────────────────────────────────────────
+
+    /// Whether rz/sz exist on this session's host (probed at connect for
+    /// SSH, at creation for local shells; `Unknown` until then).
+    #[cfg(unix)]
+    pub fn zmodem_support(&self) -> crate::terminal::zmodem::ZmodemSupport {
+        match self {
+            SessionKind::Local(s, _) => s.zmodem_support(),
+            SessionKind::Ssh(s, _, _) => s.zmodem_support(),
+        }
+    }
+
+    /// Chip state for the status bar: `Some` from the moment a transfer is
+    /// started on this session until the chip is dismissed.
+    #[cfg(unix)]
+    pub fn zmodem_transfer(&self) -> Option<crate::terminal::zmodem::ZmodemTransfer> {
+        let slot = match self {
+            SessionKind::Local(s, _) => &s.zmodem_transfer,
+            SessionKind::Ssh(s, _, _) => &s.zmodem_transfer,
+        };
+        slot.lock().ok().and_then(|g| g.clone())
+    }
+
+    /// Bytes transferred so far by the active bridge (0 when idle/finished).
+    #[cfg(unix)]
+    pub fn zmodem_bytes(&self) -> u64 {
+        match self {
+            SessionKind::Local(s, _) => s.zmodem_bytes(),
+            SessionKind::Ssh(s, _, _) => s.zmodem_bytes(),
+        }
+    }
+
+    /// Start a ZMODEM upload of a local file into this session.
+    #[cfg(unix)]
+    pub fn start_zmodem_upload(&self, path: &std::path::Path) -> std::io::Result<()> {
+        match self {
+            SessionKind::Local(s, _) => s.start_zmodem_upload(path.to_path_buf()),
+            SessionKind::Ssh(s, _, _) => s.start_zmodem_upload(path.to_path_buf()),
+        }
+    }
+
+    /// Start a ZMODEM download of `remote_path` into `local_dir`.
+    #[cfg(unix)]
+    pub fn start_zmodem_download(
+        &self,
+        remote_path: &str,
+        local_dir: &std::path::Path,
+    ) -> std::io::Result<()> {
+        match self {
+            SessionKind::Local(s, _) => {
+                s.start_zmodem_download(remote_path, local_dir.to_path_buf())
+            }
+            SessionKind::Ssh(s, _, _) => {
+                s.start_zmodem_download(remote_path, local_dir.to_path_buf())
+            }
+        }
+    }
+
+    /// Abort the active ZMODEM transfer (no-op when idle).
+    #[cfg(unix)]
+    pub fn cancel_zmodem(&self) {
+        match self {
+            SessionKind::Local(s, _) => s.cancel_zmodem(),
+            SessionKind::Ssh(s, _, _) => s.cancel_zmodem(),
+        }
+    }
+
+    /// Clear the finished-transfer chip (dismiss).
+    #[cfg(unix)]
+    pub fn clear_zmodem_state(&self) {
+        let slot = match self {
+            SessionKind::Local(s, _) => &s.zmodem_transfer,
+            SessionKind::Ssh(s, _, _) => &s.zmodem_transfer,
+        };
+        if let Ok(mut g) = slot.lock() {
+            *g = None;
+        }
+    }
+
     /// Short label identifying this session ("zsh", "myhost") — used as the
     /// recording filename segment and header title, so a `.cast` file says
     /// what it recorded without being opened.
@@ -406,6 +485,10 @@ impl TerminalSession {
         let settings = crate::config::load_settings();
         let scrollback_bytes = (settings.scrollback_limit_mb as usize) * 1024 * 1024;
 
+        // The HostEntry carries the proxy config; resolve (incl. keychain
+        // password) right before handing it to the transport.
+        let proxy = crate::config::resolve_proxy(host);
+
         let ssh = SshSession::with_scrollback_limit(
             runtime,
             host.host.clone(),
@@ -420,6 +503,7 @@ impl TerminalSession {
             host.agent_forwarding,
             host.port_forwards.clone(),
             jump_host,
+            proxy,
             host.auto_record || settings.auto_record_sessions,
         );
         let grid = ssh.get_grid();
@@ -474,6 +558,7 @@ impl TerminalSession {
             // Drop), and honor the auto-record setting for the new session.
             let was_recording = self.kind.is_recording();
             let settings = crate::config::load_settings();
+            let proxy = crate::config::resolve_proxy(&host);
             let ssh = SshSession::connect(
                 runtime,
                 host.host.clone(),
@@ -486,6 +571,7 @@ impl TerminalSession {
                 settings.ssh_keepalive_interval,
                 host.agent_forwarding,
                 jump_host,
+                proxy,
                 was_recording || settings.auto_record_sessions,
             );
             self.grid = ssh.get_grid();

@@ -4,6 +4,7 @@
 
 #![allow(unexpected_cfgs)]
 
+mod session_restore;
 mod tab_management;
 mod window_content;
 
@@ -54,6 +55,10 @@ pub struct PortalApp {
     pub recordings_retention_days: u32,
     /// Mirror of PortalSettings.recordings_max_total_mb (Settings → Terminal).
     pub recordings_max_total_mb: u32,
+    /// Mirror of PortalSettings.restore_sessions (Settings → General).
+    pub restore_sessions: bool,
+    /// Mirror of PortalSettings.zmodem_download_dir (Settings → General).
+    pub zmodem_download_dir: String,
     /// Next periodic retention sweep (hourly; startup already swept).
     pub next_retention_check: std::time::Instant,
     // LLM integration
@@ -62,6 +67,16 @@ pub struct PortalApp {
     pub llm_key_draft: String,
     /// Active settings page section (left-hand nav, non-persisted).
     pub settings_section: SettingsSection,
+    // Session restore
+    /// Tab/session structure changed since the last snapshot save.
+    pub sessions_dirty: bool,
+    /// Probed SFTP support per host ("host:port" → capability), harvested
+    /// from live SSH sessions each frame. Not persisted — a fresh connect
+    /// re-probes, so restarts just show no badge until then.
+    pub host_sftp_support:
+        std::collections::HashMap<String, crate::ssh::capability::HostCapability>,
+    /// When the debounced snapshot saver last wrote (or app start).
+    pub last_session_save: std::time::Instant,
 }
 
 /// Categories shown in the Settings page's left-hand navigation.
@@ -73,6 +88,11 @@ pub enum SettingsSection {
     Shortcuts,
     General,
 }
+
+/// Minimum interval between session-state writes. SIGTERM cannot run
+/// snapshot code (the process replaces itself), so the debounce bounds
+/// crash/TERM loss to this window.
+const SESSION_SAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_secs(20);
 
 impl PortalApp {
     /// Create a new PortalApp instance
@@ -104,6 +124,11 @@ impl PortalApp {
         let auto_record_sessions = settings.auto_record_sessions;
         let recordings_retention_days = settings.recordings_retention_days;
         let recordings_max_total_mb = settings.recordings_max_total_mb;
+        let restore_sessions = settings.restore_sessions;
+        let zmodem_download_dir = settings
+            .zmodem_download_dir
+            .clone()
+            .unwrap_or_default();
 
         // Retention sweep at startup: with auto-record on, recordings would
         // otherwise accumulate forever. Cheap no-op when both limits are 0.
@@ -136,26 +161,9 @@ impl PortalApp {
         // because eframe may override visuals set during new().
 
         let runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-        let default_shell = std::env::var("SHELL")
-            .unwrap_or_else(|_| "/bin/zsh".to_string());
-        let first_tab = Tab {
-            title: "Terminal 1".to_owned(),
-            sessions: vec![TerminalSession::new_local(0, &default_shell)],
-            layout: crate::ui::pane::PaneNode::Terminal(0),
-            focused_session: 0,
-            broadcast_enabled: false,
-            tools_drawer_open: false,
-            tools_tab: 0,
-            pending_snippet: None,
-            ai_chat: std::sync::Arc::new(std::sync::Mutex::new(
-                crate::ui::state::ai_chat::AiChatState::default(),
-            )),
-            pending_ai_command: None,
-        };
 
-        // Create the first (main) window
-        let first_window = AppWindow::new_window(egui::ViewportId::ROOT, "Portal", first_tab, 1);
-
+        // Hosts/credentials must load BEFORE tab creation: session restore
+        // resolves SSH sessions against them.
         let connection_history = crate::config::load_history();
         let snippets = crate::config::load_snippets(&crate::config::snippets_file_path());
 
@@ -168,6 +176,41 @@ impl PortalApp {
         crate::config::migrate_hosts_to_credentials(&mut hosts, &mut credentials);
         crate::config::save_credentials(&credentials_file, &credentials);
         crate::config::save_hosts(&hosts_file, &hosts);
+
+        // Restore the previous session's tabs, or start with one local shell.
+        let (first_tabs, restored_active_tab, restored_next_id) =
+            match session_restore::restore_root_tabs(&hosts, &credentials, &runtime) {
+                Some((tabs, active_tab, next_id)) => (tabs, Some(active_tab), next_id),
+                None => {
+                    let default_shell = std::env::var("SHELL")
+                        .unwrap_or_else(|_| "/bin/zsh".to_string());
+                    let first_tab = Tab {
+                        title: "Terminal 1".to_owned(),
+                        sessions: vec![TerminalSession::new_local(0, &default_shell)],
+                        layout: crate::ui::pane::PaneNode::Terminal(0),
+                        focused_session: 0,
+                        broadcast_enabled: false,
+                        tools_drawer_open: false,
+                        tools_tab: 0,
+                        pending_snippet: None,
+                        ai_chat: std::sync::Arc::new(std::sync::Mutex::new(
+                            crate::ui::state::ai_chat::AiChatState::default(),
+                        )),
+                        pending_ai_command: None,
+                    };
+                    (vec![first_tab], None, 1)
+                }
+            };
+
+        // Create the first (main) window
+        let mut first_tab_iter = first_tabs.into_iter();
+        let first_window_tab = first_tab_iter.next().expect("at least one tab");
+        let mut first_window =
+            AppWindow::new_window(egui::ViewportId::ROOT, "Portal", first_window_tab, restored_next_id);
+        first_window.tabs.extend(first_tab_iter);
+        if let Some(active) = restored_active_tab {
+            first_window.active_tab = active.min(first_window.tabs.len() - 1);
+        }
 
         Self {
             windows: vec![first_window],
@@ -197,12 +240,69 @@ impl PortalApp {
             auto_record_sessions,
             recordings_retention_days,
             recordings_max_total_mb,
+            restore_sessions,
+            zmodem_download_dir,
             // First periodic sweep one hour after launch (startup already swept).
             next_retention_check: std::time::Instant::now() + std::time::Duration::from_secs(3600),
             llm_config,
             llm_key_draft: String::new(),
             settings_section: SettingsSection::General,
+            sessions_dirty: false,
+            host_sftp_support: std::collections::HashMap::new(),
+            last_session_save: std::time::Instant::now(),
         }
+    }
+
+    /// Mark the tab/session structure changed — the debounced saver will
+    /// snapshot it within [`SESSION_SAVE_DEBOUNCE`].
+    pub fn mark_sessions_dirty(&mut self) {
+        self.sessions_dirty = true;
+    }
+
+    /// Pull capability probe results from live SSH sessions into the
+    /// hosts-list cache (keyed "host:port"). Cheap: a few atomic loads
+    /// per frame.
+    pub fn harvest_host_capabilities(&mut self) {
+        for w in &self.windows {
+            for tab in &w.tabs {
+                for s in &tab.sessions {
+                    if let crate::ui::types::session::SessionKind::Ssh(sess, host, _) = &s.kind {
+                        let cap = sess.sftp_support();
+                        if cap == crate::ssh::capability::HostCapability::Unknown {
+                            continue;
+                        }
+                        let key = format!("{}:{}", host.host, host.port);
+                        if self.host_sftp_support.get(&key) != Some(&cap) {
+                            self.host_sftp_support.insert(key, cap);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Debounced session-state save: called once per frame from update().
+    /// SIGTERM/kill paths can't run snapshot code, so periodic debounced
+    /// writes cap the worst-case loss at the debounce window.
+    pub fn maybe_save_sessions(&mut self) {
+        if !self.sessions_dirty {
+            return;
+        }
+        if self.last_session_save.elapsed() < SESSION_SAVE_DEBOUNCE {
+            return;
+        }
+        self.save_sessions_now();
+    }
+
+    /// Snapshot + write immediately (also resets the dirty flag).
+    pub fn save_sessions_now(&mut self) {
+        let state = session_restore::snapshot(&self.windows);
+        crate::config::session_state::save_session_state(
+            &crate::config::session_state::session_state_file_path(),
+            &state,
+        );
+        self.sessions_dirty = false;
+        self.last_session_save = std::time::Instant::now();
     }
 
     /// Called once per frame. When the toggle is on and enough time has passed
@@ -296,6 +396,11 @@ impl PortalApp {
     /// Dropping the sessions runs `RealPtySession`'s `Drop`, which kills the
     /// child and reaps it.
     pub fn cleanup_sessions(&mut self) {
+        // Snapshot BEFORE clearing: the whole point of a clean exit is that
+        // the next launch puts the tabs back.
+        if self.restore_sessions {
+            self.save_sessions_now();
+        }
         for window in &mut self.windows {
             for tab in &mut window.tabs {
                 tab.sessions.clear();

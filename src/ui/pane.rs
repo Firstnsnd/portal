@@ -199,6 +199,12 @@ pub enum PaneAction {
     ToggleRecording,
     /// Open the replay library filtered to the pane session's host
     ViewHostRecordings,
+    /// Pick a local file and ZMODEM-upload it into this pane's session
+    ZmodemUpload,
+    /// Open the remote-path prompt for a ZMODEM download into this pane
+    ZmodemDownload,
+    /// Cancel the active ZMODEM transfer / dismiss its status chip
+    ZmodemCancel,
     /// Remove old SSH host key from known_hosts
     RemoveHostKey,
     /// Reconnect a disconnected SSH session
@@ -329,6 +335,11 @@ pub struct AppWindow {
     pub close_requested: bool,
     pub ime_composing: bool,
     pub ime_preedit: String,
+    /// Printable chars already written by the Key-event fallback whose
+    /// matching Text/Ime-Commit event may still arrive in a later frame
+    /// (macOS IME in direct-commit mode splits the delivery). Each entry
+    /// suppresses one echo of that char; entries expire after ~250 ms.
+    pub key_char_suppress: Vec<(char, std::time::Instant)>,
     pub next_id: usize,
     pub tab_drag: TabDragState,
     #[allow(dead_code)]
@@ -355,6 +366,9 @@ pub struct AppWindow {
     /// Recently stopped recording — the status bar shows a clickable
     /// "saved" notice that opens it in the player.
     pub recording_saved: Option<(std::path::PathBuf, std::time::Instant)>,
+    /// ZMODEM download dialog state: `Some(remote_path_buffer)` while the
+    /// small "path on the remote host" prompt is open.
+    pub zmodem_download_dialog: Option<String>,
 
     // SFTP state (per-window, independent connections)
     pub sftp_browser_left: Option<SftpBrowser>,   // Left panel SFTP connection
@@ -388,6 +402,13 @@ pub struct AppWindow {
 }
 
 impl AppWindow {
+    /// egui Id of the AI composer's TextEdit, scoped to this window's
+    /// viewport so detached windows can't collide. The terminal panes query
+    /// it to decide when to stand down from re-claiming keyboard focus.
+    pub fn ai_composer_id(&self) -> egui::Id {
+        egui::Id::new("ai_composer").with(self.viewport_id)
+    }
+
     /// Create a fresh window around a single tab with fresh SFTP/dialog state.
     /// Used for the root window at startup, for detached tabs, and for
     /// "New Portal Window Here".
@@ -406,6 +427,7 @@ impl AppWindow {
             close_requested: false,
             ime_composing: false,
             ime_preedit: String::new(),
+            key_char_suppress: Vec::new(),
             next_id,
             tab_drag: TabDragState::default(),
             broadcast_state: BroadcastState::default(),
@@ -418,6 +440,7 @@ impl AppWindow {
             replay_rename: None,
             replay_host_filter: None,
             recording_saved: None,
+            zmodem_download_dialog: None,
             sftp_browser_left: None,
             sftp_browser: None,
             local_browser_left: LocalBrowser::new(),

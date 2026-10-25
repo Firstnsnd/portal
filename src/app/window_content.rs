@@ -113,6 +113,7 @@ impl PortalApp {
                     }
                     result.pending_detach.retain(|&(w, t)| w != window_idx || t != removed_idx);
                 }
+                self.mark_sessions_dirty();
             }
             if sr.matches(ShortcutAction::ClosePane, ctx) {
                 let window = &mut self.windows[window_idx];
@@ -131,6 +132,7 @@ impl PortalApp {
                     } else if tab.focused_session == focused && focused > 0 {
                         tab.focused_session = focused - 1;
                     }
+                    self.mark_sessions_dirty();
                 }
             }
             if sr.matches(ShortcutAction::NextTab, ctx) {
@@ -395,6 +397,7 @@ impl PortalApp {
                 &self.runtime,
                 self.font_size,
                 &self.llm_config,
+                &self.host_sftp_support,
             );
             self.windows[window_idx].render_drawers(ctx, &mut cx);
         }
@@ -428,6 +431,7 @@ impl PortalApp {
                                 &self.runtime,
                                 self.font_size,
                                 &self.llm_config,
+                                &self.host_sftp_support,
                             );
                             self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
                         };
@@ -448,6 +452,7 @@ impl PortalApp {
                                 &self.runtime,
                                 self.font_size,
                                 &self.llm_config,
+                                &self.host_sftp_support,
                             );
                             self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
                         };
@@ -467,6 +472,7 @@ impl PortalApp {
                                 &self.runtime,
                                 self.font_size,
                                 &self.llm_config,
+                                &self.host_sftp_support,
                             );
                             self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
                         };
@@ -489,6 +495,7 @@ impl PortalApp {
                                 &self.runtime,
                                 self.font_size,
                                 &self.llm_config,
+                                &self.host_sftp_support,
                             );
                             self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
                         };
@@ -691,6 +698,7 @@ impl PortalApp {
                     } else if window.active_tab > ti {
                         window.active_tab -= 1;
                     }
+                    self.mark_sessions_dirty();
                 }
             }
             TabBarAction::ReconnectTab(ti) => {
@@ -730,6 +738,7 @@ impl PortalApp {
                 if window.active_tab >= window.tabs.len() {
                     window.active_tab = window.tabs.len().saturating_sub(1);
                 }
+                self.mark_sessions_dirty();
             }
             TabBarAction::ReorderTab { src, dst, insert_before } => {
                 let window = &mut self.windows[window_idx];
@@ -739,6 +748,7 @@ impl PortalApp {
                 } else if src < dst { dst } else { (dst + 1).min(window.tabs.len()) };
                 window.tabs.insert(insert_idx, src_tab);
                 window.active_tab = insert_idx;
+                self.mark_sessions_dirty();
             }
             TabBarAction::NewTab => {
                 let window = &mut self.windows[window_idx];
@@ -762,6 +772,7 @@ impl PortalApp {
                 };
                 window.tabs.push(new_tab);
                 window.active_tab = window.tabs.len() - 1;
+                self.mark_sessions_dirty();
             }
             TabBarAction::ToggleToolsDrawer => {
                 let window = &mut self.windows[window_idx];
@@ -942,6 +953,119 @@ impl PortalApp {
                             self.windows[window_idx].recording_saved = None;
                         }
                     }
+                    // ZMODEM transfer chip (focused pane): live byte progress
+                    // while active (click cancels); final states stay until
+                    // clicked (dismiss).
+                    #[cfg(unix)]
+                    {
+                        use crate::terminal::zmodem::{Direction, ZmodemState};
+                        fn format_transfer_bytes(bytes: u64) -> String {
+                            const KB: f64 = 1024.0;
+                            const MB: f64 = 1024.0 * 1024.0;
+                            if bytes as f64 >= MB {
+                                format!("{:.1} MB", bytes as f64 / MB)
+                            } else if bytes as f64 >= KB {
+                                format!("{:.0} KB", bytes as f64 / KB)
+                            } else {
+                                format!("{bytes} B")
+                            }
+                        }
+                        let active_tab_i = self.windows[window_idx].active_tab;
+                        let zt = self.windows[window_idx]
+                            .tabs
+                            .get(active_tab_i)
+                            .and_then(|t| t.sessions.get(t.focused_session))
+                            .map(|s| (s.kind.zmodem_transfer(), s.kind.zmodem_bytes()));
+                        if let Some((Some(transfer), live_bytes)) = zt {
+                            ui.add_space(12.0);
+                            ui.label(
+                                egui::RichText::new("|").color(sep_color).size(font_size),
+                            );
+                            ui.add_space(12.0);
+                            let bytes = if transfer.is_active() && live_bytes > 0 {
+                                live_bytes
+                            } else {
+                                match &transfer.state {
+                                    ZmodemState::Done { bytes, .. } => *bytes,
+                                    _ => 0,
+                                }
+                            };
+                            let (text, color) = match (&transfer.state, transfer.direction)
+                            {
+                                (ZmodemState::Handshaking, Direction::Upload) => (
+                                    self.language.t("zmodem_sending").to_string(),
+                                    self.theme.accent,
+                                ),
+                                (ZmodemState::Handshaking, Direction::Download) => (
+                                    self.language.t("zmodem_receiving").to_string(),
+                                    self.theme.accent,
+                                ),
+                                (ZmodemState::Transferring { file }, dir) => {
+                                    let verb = match dir {
+                                        Direction::Upload => self.language.t("zmodem_sending"),
+                                        Direction::Download => self.language.t("zmodem_receiving"),
+                                    };
+                                    let label = if file.is_empty() {
+                                        verb.to_string()
+                                    } else {
+                                        format!("{verb} {file}")
+                                    };
+                                    (label, self.theme.accent)
+                                }
+                                (ZmodemState::Finishing, _) => (
+                                    self.language.t("zmodem_sending").to_string(),
+                                    self.theme.accent,
+                                ),
+                                (ZmodemState::Done { .. }, _) => (
+                                    self.language.t("zmodem_complete").to_string(),
+                                    self.theme.green,
+                                ),
+                                (ZmodemState::Failed(e), _) => (
+                                    self.language.tf("zmodem_failed", e),
+                                    self.theme.red,
+                                ),
+                                (ZmodemState::Cancelled, _) => (
+                                    self.language.t("zmodem_cancelled").to_string(),
+                                    self.theme.fg_dim,
+                                ),
+                            };
+                            let text = if bytes > 0 {
+                                format!("{text} • {}", format_transfer_bytes(bytes))
+                            } else {
+                                text
+                            };
+                            let hover = if transfer.is_active() {
+                                self.language.t("zmodem_cancel").to_string()
+                            } else if let ZmodemState::Done { files, .. } = &transfer.state {
+                                files.join(", ")
+                            } else {
+                                String::new()
+                            };
+                            let mut chip = status_btn(ui, &text, color);
+                            if !hover.is_empty() {
+                                chip = chip.on_hover_text(hover);
+                            }
+                            if chip.clicked() {
+                                let w = &mut self.windows[window_idx];
+                                if let Some(s) = w.tabs
+                                    .get_mut(w.active_tab)
+                                    .and_then(|t| t.sessions.get_mut(t.focused_session))
+                                {
+                                    if transfer.is_active() {
+                                        s.kind.cancel_zmodem();
+                                    } else {
+                                        s.kind.clear_zmodem_state();
+                                    }
+                                }
+                            }
+                            if transfer.is_active() {
+                                // Keep the byte counter animating.
+                                ctx.request_repaint_after(std::time::Duration::from_millis(
+                                    250,
+                                ));
+                            }
+                        }
+                    }
                     ui.add_space(12.0);
                     ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
                     ui.add_space(12.0);
@@ -985,28 +1109,33 @@ impl PortalApp {
 
         let pane_result = {
             let window = &mut self.windows[window_idx];
+            let ai_composer_id = window.ai_composer_id();
             let tab = &mut window.tabs[active];
             let temp_broadcast = BroadcastState {
                 enabled: tab.broadcast_enabled,
             };
-            // The AI chat drawer's TextEdit must be able to hold keyboard
-            // focus; while it's open the terminal panes stand down from
+            // The AI composer's TextEdit must be able to hold keyboard
+            // focus; while it does, the terminal panes stand down from
             // re-claiming focus every frame (see render_terminal_session).
-            let ai_drawer_open = tab
+            // A click on a pane takes focus back regardless.
+            let ai_chat_open = tab
                 .ai_chat
                 .lock()
                 .map(|s| s.open)
                 .unwrap_or(false);
+            let ai_composer_holds_focus = ai_chat_open
+                && ui.memory(|mem| mem.has_focus(ai_composer_id));
             render_pane_tree(
                 ui, ctx,
                 &mut tab.layout,
                 available,
                 &mut tab.sessions,
                 focused,
-                ai_drawer_open,
+                ai_composer_holds_focus,
                 &temp_broadcast,
                 &mut window.ime_composing,
                 &mut window.ime_preedit,
+                &mut window.key_char_suppress,
                 can_close,
                 &self.theme,
                 self.font_size,
@@ -1064,6 +1193,7 @@ impl PortalApp {
                         second: Box::new(PaneNode::Terminal(new_idx)),
                     });
                     tab.focused_session = new_idx;
+                    self.mark_sessions_dirty();
                 }
                 PaneAction::SplitVertical => {
                     let window = &mut self.windows[window_idx];
@@ -1089,6 +1219,7 @@ impl PortalApp {
                         second: Box::new(PaneNode::Terminal(new_idx)),
                     });
                     tab.focused_session = new_idx;
+                    self.mark_sessions_dirty();
                 }
                 PaneAction::ClosePane => {
                     let window = &mut self.windows[window_idx];
@@ -1099,6 +1230,7 @@ impl PortalApp {
                             if window.active_tab >= window.tabs.len() {
                                 window.active_tab = window.tabs.len().saturating_sub(1);
                             }
+                            self.mark_sessions_dirty();
                         }
                     } else {
                         let old_layout = tab.layout.clone();
@@ -1112,6 +1244,7 @@ impl PortalApp {
                         } else if tab.focused_session == idx && idx > 0 {
                             tab.focused_session = idx - 1;
                         }
+                        self.mark_sessions_dirty();
                     }
                 }
                 PaneAction::ToggleBroadcast => {
@@ -1156,6 +1289,35 @@ impl PortalApp {
                         window.current_view = AppView::Replay;
                     }
                 }
+                #[cfg(unix)]
+                PaneAction::ZmodemUpload => {
+                    let window = &mut self.windows[window_idx];
+                    if let Some(session) = window.tabs[active].sessions.get(idx) {
+                        if let Some(path) = rfd::FileDialog::new().pick_file() {
+                            if let Err(e) = session.kind.start_zmodem_upload(&path) {
+                                window.recording_error =
+                                    Some((e.to_string(), std::time::Instant::now()));
+                            }
+                        }
+                    }
+                }
+                #[cfg(unix)]
+                PaneAction::ZmodemDownload => {
+                    let window = &mut self.windows[window_idx];
+                    window.zmodem_download_dialog = Some(String::new());
+                }
+                #[cfg(unix)]
+                PaneAction::ZmodemCancel => {
+                    let window = &mut self.windows[window_idx];
+                    if let Some(session) = window.tabs[active].sessions.get(idx) {
+                        let transfer = session.kind.zmodem_transfer();
+                        if transfer.is_some_and(|t| t.is_active()) {
+                            session.kind.cancel_zmodem();
+                        } else {
+                            session.kind.clear_zmodem_state();
+                        }
+                    }
+                }
                 PaneAction::RemoveHostKey => {
                     let window = &mut self.windows[window_idx];
                     let host_opt = match &window.tabs[active].sessions.get(idx).map(|s| &s.kind) {
@@ -1171,9 +1333,84 @@ impl PortalApp {
                     let window = &mut self.windows[window_idx];
                     // Only SSH sessions support reconnection.
                     if matches!(&window.tabs[active].sessions[idx].kind, SessionKind::Ssh(_, _, _)) {
+                        // An active ZMODEM transfer dies with the old connection —
+                        // say so instead of letting the chip vanish silently.
+                        #[cfg(unix)]
+                        if window.tabs[active].sessions[idx]
+                            .kind
+                            .zmodem_transfer()
+                            .is_some_and(|t| t.is_active())
+                        {
+                            window.recording_error = Some((
+                                self.language.t("zmodem_transfer_interrupted").to_string(),
+                                std::time::Instant::now(),
+                            ));
+                        }
                         window.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
                     }
                 }
+            }
+        }
+
+        // ── ZMODEM download: remote-path prompt (unix only) ──
+        // Opening it takes the buffer out; submitting starts the transfer
+        // (the buffer stays taken = dialog closed) or puts it back.
+        #[cfg(unix)]
+        if self.windows[window_idx].zmodem_download_dialog.is_some() {
+            let t_download = self.language.t("zmodem_download").to_string();
+            let t_remote_path = self.language.t("zmodem_remote_path").to_string();
+            let t_cancel = self.language.t("cancel").to_string();
+            let mut open = true;
+            let mut submitted = false;
+            let mut cancel_clicked = false;
+            let mut buffer = self
+                .windows[window_idx]
+                .zmodem_download_dialog
+                .take()
+                .unwrap_or_default();
+            egui::Window::new(egui::RichText::new(t_download).heading())
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label(t_remote_path);
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut buffer)
+                            .desired_width(360.0)
+                            .hint_text("/var/log/app/error.log"),
+                    );
+                    if field.lost_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                    {
+                        submitted = true;
+                    }
+                    field.request_focus();
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(self.language.t("save")).clicked() {
+                            submitted = true;
+                        }
+                        if ui.button(t_cancel).clicked() {
+                            cancel_clicked = true;
+                        }
+                    });
+                });
+            let remote = buffer.trim().to_string();
+            if submitted && !remote.is_empty() {
+                let dir = config::zmodem_download_dir();
+                let window = &mut self.windows[window_idx];
+                if let Some(session) = window.tabs
+                    .get_mut(window.active_tab)
+                    .and_then(|t| t.sessions.get_mut(t.focused_session))
+                {
+                    if let Err(e) = session.kind.start_zmodem_download(&remote, &dir) {
+                        window.recording_error =
+                            Some((e.to_string(), std::time::Instant::now()));
+                    }
+                }
+            } else if open && !cancel_clicked {
+                self.windows[window_idx].zmodem_download_dialog = Some(buffer);
             }
         }
 

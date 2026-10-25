@@ -1049,6 +1049,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         let host = &cx.hosts[idx];
         let username = TerminalSession::get_effective_username(&host.username);
         let auth = config::resolve_auth(host, cx.credentials);
+        let proxy = config::resolve_proxy(host);
         window.sftp_browser_left = Some(crate::sftp::SftpBrowser::connect(
             cx.runtime,
             host.host.clone(),
@@ -1056,6 +1057,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
             username,
             auth,
             host.name.clone(),
+            proxy,
         ));
     }
 
@@ -1064,6 +1066,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         let host = &cx.hosts[idx];
         let username = TerminalSession::get_effective_username(&host.username);
         let auth = config::resolve_auth(host, cx.credentials);
+        let proxy = config::resolve_proxy(host);
         window.sftp_browser = Some(crate::sftp::SftpBrowser::connect(
             cx.runtime,
             host.host.clone(),
@@ -1071,6 +1074,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
             username,
             auth,
             host.name.clone(),
+            proxy,
         ));
     }
 

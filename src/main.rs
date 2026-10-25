@@ -68,6 +68,10 @@ impl eframe::App for PortalApp {
             }
         }
 
+        // Debounced session-state save (at most one write per 20s window).
+        self.maybe_save_sessions();
+        self.harvest_host_capabilities();
+
         // Handle "open here" requests (from CLI at startup, or forwarded from
         // a second instance over the IPC socket).
         #[cfg(unix)]

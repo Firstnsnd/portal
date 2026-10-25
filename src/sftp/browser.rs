@@ -4,7 +4,7 @@
 
 use tokio::sync::mpsc;
 
-use crate::config::ResolvedAuth;
+use crate::config::{ResolvedAuth, ResolvedProxy};
 use crate::sftp::selection::FileSelection;
 use crate::sftp::types::{SftpEntry, SftpConnectionState, TransferProgress, SftpCommand, SftpResponse};
 
@@ -29,6 +29,7 @@ pub struct SftpBrowser {
     conn_port: u16,
     conn_username: String,
     conn_auth: ResolvedAuth,
+    conn_proxy: Option<ResolvedProxy>,
     /// Keyboard-interactive (2FA) prompt mailbox for the live task; the
     /// SFTP view renders it while the panel is connecting.
     pub auth_prompt: std::sync::Arc<crate::ssh::AuthPromptBridge>,
@@ -43,6 +44,7 @@ impl SftpBrowser {
         username: String,
         auth: ResolvedAuth,
         host_name: String,
+        proxy: Option<ResolvedProxy>,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (resp_tx, resp_rx) = mpsc::unbounded_channel();
@@ -55,6 +57,7 @@ impl SftpBrowser {
             host.clone(), port, username.clone(), auth.clone(),
             cmd_rx, resp_tx, cancel_clone, prompt_clone,
             crate::ssh::HostKeyPolicy::Learn,
+            proxy.clone(),
         ));
 
         Self {
@@ -76,6 +79,7 @@ impl SftpBrowser {
             conn_port: port,
             conn_username: username,
             conn_auth: auth,
+            conn_proxy: proxy,
             auth_prompt,
         }
     }
@@ -164,6 +168,7 @@ impl SftpBrowser {
             prompt_clone,
             crate::ssh::HostKeyPolicy::Learn,
             reconnect_path,
+            self.conn_proxy.clone(),
         ));
 
         // Replace the old channels (old ones are dropped here)

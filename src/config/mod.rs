@@ -104,6 +104,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::llm::types::LlmConfig;
 
+pub mod session_state;
+
 // ── Port Forward Config Types ─────────────────────────────────────
 // Defined here so both config and ssh modules can use them without circular deps.
 
@@ -114,6 +116,9 @@ pub enum ForwardKind {
     Local,
     /// -R: listen on remote, forward to local
     Remote,
+    /// -D: listen locally as a SOCKS5 proxy; each client connection picks
+    /// its own destination. Only local_host/local_port are used.
+    Dynamic,
 }
 
 impl std::fmt::Display for ForwardKind {
@@ -121,6 +126,7 @@ impl std::fmt::Display for ForwardKind {
         match self {
             ForwardKind::Local => write!(f, "L"),
             ForwardKind::Remote => write!(f, "R"),
+            ForwardKind::Dynamic => write!(f, "D"),
         }
     }
 }
@@ -148,6 +154,11 @@ impl std::fmt::Display for PortForwardConfig {
                 "-R {}:{}:{}:{}",
                 self.remote_host, self.remote_port, self.local_host, self.local_port
             ),
+            ForwardKind::Dynamic => write!(
+                f,
+                "-D {}:{} (SOCKS5)",
+                self.local_host, self.local_port
+            ),
         }
     }
 }
@@ -173,6 +184,9 @@ pub enum AuthMethod {
         #[serde(default)]
         key_in_keychain: bool,
     },
+    /// Delegate authentication to the local ssh-agent (SSH_AUTH_SOCK).
+    #[serde(rename = "agent")]
+    Agent,
 }
 
 // ── Credential (first-class entity) ─────────────────────────────────
@@ -202,6 +216,14 @@ pub enum CredentialType {
         #[serde(default)]
         has_passphrase: bool,
     },
+    /// Delegate authentication to the local ssh-agent. No secret is stored —
+    /// the agent holds the keys. `username` is informational (the effective
+    /// SSH username still comes from the host entry).
+    #[serde(rename = "agent")]
+    Agent {
+        #[serde(default)]
+        username: String,
+    },
 }
 
 impl Credential {
@@ -228,6 +250,18 @@ impl Credential {
                 .as_secs(),
         }
     }
+
+    pub fn new_agent(name: String, username: String) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name,
+            credential_type: CredentialType::Agent { username },
+            created_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        }
+    }
 }
 
 /// Resolved authentication data (transient, in-memory only).
@@ -237,6 +271,50 @@ pub enum ResolvedAuth {
     None,
     Password { password: String },
     Key { key_content: String, passphrase: Option<String> },
+    /// Try the keys held by the local ssh-agent (SSH_AUTH_SOCK).
+    Agent,
+}
+
+// ── Proxy (per-host outbound connection path) ───────────────────────
+
+/// Protocol spoken by the proxy.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(tag = "type")]
+pub enum ProxyKind {
+    /// HTTP CONNECT tunnel.
+    #[default]
+    #[serde(rename = "http")]
+    Http,
+    /// SOCKS5 (RFC 1928), with optional user/pass auth (RFC 1929).
+    #[serde(rename = "socks5")]
+    Socks5,
+}
+
+/// Proxy used to reach a host. Stored inline in HostEntry; the password
+/// never lives in JSON — only in the keychain under kind "proxy_password".
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct ProxyConfig {
+    pub kind: ProxyKind,
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub port: u16,
+    #[serde(default)]
+    pub username: String,
+    /// True when the password is in the keychain (kind "proxy_password").
+    #[serde(default)]
+    pub password_in_keychain: bool,
+}
+
+/// A proxy with secrets resolved (transient, in-memory only) — what the
+/// transport layer actually dials through.
+#[derive(Debug, Clone)]
+pub struct ResolvedProxy {
+    pub kind: ProxyKind,
+    pub host: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub password: Option<String>,
 }
 
 /// A saved host/connection entry
@@ -269,6 +347,9 @@ pub struct HostEntry {
     pub jump_host: Option<String>,
     #[serde(default)]
     pub port_forwards: Vec<PortForwardConfig>,
+    /// Connect to this host through a proxy (None = direct).
+    #[serde(default)]
+    pub proxy: Option<ProxyConfig>,
 }
 
 fn default_port() -> u16 {
@@ -292,6 +373,7 @@ impl HostEntry {
             auto_record: false,
             jump_host: None,
             port_forwards: Vec::new(),
+            proxy: None,
         }
     }
 
@@ -311,6 +393,7 @@ impl HostEntry {
             auto_record: false,
             jump_host: None,
             port_forwards: Vec::new(),
+            proxy: None,
         }
     }
 }
@@ -462,7 +545,12 @@ pub fn delete_host_credentials(host: &HostEntry) {
             delete_host_credential(&host.host, host.port, &host.username, "passphrase", &host.name);
             delete_host_credential(&host.host, host.port, &host.username, "privatekey", &host.name);
         }
-        AuthMethod::None => {}
+        AuthMethod::Agent | AuthMethod::None => {}
+    }
+
+    // The proxy password outlives auth changes — clean it only with the host.
+    if host.proxy.is_some() {
+        delete_proxy_password(host);
     }
 }
 
@@ -618,12 +706,13 @@ pub fn resolve_credential(cred: &Credential) -> ResolvedAuth {
                 ResolvedAuth::Key { key_content, passphrase }
             }
         }
+        // Nothing to resolve — the agent holds the keys at connect time.
+        CredentialType::Agent { .. } => ResolvedAuth::Agent,
     }
 }
 
 /// Resolve legacy AuthMethod from host-based keychain scheme.
-fn resolve_legacy_auth(host: &HostEntry) -> ResolvedAuth {
-    match &host.auth {
+fn resolve_legacy_auth(host: &HostEntry) -> ResolvedAuth {    match &host.auth {
         AuthMethod::None => ResolvedAuth::None,
         AuthMethod::Password { password } => {
             let pw = if password.is_empty() {
@@ -667,7 +756,47 @@ fn resolve_legacy_auth(host: &HostEntry) -> ResolvedAuth {
 
             ResolvedAuth::Key { key_content: key_data, passphrase: pp }
         }
+        AuthMethod::Agent => ResolvedAuth::Agent,
     }
+}
+
+// ── Proxy resolution ────────────────────────────────────────────────
+
+/// Keychain kind used for the proxy password (host-keyed scheme, "proxy"
+/// takes the username slot of the keyring account so it never collides
+/// with SSH credential kinds).
+pub const PROXY_KEYCHAIN_KIND: &str = "proxy_password";
+
+/// Build a `ResolvedProxy` for a host by loading the proxy password from
+/// the keychain. Returns None when the host has no usable proxy config
+/// (unset, or host/port left empty).
+pub fn resolve_proxy(host: &HostEntry) -> Option<ResolvedProxy> {
+    let cfg = host.proxy.as_ref()?;
+    if cfg.host.is_empty() || cfg.port == 0 {
+        return None;
+    }
+    let password = if cfg.password_in_keychain {
+        load_host_credential(&host.host, host.port, "proxy", PROXY_KEYCHAIN_KIND, &host.name)
+    } else {
+        None
+    };
+    Some(ResolvedProxy {
+        kind: cfg.kind,
+        host: cfg.host.clone(),
+        port: cfg.port,
+        username: if cfg.username.is_empty() { None } else { Some(cfg.username.clone()) },
+        password,
+    })
+}
+
+/// Store the proxy password for a host in the keychain.
+pub fn store_proxy_password(host: &HostEntry, password: &str) -> bool {
+    store_host_credential(&host.host, host.port, "proxy", PROXY_KEYCHAIN_KIND, password, &host.name)
+}
+
+/// Delete the proxy password of a host from the keychain.
+pub fn delete_proxy_password(host: &HostEntry) {
+    delete_host_credential(&host.host, host.port, "proxy", PROXY_KEYCHAIN_KIND, &host.name);
 }
 
 // ── Credentials persistence ─────────────────────────────────────────
@@ -754,7 +883,9 @@ pub fn migrate_hosts_to_credentials(hosts: &mut [HostEntry], credentials: &mut V
                 credentials.push(cred);
                 changed = true;
             }
-            AuthMethod::None => {}
+            // No stored secret to migrate — an agent credential is created
+            // on save from the keychain UI, not from a legacy host.
+            AuthMethod::Agent | AuthMethod::None => {}
         }
     }
 
@@ -943,6 +1074,16 @@ pub struct PortalSettings {
     /// recordings directory exceeds this many MB (0 = unlimited).
     #[serde(default)]
     pub recordings_max_total_mb: u32,
+    /// Reopen the previous session's tabs on launch (session restore).
+    #[serde(default = "default_true")]
+    pub restore_sessions: bool,
+    /// Directory ZMODEM downloads land in. Empty/None → ~/Downloads.
+    #[serde(default)]
+    pub zmodem_download_dir: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_keepalive_interval() -> u32 {
@@ -976,8 +1117,24 @@ impl Default for PortalSettings {
             auto_record_sessions: false,
             recordings_retention_days: 0,
             recordings_max_total_mb: 0,
+            restore_sessions: true,
+            zmodem_download_dir: None,
         }
     }
+}
+
+/// Directory ZMODEM downloads land in: the setting override when set, else
+/// the platform downloads directory, else `~/Downloads`, else `.`.
+pub fn zmodem_download_dir() -> std::path::PathBuf {
+    if let Some(dir) = load_settings()
+        .zmodem_download_dir
+        .filter(|s| !s.trim().is_empty())
+    {
+        return std::path::PathBuf::from(dir);
+    }
+    dirs::download_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join("Downloads")))
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
 pub fn load_settings() -> PortalSettings {
@@ -1057,7 +1214,7 @@ pub fn load_hosts(path: &Path) -> Vec<HostEntry> {
                     }
                 }
             }
-            AuthMethod::None => {}
+            AuthMethod::Agent | AuthMethod::None => {}
         }
     }
 
@@ -1130,7 +1287,7 @@ pub fn save_hosts(path: &Path, hosts: &[HostEntry]) {
                             passphrase.clear();
                         }
                 }
-                AuthMethod::None => {}
+                AuthMethod::Agent | AuthMethod::None => {}
             }
             entry
         })

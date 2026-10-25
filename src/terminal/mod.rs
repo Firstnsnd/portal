@@ -9,6 +9,10 @@ pub mod cast;
 pub mod url;
 pub mod metrics;
 
+// ZMODEM bridge — depends on the rzsz crate (nix), unix-only like the PTY layer.
+#[cfg(unix)]
+pub mod zmodem;
+
 #[cfg(unix)]
 mod unix_pty;
 #[cfg(windows)]

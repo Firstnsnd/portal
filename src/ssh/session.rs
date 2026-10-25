@@ -8,7 +8,7 @@ use std::sync::{
 use tokio::sync::mpsc;
 
 use crate::terminal::{CellAttrs, TerminalGrid, VteHandler};
-use crate::config::ResolvedAuth;
+use crate::config::{ResolvedAuth, ResolvedProxy};
 use crate::terminal::metrics::MetricsSnapshot;
 
 #[derive(Clone)]
@@ -17,10 +17,13 @@ pub struct JumpHostInfo {
     pub port: u16,
     pub username: String,
     pub auth: ResolvedAuth,
+    /// Proxy for reaching the jump host itself (target leg rides the
+    /// jump's direct-tcpip tunnel, so it needs no proxy of its own).
+    pub proxy: Option<ResolvedProxy>,
 }
 use super::port_forward::{
     PortForwardConfig, PortForward, ForwardKind, ForwardState,
-    start_local_forward, AppNotification,
+    start_local_forward, start_dynamic_forward, AppNotification,
 };
 use super::auth::connect_and_authenticate;
 
@@ -58,12 +61,17 @@ pub struct SshClient {
 }
 
 impl SshClient {
-    pub fn with_policy(host: &str, port: u16, policy: super::auth::HostKeyPolicy) -> Self {
+    pub fn with_policy(
+        host: &str,
+        port: u16,
+        policy: super::auth::HostKeyPolicy,
+        remote_forwards: Arc<Mutex<Vec<PortForwardConfig>>>,
+    ) -> Self {
         Self {
             host: host.to_string(),
             port,
             host_key_policy: policy,
-            remote_forwards: Arc::new(Mutex::new(Vec::new())),
+            remote_forwards,
         }
     }
 }
@@ -170,12 +178,16 @@ pub async fn connect_via_jump(
     _agent_forwarding: bool,
     bridge: &super::auth_prompt::AuthPromptBridge,
     host_key_policy: super::auth::HostKeyPolicy,
+    remote_forwards: Arc<Mutex<Vec<PortForwardConfig>>>,
 ) -> Result<russh::client::Handle<SshClient>, String> {
     let mut jump_handle = super::auth::open_ssh_connection(
         &jump.host,
         jump.port,
         host_key_policy,
         Some((std::time::Duration::from_secs(15), 30)),
+        // The jump leg never carries remote forwards of the target session.
+        Arc::new(Mutex::new(Vec::new())),
+        jump.proxy.as_ref(),
     )
     .await
     .map_err(|e| format!("Jump host connection failed: {}", e))?;
@@ -201,6 +213,7 @@ pub async fn connect_via_jump(
     let mut handle = russh::client::connect_stream(
         config, stream, SshClient::with_policy(
             target_host, target_port, host_key_policy,
+            remote_forwards,
         ),
     ).await.map_err(|e| format!("SSH handshake through jump host failed: {}", e))?;
 
@@ -264,7 +277,40 @@ pub struct SshSession {
     /// Asciicast recorder slot: `Some` while the session is being recorded.
     /// Cloned into ssh_task at spawn, so the data taps see it.
     pub recorder: Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>>,
+    /// ZMODEM tap: watches output for a remote `sz` ZRQINIT and, once armed
+    /// or triggered, diverts all output into the transfer bridge. Cloned
+    /// into ssh_task at spawn, like the recorder slot.
+    #[cfg(unix)]
+    pub zmodem_tap: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTap>>>,
+    /// Active ZMODEM transfer bridge (engine thread + its input path).
+    #[cfg(unix)]
+    pub zmodem_bridge: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemBridge>>>,
+    /// Chip state for the UI: what is transferring and how far it got.
+    #[cfg(unix)]
+    pub zmodem_transfer: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTransfer>>>,
+    /// ZMODEM support probe result for the remote host
+    /// ([`ZmodemSupport::to_u8`]; 0 = unknown until the probe lands).
+    #[cfg(unix)]
+    pub zmodem_support: Arc<std::sync::atomic::AtomicU8>,
+    /// SFTP subsystem support for the remote host
+    /// ([`HostCapability::to_u8`]) — drives the hosts-list badge.
+    pub sftp_support: Arc<std::sync::atomic::AtomicU8>,
 }
+
+/// ZMODEM slot types — real on unix, unit placeholders elsewhere (the rzsz
+/// engine is unix-only; SshSession itself compiles on every platform).
+#[cfg(unix)]
+type ZmodemTapSlot = Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTap>>>;
+#[cfg(not(unix))]
+type ZmodemTapSlot = ();
+#[cfg(unix)]
+type ZmodemBridgeSlot = Arc<Mutex<Option<crate::terminal::zmodem::ZmodemBridge>>>;
+#[cfg(not(unix))]
+type ZmodemBridgeSlot = ();
+#[cfg(unix)]
+type ZmodemSupportSlot = Arc<std::sync::atomic::AtomicU8>;
+#[cfg(not(unix))]
+type ZmodemSupportSlot = ();
 
 impl SshSession {
     #[allow(clippy::too_many_arguments)]
@@ -280,6 +326,7 @@ impl SshSession {
         keepalive_interval: u32,
         agent_forwarding: bool,
         jump_host: Option<JumpHostInfo>,
+        proxy: Option<ResolvedProxy>,
         record: bool,
     ) -> Self {
         Self::with_scrollback_limit(
@@ -296,6 +343,7 @@ impl SshSession {
             agent_forwarding,
             Vec::new(),
             jump_host,
+            proxy,
             record,
         )
     }
@@ -315,6 +363,7 @@ impl SshSession {
         agent_forwarding: bool,
         port_forward_configs: Vec<PortForwardConfig>,
         jump_host: Option<JumpHostInfo>,
+        proxy: Option<ResolvedProxy>,
         record: bool,
     ) -> Self {
         let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
@@ -332,6 +381,11 @@ impl SshSession {
         let notifications = Arc::new(Mutex::new(Vec::<AppNotification>::new()));
         let metrics = Arc::new(Mutex::new(MetricsSnapshot::new()));
         let metrics_enabled = Arc::new(AtomicBool::new(false));
+        #[cfg(unix)]
+        let zmodem_support = Arc::new(std::sync::atomic::AtomicU8::new(0));
+        #[cfg(not(unix))]
+        let zmodem_support = ();
+        let sftp_support = Arc::new(std::sync::atomic::AtomicU8::new(0));
 
         let grid_clone = Arc::clone(&grid);
         let state_clone = Arc::clone(&state);
@@ -373,6 +427,27 @@ impl SshSession {
         ));
         let recorder_clone = Arc::clone(&recorder);
 
+        // ZMODEM slots — cloned into ssh_task like the recorder.
+        #[cfg(unix)]
+        let zmodem_tap = Arc::new(Mutex::new(None));
+        #[cfg(unix)]
+        let zmodem_bridge = Arc::new(Mutex::new(None));
+        #[cfg(unix)]
+        let zmodem_transfer = Arc::new(Mutex::new(None));
+        #[cfg(unix)]
+        let zmodem_tap_task = Arc::clone(&zmodem_tap);
+        #[cfg(unix)]
+        let zmodem_bridge_task = Arc::clone(&zmodem_bridge);
+        #[cfg(not(unix))]
+        let zmodem_tap_task = ();
+        #[cfg(not(unix))]
+        let zmodem_bridge_task = ();
+        #[cfg(unix)]
+        let zmodem_support_probe = Arc::clone(&zmodem_support);
+        #[cfg(not(unix))]
+        let zmodem_support_probe = ();
+        let sftp_support_probe = Arc::clone(&sftp_support);
+
         runtime.spawn(async move {
             Self::ssh_task(
                 host, port, username, auth, cols, rows, grid_clone, cmd_rx,
@@ -380,7 +455,10 @@ impl SshSession {
                 arch_hint_clone, startup_commands,
                 keepalive_interval, agent_forwarding, port_forward_configs,
                 port_forwards_clone, notifications_clone, metrics_clone,
-                metrics_enabled_clone, auth_prompt_clone, recorder_clone, jump_host,
+                metrics_enabled_clone, auth_prompt_clone, recorder_clone,
+                zmodem_tap_task, zmodem_bridge_task, zmodem_support_probe,
+                sftp_support_probe, jump_host,
+                proxy,
             )
             .await;
         });
@@ -398,6 +476,15 @@ impl SshSession {
             metrics_enabled,
             auth_prompt,
             recorder,
+            #[cfg(unix)]
+            zmodem_tap,
+            #[cfg(unix)]
+            zmodem_bridge,
+            #[cfg(unix)]
+            zmodem_transfer,
+            #[cfg(unix)]
+            zmodem_support,
+            sftp_support,
         }
     }
 
@@ -426,7 +513,12 @@ impl SshSession {
         metrics_enabled: Arc<AtomicBool>,
         auth_bridge: Arc<super::auth_prompt::AuthPromptBridge>,
         recorder: Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>>,
+        zmodem_tap: ZmodemTapSlot,
+        zmodem_bridge: ZmodemBridgeSlot,
+        zmodem_support: ZmodemSupportSlot,
+        sftp_support: Arc<std::sync::atomic::AtomicU8>,
         jump_host: Option<JumpHostInfo>,
+        proxy: Option<ResolvedProxy>,
     ) {
         let set_state = |s: SshConnectionState| {
             if let Ok(mut st) = state.lock() {
@@ -447,11 +539,12 @@ impl SshSession {
             .collect();
         let remote_fwd_arc = Arc::new(Mutex::new(remote_fwd_configs));
 
-        let handle = if let Some(ref jump) = jump_host {
+        let mut handle = if let Some(ref jump) = jump_host {
             match connect_via_jump(
                 jump, &host, port, &username, &auth,
                 keepalive_interval, agent_forwarding, &auth_bridge,
                 super::auth::HostKeyPolicy::Learn,
+                Arc::clone(&remote_fwd_arc),
             ).await {
                 Ok(h) => h,
                 Err(e) => {
@@ -461,9 +554,12 @@ impl SshSession {
                 }
             }
         } else {
+            // Without a jump host the proxy applies to the target leg
+            // directly; with one, the target rides the jump's tunnel and
+            // only the jump's own proxy (jump.proxy) matters.
             match connect_and_authenticate(
                 &host, port, &username, &auth, keepalive_interval, agent_forwarding,
-                &auth_bridge,
+                &auth_bridge, Arc::clone(&remote_fwd_arc), proxy.as_ref(),
             ).await {
                 Ok(h) => h,
                 Err(e) => {
@@ -546,15 +642,45 @@ impl SshSession {
             }
         }
 
-        // 5. Auto-start configured port forwards
-        // Remote forwards must be requested before Arc wrapping (&mut Handle)
-        // — still register them in the handler table so server-initiated
-        // channels can be accepted, but don't automatically activate them.
-        // Users start them manually via the tools drawer.
+        // 5. Activate configured remote forwards (-R). tcpip_forward needs
+        // &mut Handle, so this must run before the Arc wrap below. Incoming
+        // forwarded-tcpip channels are routed via SshClient's remote_forwards
+        // table (shared above). Local (-L) and dynamic (-D) forwards are
+        // started on demand from the Tunnels tab.
         for cfg in port_forward_configs.iter().filter(|c| c.kind == ForwardKind::Remote) {
-            if let Ok(mut rfwds) = remote_fwd_arc.lock() {
-                if !rfwds.iter().any(|c| c.remote_port == cfg.remote_port) {
-                    rfwds.push(cfg.clone());
+            match handle.tcpip_forward(&cfg.remote_host, cfg.remote_port as u32).await {
+                Ok(allocated) => {
+                    // RFC 4254: a reply to a specific-port request carries no
+                    // port — russh surfaces that as 0, meaning "the port you
+                    // asked for". A port-0 request gets the assigned port back.
+                    let bound_port = if allocated == 0 { cfg.remote_port as u32 } else { allocated };
+                    log::info!(
+                        "Remote forward active: {} (port {}) -> {}:{}",
+                        cfg.remote_host, bound_port, cfg.local_host, cfg.local_port
+                    );
+                    let (pf, _cancel_rx) = PortForward::new(cfg.clone());
+                    if let Ok(mut ap) = pf.allocated_port.lock() {
+                        *ap = Some(bound_port);
+                    }
+                    if let Ok(mut s) = pf.state.lock() {
+                        *s = ForwardState::Active;
+                    }
+                    if let Ok(mut fwds) = port_forwards.lock() {
+                        fwds.push(pf);
+                    }
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Remote forward request for {}:{} failed: {}",
+                        cfg.remote_host, cfg.remote_port, e
+                    );
+                    let (pf, _cancel_rx) = PortForward::new(cfg.clone());
+                    if let Ok(mut s) = pf.state.lock() {
+                        *s = ForwardState::Error(format!("tcpip_forward failed: {}", e));
+                    }
+                    if let Ok(mut fwds) = port_forwards.lock() {
+                        fwds.push(pf);
+                    }
                 }
             }
         }
@@ -576,6 +702,68 @@ impl SshSession {
                 if let Ok(mut h) = arch_hint.lock() { *h = Some(arch); }
             }
         }
+
+        // ZMODEM support: both sz and rz must be on the remote PATH.
+        // `command -v` is POSIX; `echo yes` marks success because
+        // exec_command only returns stdout. Exec failing (hardened servers
+        // may disable it) leaves Unknown — the interactive shell may still
+        // run sz, so a probe error must never claim Missing.
+        #[cfg(unix)]
+        if let Ok(out) = exec_command(
+            &handle,
+            "command -v sz >/dev/null 2>&1 && command -v rz >/dev/null 2>&1 && echo yes",
+        )
+        .await
+        {
+            let support = if out.trim() == "yes" {
+                crate::terminal::zmodem::ZmodemSupport::Available
+            } else {
+                crate::terminal::zmodem::ZmodemSupport::Missing
+            };
+            zmodem_support.store(support.to_u8(), Ordering::Relaxed);
+            // The context menu greys out once this lands — wake the UI.
+            crate::repaint::notify_repaint();
+        }
+
+        // SFTP subsystem support: open a throwaway session channel and
+        // ask for the subsystem — the server's Success/Failure reply is
+        // the whole answer. Probe failure (channel never answered) leaves
+        // Unknown: never claim Missing on our own transport trouble.
+        // Spawned, not awaited: a server that never answers a subsystem
+        // request (the 10 s timeout only bounds this task) must not delay
+        // ssh_task's entry into its select loop.
+        let probe_handle = Arc::clone(&handle);
+        let probe_sftp_support = Arc::clone(&sftp_support);
+        tokio::spawn(async move {
+            let Ok(mut channel) = probe_handle.channel_open_session().await else {
+                return;
+            };
+            let verdict = if channel.request_subsystem(true, "sftp").await.is_err() {
+                Some(false)
+            } else {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    channel.wait(),
+                )
+                .await
+                {
+                    Ok(Some(russh::ChannelMsg::Success)) => Some(true),
+                    Ok(Some(russh::ChannelMsg::Failure)) => Some(false),
+                    _ => None,
+                }
+            };
+            let _ = channel.close().await;
+            if let Some(ok) = verdict {
+                let cap = if ok {
+                    crate::ssh::capability::HostCapability::Available
+                } else {
+                    crate::ssh::capability::HostCapability::Missing
+                };
+                probe_sftp_support.store(cap.to_u8(), Ordering::Relaxed);
+                // The hosts-list badge appears once this lands.
+                crate::repaint::notify_repaint();
+            }
+        });
 
         // Local forwards are no longer auto-started on connect — use the
         // Tunnels tab (Start button → start_port_forward) instead.
@@ -636,37 +824,115 @@ impl SshSession {
                 msg = channel.wait() => {
                     match msg {
                         Some(russh::ChannelMsg::Data { data }) => {
-                            if let Ok(mut g) = grid.lock() {
-                                let mut handler = VteHandler {
-                                    grid: &mut g,
-                                    attrs: &mut attrs,
-                                };
-                                for byte in &*data {
-                                    parser.advance(&mut handler, *byte);
+                            // ZMODEM diversion must run BEFORE the VTE parse
+                            // and the asciicast tap so binary protocol frames
+                            // never reach scrollback or the recording.
+                            // NOTE: the emit closure is the ONLY render path
+                            // here — on diversion it may receive just the
+                            // non-protocol prefix, so this chunk must never
+                            // be parsed again after route_chunk returns.
+                            #[cfg(unix)]
+                            {
+                                let diverted = crate::terminal::zmodem::route_chunk(
+                                    &zmodem_tap,
+                                    &zmodem_bridge,
+                                    &data,
+                                    |bytes| {
+                                        if let Ok(mut g) = grid.lock() {
+                                            let mut handler = VteHandler {
+                                                grid: &mut g,
+                                                attrs: &mut attrs,
+                                            };
+                                            for byte in bytes {
+                                                parser.advance(&mut handler, *byte);
+                                            }
+                                        }
+                                        // Asciicast tap (outside the grid lock).
+                                        if let Ok(mut slot) = recorder.lock() {
+                                            if let Some(rec) = slot.as_mut() {
+                                                rec.output(bytes);
+                                            }
+                                        }
+                                    },
+                                );
+                                if diverted
+                                    == crate::terminal::zmodem::ChunkRoute::Diverted
+                                {
+                                    crate::repaint::notify_repaint();
+                                    continue;
                                 }
                             }
-                            // Asciicast tap (outside the grid lock).
-                            if let Ok(mut slot) = recorder.lock() {
-                                if let Some(rec) = slot.as_mut() {
-                                    rec.output(&data);
+                            #[cfg(not(unix))]
+                            {
+                                // No ZMODEM routing on this platform.
+                                if let Ok(mut g) = grid.lock() {
+                                    let mut handler = VteHandler {
+                                        grid: &mut g,
+                                        attrs: &mut attrs,
+                                    };
+                                    for byte in &*data {
+                                        parser.advance(&mut handler, *byte);
+                                    }
+                                }
+                                if let Ok(mut slot) = recorder.lock() {
+                                    if let Some(rec) = slot.as_mut() {
+                                        rec.output(&data);
+                                    }
                                 }
                             }
                             crate::repaint::notify_repaint();
                         }
                         Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
-                            if let Ok(mut g) = grid.lock() {
-                                let mut handler = VteHandler {
-                                    grid: &mut g,
-                                    attrs: &mut attrs,
-                                };
-                                for byte in &*data {
-                                    parser.advance(&mut handler, *byte);
+                            // ZMODEM diversion (same ordering and single-render
+                            // rule as the Data arm above).
+                            #[cfg(unix)]
+                            {
+                                let diverted = crate::terminal::zmodem::route_chunk(
+                                    &zmodem_tap,
+                                    &zmodem_bridge,
+                                    &data,
+                                    |bytes| {
+                                        if let Ok(mut g) = grid.lock() {
+                                            let mut handler = VteHandler {
+                                                grid: &mut g,
+                                                attrs: &mut attrs,
+                                            };
+                                            for byte in bytes {
+                                                parser.advance(&mut handler, *byte);
+                                            }
+                                        }
+                                        // Asciicast tap (stderr merged into the
+                                        // same stream).
+                                        if let Ok(mut slot) = recorder.lock() {
+                                            if let Some(rec) = slot.as_mut() {
+                                                rec.output(bytes);
+                                            }
+                                        }
+                                    },
+                                );
+                                if diverted
+                                    == crate::terminal::zmodem::ChunkRoute::Diverted
+                                {
+                                    crate::repaint::notify_repaint();
+                                    continue;
                                 }
                             }
-                            // Asciicast tap (stderr merged into the same stream).
-                            if let Ok(mut slot) = recorder.lock() {
-                                if let Some(rec) = slot.as_mut() {
-                                    rec.output(&data);
+                            #[cfg(not(unix))]
+                            {
+                                // No ZMODEM routing on this platform.
+                                if let Ok(mut g) = grid.lock() {
+                                    let mut handler = VteHandler {
+                                        grid: &mut g,
+                                        attrs: &mut attrs,
+                                    };
+                                    for byte in &*data {
+                                        parser.advance(&mut handler, *byte);
+                                    }
+                                }
+                                if let Ok(mut slot) = recorder.lock() {
+                                    if let Some(rec) = slot.as_mut() {
+                                        rec.output(&data);
+                                    }
                                 }
                             }
                             crate::repaint::notify_repaint();
@@ -701,45 +967,49 @@ impl SshSession {
                             }
                         }
                         Some(SshCommand::StartPortForward(cfg)) => {
-                            // Only local forwards can be started dynamically via Arc<Handle>
-                            // Remote forwards need &mut Handle which we don't have here after Arc wrapping
-                            if cfg.kind == ForwardKind::Local {
-                                Self::spawn_local_forward(
-                                    Arc::clone(&handle),
-                                    cfg,
-                                    &port_forwards,
-                                    &notifications,
-                                );
-                            } else {
-                                log::warn!("Dynamic remote forward not supported after connection (requires &mut Handle)");
-                                let (pf, _cancel_rx) = PortForward::new(cfg);
-                                if let Ok(mut s) = pf.state.lock() {
-                                    *s = ForwardState::Error("Remote forwards must be configured before connect".into());
+                            match cfg.kind {
+                                ForwardKind::Local | ForwardKind::Dynamic => {
+                                    Self::spawn_forward(
+                                        Arc::clone(&handle),
+                                        cfg,
+                                        &port_forwards,
+                                        &notifications,
+                                    );
                                 }
-                                if let Ok(mut fwds) = port_forwards.lock() {
-                                    fwds.push(pf);
+                                ForwardKind::Remote => {
+                                    // tcpip_forward needs &mut Handle, gone after Arc
+                                    // wrapping — remote forwards activate at connect time.
+                                    log::warn!("Remote forward cannot start after connection (requires &mut Handle)");
+                                    let (pf, _cancel_rx) = PortForward::new(cfg);
+                                    if let Ok(mut s) = pf.state.lock() {
+                                        *s = ForwardState::Error(
+                                            "Remote forwards are set up when connecting — reconnect to change them".into(),
+                                        );
+                                    }
+                                    if let Ok(mut fwds) = port_forwards.lock() {
+                                        fwds.push(pf);
+                                    }
                                 }
                             }
                         }
                         Some(SshCommand::StopPortForward(cfg)) => {
                             // Find matching port forward by full config (not just index)
                             let mut stopped_index = None;
+                            let mut remote_cancel: Option<(String, u32)> = None;
                             if let Ok(mut fwds) = port_forwards.lock() {
                                 for (idx, pf) in fwds.iter().enumerate() {
-                                    if pf.config.kind == cfg.kind &&
-                                       pf.config.local_host == cfg.local_host &&
-                                       pf.config.local_port == cfg.local_port &&
-                                       pf.config.remote_host == cfg.remote_host &&
-                                       pf.config.remote_port == cfg.remote_port {
+                                    if pf.config == cfg {
                                         pf.stop();
                                         stopped_index = Some(idx);
-
-                                        // Note: For remote forwards, we can't call cancel_tcpip_forward
-                                        // here because it requires &mut Handle which we don't have
-                                        // after Arc wrapping. The server will clean up when the
-                                        // connection closes.
                                         if cfg.kind == ForwardKind::Remote {
-                                            log::info!("Remote forward stopped (cancel-tcpip-forward will be sent on disconnect)");
+                                            // cancel_tcpip_forward takes &self, so the
+                                            // Arc<Handle> works — tell the server to stop
+                                            // listening. Await happens after the lock drops.
+                                            if let Ok(ap) = pf.allocated_port.lock() {
+                                                if let Some(port) = *ap {
+                                                    remote_cancel = Some((cfg.remote_host.clone(), port));
+                                                }
+                                            }
                                         }
                                         break;
                                     }
@@ -748,6 +1018,18 @@ impl SshSession {
                                 // Clean up: remove stopped forwards from the Vec
                                 if let Some(idx) = stopped_index {
                                     fwds.remove(idx);
+                                }
+                            }
+                            if let Some((host, port)) = remote_cancel {
+                                match handle.cancel_tcpip_forward(&host, port).await {
+                                    Ok(_) => log::info!(
+                                        "Remote forward cancelled on server: {}:{}",
+                                        host, port
+                                    ),
+                                    Err(e) => log::warn!(
+                                        "cancel_tcpip_forward for {}:{} failed: {}",
+                                        host, port, e
+                                    ),
                                 }
                             }
                         }
@@ -787,7 +1069,7 @@ impl SshSession {
     }
 
     /// Spawn a local port forward task and track it in port_forwards.
-    fn spawn_local_forward(
+    fn spawn_forward(
         handle: Arc<russh::client::Handle<SshClient>>,
         cfg: PortForwardConfig,
         port_forwards: &Arc<Mutex<Vec<PortForward>>>,
@@ -802,7 +1084,14 @@ impl SshSession {
 
         let notifications = Arc::clone(notifications);
         tokio::spawn(async move {
-            start_local_forward(handle, cfg, fwd_state, cancel_rx, notifications).await;
+            match cfg.kind {
+                ForwardKind::Dynamic => {
+                    start_dynamic_forward(handle, cfg, fwd_state, cancel_rx, notifications).await;
+                }
+                _ => {
+                    start_local_forward(handle, cfg, fwd_state, cancel_rx, notifications).await;
+                }
+            }
         });
     }
 
@@ -825,6 +1114,23 @@ impl SshSession {
 
     pub fn get_shell_hint(&self) -> Option<String> {
         self.shell_hint.lock().ok().and_then(|h| h.clone())
+    }
+
+    /// ZMODEM support on the remote host (Unknown until the probe lands).
+    #[cfg(unix)]
+    pub fn zmodem_support(&self) -> crate::terminal::zmodem::ZmodemSupport {
+        crate::terminal::zmodem::ZmodemSupport::from_u8(
+            self.zmodem_support
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
+    /// SFTP subsystem support on the remote host (Unknown until probed).
+    pub fn sftp_support(&self) -> crate::ssh::capability::HostCapability {
+        crate::ssh::capability::HostCapability::from_u8(
+            self.sftp_support
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
     }
 
     /// Enable/disable remote metrics polling. Called by the UI every
@@ -878,6 +1184,113 @@ impl SshSession {
             }
         }
     }
+
+    // ── ZMODEM (unix) ────────────────────────────────────────────────────
+
+    /// Sink for the ZMODEM engine: protocol frames go through the command
+    /// channel as writes, landing in THIS session's shell channel only
+    /// (broadcast mode never sees them).
+    #[cfg(unix)]
+    fn make_zmodem_sink(&self) -> std::io::Result<crate::terminal::zmodem::SessionWriter> {
+        let tx = self.cmd_tx.clone();
+        Ok(crate::terminal::zmodem::SessionWriter::new(move |data| {
+            tx.send(SshCommand::Write(data.to_vec())).map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "ssh command channel closed",
+                )
+            })
+        }))
+    }
+
+    /// Start a ZMODEM upload of `path` to the remote host. Arms the tap (all
+    /// output diverts) and spawns the transfer engine, which types `rz\r`
+    /// into the remote shell itself and runs the ZRQINIT → ZRINIT handshake.
+    #[cfg(unix)]
+    pub fn start_zmodem_upload(&self, path: std::path::PathBuf) -> std::io::Result<()> {
+        use crate::terminal::zmodem::{TransferRequest, ZmodemBridge};
+        self.cancel_zmodem();
+        let sink = self.make_zmodem_sink()?;
+        let mut tap = crate::terminal::zmodem::ZmodemTap::new();
+        let held = tap.arm();
+        *self
+            .zmodem_tap
+            .lock()
+            .map_err(|_| std::io::Error::other("zmodem tap lock poisoned"))? = Some(tap);
+        let mut bridge = ZmodemBridge::spawn(
+            TransferRequest::Upload { path },
+            sink,
+            Arc::clone(&self.zmodem_transfer),
+        );
+        if !held.is_empty() {
+            bridge.feed(&held);
+        }
+        *self
+            .zmodem_bridge
+            .lock()
+            .map_err(|_| std::io::Error::other("zmodem bridge lock poisoned"))? = Some(bridge);
+        Ok(())
+    }
+
+    /// Start a ZMODEM download of remote `remote_path` into `local_dir`:
+    /// arm a passive tap, spawn a waiting bridge, then type `sz '<path>'`
+    /// so the remote side announces itself and the tap triggers the engine
+    /// on its first frame.
+    #[cfg(unix)]
+    pub fn start_zmodem_download(
+        &self,
+        remote_path: &str,
+        local_dir: std::path::PathBuf,
+    ) -> std::io::Result<()> {
+        use crate::terminal::zmodem::{shell_quote_single, TransferRequest, ZmodemBridge};
+        self.cancel_zmodem();
+        let sink = self.make_zmodem_sink()?;
+        *self
+            .zmodem_tap
+            .lock()
+            .map_err(|_| std::io::Error::other("zmodem tap lock poisoned"))? =
+            Some(crate::terminal::zmodem::ZmodemTap::new());
+        let bridge = ZmodemBridge::spawn(
+            TransferRequest::Download {
+                output_dir: local_dir,
+            },
+            sink,
+            Arc::clone(&self.zmodem_transfer),
+        );
+        *self
+            .zmodem_bridge
+            .lock()
+            .map_err(|_| std::io::Error::other("zmodem bridge lock poisoned"))? = Some(bridge);
+        self.write(format!("sz {}\r", shell_quote_single(remote_path)).as_bytes())
+    }
+
+    /// Abort any ZMODEM transfer on this session (no-op when idle).
+    #[cfg(unix)]
+    pub fn cancel_zmodem(&self) {
+        if let Ok(mut b) = self.zmodem_bridge.lock() {
+            if let Some(bridge) = b.as_mut() {
+                bridge.cancel();
+            }
+            *b = None;
+        }
+        if let Ok(mut t) = self.zmodem_tap.lock() {
+            if let Some(tap) = t.as_mut() {
+                tap.reset();
+            }
+        }
+        // The transfer slot keeps its final state for the status chip until
+        // the next transfer replaces it.
+    }
+
+    /// Bytes transferred so far by the active bridge (0 when idle).
+    #[cfg(unix)]
+    pub fn zmodem_bytes(&self) -> u64 {
+        self.zmodem_bridge
+            .lock()
+            .ok()
+            .and_then(|b| b.as_ref().map(|bridge| bridge.bytes()))
+            .unwrap_or(0)
+    }
 }
 
 impl Drop for SshSession {
@@ -898,12 +1311,16 @@ pub async fn test_connection(
     auth: ResolvedAuth,
     keepalive_interval: u32,
     agent_forwarding: bool,
+    proxy: Option<ResolvedProxy>,
 ) -> Result<String, String> {
     // The test dialog has no UI for OTP entry: refuse prompts so 2FA
     // hosts report an actionable error instead of hanging.
     let _handle = connect_and_authenticate(
         &host, port, &username, &auth, keepalive_interval, agent_forwarding,
         &super::auth_prompt::AuthPromptBridge::decline(),
+        // The test dialog never forwards ports.
+        Arc::new(Mutex::new(Vec::new())),
+        proxy.as_ref(),
     ).await?;
     Ok("Connection successful! Authentication passed.".to_string())
 }

@@ -93,6 +93,12 @@ impl PortalApp {
             auto_record_sessions: self.auto_record_sessions,
             recordings_retention_days: self.recordings_retention_days,
             recordings_max_total_mb: self.recordings_max_total_mb,
+            restore_sessions: self.restore_sessions,
+            zmodem_download_dir: if self.zmodem_download_dir.trim().is_empty() {
+                None
+            } else {
+                Some(self.zmodem_download_dir.trim().to_string())
+            },
             llm: self.llm_config.clone(),
         };
         crate::config::save_settings(&settings);
@@ -643,5 +649,39 @@ impl PortalApp {
             }
         }
         ui.label(egui::RichText::new(lang.t("check_for_updates_desc")).color(theme.fg_dim).size(FONT_SM));
+
+        ui.add_space(SPACE_LG);
+        ui.separator();
+        ui.add_space(SPACE_SM);
+
+        ui.label(egui::RichText::new(lang.t("restore_sessions")).color(theme.fg_primary).size(14.0).strong());
+        ui.add_space(SPACE_XS);
+        let restore = ui.checkbox(&mut self.restore_sessions, lang.t("restore_sessions"));
+        if restore.changed() {
+            *changed = true;
+        }
+        ui.label(egui::RichText::new(lang.t("restore_sessions_desc")).color(theme.fg_dim).size(FONT_SM));
+
+        ui.add_space(SPACE_LG);
+        ui.separator();
+        ui.add_space(SPACE_SM);
+
+        ui.label(egui::RichText::new(lang.t("zmodem_download_dir")).color(theme.fg_primary).size(14.0).strong());
+        ui.add_space(SPACE_XS);
+        ui.horizontal(|ui| {
+            ui.label(widgets::field_label(lang.t("zmodem_download_dir"), theme));
+            ui.add_space(SPACE_SM);
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut self.zmodem_download_dir)
+                    .hint_text(egui::RichText::new("~/Downloads").color(theme.hint_color()).italics())
+                    .desired_width(300.0)
+                    .font(egui::FontId::proportional(13.0))
+                    .text_color(theme.fg_primary)
+            );
+            if resp.changed() || resp.lost_focus() {
+                *changed = true;
+            }
+        });
+        ui.label(egui::RichText::new(lang.t("zmodem_download_dir_desc")).color(theme.fg_dim).size(FONT_SM));
     }
 }
