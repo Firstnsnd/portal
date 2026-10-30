@@ -316,9 +316,13 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
             ui.add(egui::Separator::default().spacing(0.0));
             ui.add_space(24.0);
 
-            // Content
+            // Content. The height is capped so the fixed footer (Save/Cancel)
+            // always stays visible — an unbounded ScrollArea would take all
+            // remaining height and push the buttons below the panel edge.
             egui::ScrollArea::vertical()
                 .id_salt("credential_drawer_scroll")
+                .auto_shrink([false, false])
+                .max_height((ui.available_height() - widgets::DRAWER_FOOTER_H).max(80.0))
                 .show(ui, |ui| {
                     egui::Frame::none()
                         .inner_margin(egui::Margin::symmetric(widgets::FORM_LEFT_MARGIN, 0.0))
@@ -332,36 +336,34 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                                     crate::ui::types::dialogs::CredentialTypeChoice::SshKey => cx.language.t("credential_private_key"),
                                     crate::ui::types::dialogs::CredentialTypeChoice::Agent => cx.language.t("credential_agent"),
                                 };
+                                widgets::style_combo_button(ui, cx.theme);
                                 egui::ComboBox::from_id_salt("cred_type")
-                                    .selected_text(egui::RichText::new(selected_text).size(widgets::FONT_SIZE_INPUT).color(cx.theme.fg_primary))
+                                    .selected_text(egui::RichText::new(selected_text).size(widgets::FONT_SIZE_INPUT).color(cx.theme.accent))
                                     .width(ui.available_width())
                                     .show_ui(ui, |ui| {
                                         widgets::style_dropdown(ui, cx.theme);
-                                        if ui.selectable_label(
-                                            matches!(window.credential_dialog.cred_type, crate::ui::types::dialogs::CredentialTypeChoice::Password),
-                                            cx.language.t("credential_password")
-                                        ).clicked() {
+                                        if widgets::dropdown_item(ui, cx.theme, cx.language.t("credential_password"),
+                                            matches!(window.credential_dialog.cred_type, crate::ui::types::dialogs::CredentialTypeChoice::Password)).clicked() {
                                             window.credential_dialog.cred_type = crate::ui::types::dialogs::CredentialTypeChoice::Password;
                                             window.credential_dialog.key_path.clear();
                                             window.credential_dialog.key_content.clear();
                                             window.credential_dialog.key_passphrase.clear();
+                                            ui.close_menu();
                                         }
-                                        if ui.selectable_label(
-                                            matches!(window.credential_dialog.cred_type, crate::ui::types::dialogs::CredentialTypeChoice::SshKey),
-                                            cx.language.t("credential_private_key")
-                                        ).clicked() {
+                                        if widgets::dropdown_item(ui, cx.theme, cx.language.t("credential_private_key"),
+                                            matches!(window.credential_dialog.cred_type, crate::ui::types::dialogs::CredentialTypeChoice::SshKey)).clicked() {
                                             window.credential_dialog.cred_type = crate::ui::types::dialogs::CredentialTypeChoice::SshKey;
                                             window.credential_dialog.password.clear();
+                                            ui.close_menu();
                                         }
-                                        if ui.selectable_label(
-                                            matches!(window.credential_dialog.cred_type, crate::ui::types::dialogs::CredentialTypeChoice::Agent),
-                                            cx.language.t("credential_agent")
-                                        ).clicked() {
+                                        if widgets::dropdown_item(ui, cx.theme, cx.language.t("credential_agent"),
+                                            matches!(window.credential_dialog.cred_type, crate::ui::types::dialogs::CredentialTypeChoice::Agent)).clicked() {
                                             window.credential_dialog.cred_type = crate::ui::types::dialogs::CredentialTypeChoice::Agent;
                                             window.credential_dialog.password.clear();
                                             window.credential_dialog.key_path.clear();
                                             window.credential_dialog.key_content.clear();
                                             window.credential_dialog.key_passphrase.clear();
+                                            ui.close_menu();
                                         }
                                     });
                             });
@@ -408,22 +410,21 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                                         crate::ui::types::dialogs::KeySourceChoice::LocalFile => cx.language.t("key_source_path"),
                                         crate::ui::types::dialogs::KeySourceChoice::ImportContent => cx.language.t("import_key"),
                                     };
+                                    widgets::style_combo_button(ui, cx.theme);
                                     egui::ComboBox::from_id_salt("key_source")
-                                        .selected_text(egui::RichText::new(source_text).size(widgets::FONT_SIZE_INPUT).color(cx.theme.fg_primary))
+                                        .selected_text(egui::RichText::new(source_text).size(widgets::FONT_SIZE_INPUT).color(cx.theme.accent))
                                         .width(ui.available_width())
                                         .show_ui(ui, |ui| {
                                             widgets::style_dropdown(ui, cx.theme);
-                                            if ui.selectable_label(
-                                                matches!(window.credential_dialog.key_source, crate::ui::types::dialogs::KeySourceChoice::LocalFile),
-                                                cx.language.t("key_source_path")
-                                            ).clicked() {
+                                            if widgets::dropdown_item(ui, cx.theme, cx.language.t("key_source_path"),
+                                                matches!(window.credential_dialog.key_source, crate::ui::types::dialogs::KeySourceChoice::LocalFile)).clicked() {
                                                 window.credential_dialog.key_source = crate::ui::types::dialogs::KeySourceChoice::LocalFile;
+                                                ui.close_menu();
                                             }
-                                            if ui.selectable_label(
-                                                matches!(window.credential_dialog.key_source, crate::ui::types::dialogs::KeySourceChoice::ImportContent),
-                                                cx.language.t("import_key")
-                                            ).clicked() {
+                                            if widgets::dropdown_item(ui, cx.theme, cx.language.t("import_key"),
+                                                matches!(window.credential_dialog.key_source, crate::ui::types::dialogs::KeySourceChoice::ImportContent)).clicked() {
                                                 window.credential_dialog.key_source = crate::ui::types::dialogs::KeySourceChoice::ImportContent;
+                                                ui.close_menu();
                                             }
                                         });
                                 });
@@ -595,5 +596,7 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                     }
                 });
             });
+            // Minimum distance between the footer buttons and the panel edge.
+            ui.add_space(12.0);
         });
 }

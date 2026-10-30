@@ -407,18 +407,21 @@ impl PortalApp {
                 crate::llm::types::LlmBackend::OpenAiCompatible => lang.t("llm_provider_openai"),
                 crate::llm::types::LlmBackend::Anthropic => lang.t("llm_provider_anthropic"),
             };
+            widgets::style_combo_button(ui, theme);
             egui::ComboBox::from_id_salt("llm_provider_combo")
-                .selected_text(egui::RichText::new(selected).color(theme.fg_primary).size(FONT_BASE))
+                .selected_text(egui::RichText::new(selected).color(theme.accent).size(FONT_MD))
                 .width(220.0)
                 .show_ui(ui, |ui| {
                     widgets::style_dropdown(ui, theme);
-                    if ui.selectable_label(matches!(backend, crate::llm::types::LlmBackend::OpenAiCompatible), lang.t("llm_provider_openai")).clicked() {
+                    if widgets::dropdown_item(ui, theme, lang.t("llm_provider_openai"), matches!(backend, crate::llm::types::LlmBackend::OpenAiCompatible)).clicked() {
                         self.llm_config.backend = crate::llm::types::LlmBackend::OpenAiCompatible;
                         *changed = true;
+                        ui.close_menu();
                     }
-                    if ui.selectable_label(matches!(backend, crate::llm::types::LlmBackend::Anthropic), lang.t("llm_provider_anthropic")).clicked() {
+                    if widgets::dropdown_item(ui, theme, lang.t("llm_provider_anthropic"), matches!(backend, crate::llm::types::LlmBackend::Anthropic)).clicked() {
                         self.llm_config.backend = crate::llm::types::LlmBackend::Anthropic;
                         *changed = true;
+                        ui.close_menu();
                     }
                 });
         });

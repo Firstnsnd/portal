@@ -74,6 +74,10 @@ pub struct RealPtySession {
     /// Asciicast recorder slot: `Some` while the session is being recorded.
     /// Cloned into the reader thread at spawn, so the tap sees it.
     pub recorder: Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>>,
+    /// AI run-feedback capture slot: `Some` while a confirmed AI command's
+    /// output is being captured for the chat. Cloned into the reader thread
+    /// like the recorder slot.
+    pub ai_capture: crate::terminal::ai_capture::AiCaptureSlot,
     /// ZMODEM tap: watches output for a remote `sz` ZRQINIT and, once armed
     /// or triggered, diverts all output into the transfer bridge. Cloned
     /// into the reader thread at spawn, like the recorder slot.
@@ -145,6 +149,9 @@ impl RealPtySession {
             },
         ));
         let recorder_clone = Arc::clone(&recorder);
+        let ai_capture: crate::terminal::ai_capture::AiCaptureSlot =
+            Arc::new(Mutex::new(None));
+        let ai_capture_clone = Arc::clone(&ai_capture);
 
         // ZMODEM slots — cloned into the reader thread like the recorder.
         let zmodem_tap: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTap>>> =
@@ -270,6 +277,15 @@ impl RealPtySession {
                                                 rec.output(bytes);
                                             }
                                         }
+                                        // AI run-feedback tap (same tap point;
+                                        // only armed while a capture is active).
+                                        if let Ok(slot) = ai_capture_clone.lock() {
+                                            if let Some(cap) = slot.as_ref() {
+                                                if let Ok(mut cap) = cap.lock() {
+                                                    cap.feed(bytes);
+                                                }
+                                            }
+                                        }
                                     },
                                 );
                                 if diverted == crate::terminal::zmodem::ChunkRoute::Diverted {
@@ -375,6 +391,7 @@ impl RealPtySession {
             last_shell_check,
             metrics,
             recorder,
+            ai_capture,
             zmodem_tap,
             zmodem_bridge,
             zmodem_transfer,
@@ -699,6 +716,59 @@ mod tests {
         }
     }
 
+    /// E2E regression (2026-10-30 report): a freshly opened LOCAL terminal
+    /// showed "[Session ended]" — the login zsh died right after spawn. This
+    /// exercises the exact production spawn path (forkpty + `zsh -l` + HOME
+    /// cwd + reader thread) and asserts the shell stays alive, accepts input,
+    /// and executes it — i.e. the banner must NOT appear on a fresh terminal.
+    #[cfg(unix)]
+    #[test]
+    fn fresh_local_login_shell_stays_alive_and_accepts_input() {
+        let session = RealPtySession::with_scrollback_limit(
+            1,
+            80,
+            24,
+            "/bin/zsh",
+            1024 * 1024,
+            None, // default cwd (HOME), like a plain "new terminal"
+            false,
+        )
+        .expect("spawn login zsh");
+
+        // Login shells load /etc/zprofile + ~/.zprofile + ~/.zshrc (conda,
+        // nvm on this machine) — give them time to settle.
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        assert!(
+            !session.has_exited(),
+            "login zsh exited within 1.5s of spawn — the session-ended bug"
+        );
+
+        session.write(b"echo PORTAL-SURVIVED\n").expect("write probe");
+        let grid = session.get_grid();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let found = {
+                let g = grid.lock().unwrap();
+                g.cells.iter().any(|row| {
+                    let line: String = row.iter().map(|c| c.c).collect();
+                    line.contains("PORTAL-SURVIVED")
+                })
+            };
+            if found {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "shell did not echo the probe within 5s"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert!(
+            !session.has_exited(),
+            "login zsh exited after executing input"
+        );
+    }
+
     /// E2E: the PTY output tap lands in a `.cast` file — start recording,
     /// run `echo hi`, stop, and the parsed recording contains an Output event
     /// with the echoed text.
@@ -860,6 +930,7 @@ mod tests {
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
             recorder: Arc::new(Mutex::new(None)),
+            ai_capture: Arc::new(Mutex::new(None)),
             #[cfg(unix)]
             zmodem_tap: Arc::new(Mutex::new(None)),
             #[cfg(unix)]
@@ -897,6 +968,7 @@ mod tests {
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
             recorder: Arc::new(Mutex::new(None)),
+            ai_capture: Arc::new(Mutex::new(None)),
             #[cfg(unix)]
             zmodem_tap: Arc::new(Mutex::new(None)),
             #[cfg(unix)]
@@ -933,6 +1005,7 @@ mod tests {
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
             recorder: Arc::new(Mutex::new(None)),
+            ai_capture: Arc::new(Mutex::new(None)),
             #[cfg(unix)]
             zmodem_tap: Arc::new(Mutex::new(None)),
             #[cfg(unix)]
@@ -970,6 +1043,7 @@ mod tests {
                 last_shell_check: Arc::new(Mutex::new(Instant::now())),
                 metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
                 recorder: Arc::new(Mutex::new(None)),
+            ai_capture: Arc::new(Mutex::new(None)),
                 #[cfg(unix)]
                 zmodem_tap: Arc::new(Mutex::new(None)),
                 #[cfg(unix)]

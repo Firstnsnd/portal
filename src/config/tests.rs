@@ -291,6 +291,60 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_key_path_credential_reads_file() {
+        // A key credential stored by file path (key_in_keychain=false) must
+        // read the key at resolve time — previously key_path was ignored and
+        // every path-based credential resolved to No authentication.
+        let dir = std::env::temp_dir().join(format!("portal_key_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("id_test_key");
+        std::fs::write(&path, "FAKE-KEY-CONTENT\n").unwrap();
+
+        let cred = Credential::new_ssh_key(
+            "path cred".to_string(),
+            path.to_string_lossy().to_string(),
+            false,
+            false,
+        );
+        match resolve_credential(&cred) {
+            ResolvedAuth::Key { key_content, passphrase } => {
+                assert_eq!(key_content, "FAKE-KEY-CONTENT\n");
+                assert!(passphrase.is_none());
+            }
+            other => panic!("expected ResolvedAuth::Key, got {:?}", other),
+        }
+
+        // A missing file and an empty path both degrade to None (not a panic
+        // or a Key with empty content).
+        let missing = Credential::new_ssh_key(
+            "missing".to_string(),
+            dir.join("nope").to_string_lossy().to_string(),
+            false,
+            false,
+        );
+        assert!(matches!(resolve_credential(&missing), ResolvedAuth::None));
+        let empty = Credential::new_ssh_key("empty".to_string(), String::new(), false, false);
+        assert!(matches!(resolve_credential(&empty), ResolvedAuth::None));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_expand_key_path() {
+        // Non-tilde paths pass through untouched.
+        let p = expand_key_path("/abs/key");
+        assert_eq!(p, std::path::PathBuf::from("/abs/key"));
+        // A bare `~` (no slash) must not panic and stays untouched.
+        let p = expand_key_path("~");
+        assert_eq!(p, std::path::PathBuf::from("~"));
+        // `~/…` expands under the home directory.
+        if let Some(home) = dirs::home_dir() {
+            let p = expand_key_path("~/.ssh/id_ed25519");
+            assert_eq!(p, home.join(".ssh/id_ed25519"));
+        }
+    }
+
+    #[test]
     fn test_proxy_config_serde_additive_compat() {
         // Old hosts.json entries have no proxy field at all — they must
         // still load, defaulting to direct connection.

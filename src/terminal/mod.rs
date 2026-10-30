@@ -8,6 +8,7 @@ mod session;
 pub mod cast;
 pub mod url;
 pub mod metrics;
+pub mod ai_capture;
 
 // ZMODEM bridge — depends on the rzsz crate (nix), unix-only like the PTY layer.
 #[cfg(unix)]

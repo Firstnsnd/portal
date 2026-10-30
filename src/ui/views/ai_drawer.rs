@@ -22,6 +22,20 @@ pub const ORB_MARGIN: f32 = 20.0;
 const PAD: f32 = 16.0;
 /// Vertical space between consecutive chat entries so bubbles don't stick together.
 const BUBBLE_GAP: f32 = 14.0;
+/// Visible composer rows; longer drafts scroll inside the composer box.
+const COMPOSER_EDIT_ROWS: usize = 2;
+/// egui's default multiline [`egui::TextEdit`] vertical margin is
+/// `Margin::symmetric(4, 2)`, so the edit box is `rows × row_height + 4px`
+/// tall. The surrounding ScrollArea cap must include it or the bottom of the
+/// box gets clipped.
+const TEXT_EDIT_V_MARGIN: f32 = 4.0;
+
+/// Outer height of the composer's edit box: `COMPOSER_EDIT_ROWS` rows of text
+/// plus the TextEdit's default vertical margin.
+fn composer_edit_height(ui: &egui::Ui) -> f32 {
+    let row_h = ui.fonts(|f| f.row_height(&egui::FontId::proportional(tk::FONT_BASE)));
+    COMPOSER_EDIT_ROWS as f32 * row_h + TEXT_EDIT_V_MARGIN
+}
 
 /// Render the AI chat drawer on the right side of a window (if open), plus the
 /// "run" confirmation window. Called from `AppWindow::render_drawers`.
@@ -70,47 +84,66 @@ pub fn render_ai_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut Wi
             draw_header(ui, theme, lang, &llm_config, &handle);
             ui.separator();
 
-            // Messages (height-limited so the composer stays visible below).
             let mut run_wanted: Option<String> = None;
-            let composer_h = 118.0;
-            let mut composer_text = {
-                let st = handle.lock().unwrap();
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .max_height((ui.available_height() - composer_h).max(80.0))
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        if st.messages.is_empty() && st.streaming.is_none() {
-                            draw_empty_state(ui, theme, lang);
-                        }
-                        for msg in &st.messages {
-                            draw_bubble(ui, msg, theme, lang, &mut run_wanted);
-                        }
-                        if let Some(buf) = &st.streaming {
-                            if buf.text.is_empty() {
-                                // No token arrived yet — show the animated
-                                // "thinking" bubble instead of an empty static one.
-                                draw_thinking_bubble(ui, theme);
-                            } else {
-                                draw_streaming_bubble(ui, &buf.text, theme);
-                            }
-                        } else if st.running {
+            let mut composer_wanted: Option<String> = None;
+            let mut composer_text = handle.lock().unwrap().input.clone();
+
+            // Composer docked at the bottom FIRST: the dock claims its natural
+            // content height (measured by egui — no hand-computed height
+            // budget), so it is always fully visible, and everything above it
+            // belongs to the messages.
+            egui::TopBottomPanel::bottom("ai_composer_dock")
+                .resizable(false)
+                .frame(egui::Frame::none())
+                .show_inside(ui, |ui| {
+                    draw_composer(ui, theme, lang, &handle, &mut composer_text, &mut do_send, composer_id);
+                });
+
+            // Messages take exactly the space left above the composer dock.
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    let st = handle.lock().unwrap();
+                    if st.messages.is_empty() && st.streaming.is_none() {
+                        draw_empty_state(ui, theme, lang);
+                    }
+                    for msg in &st.messages {
+                        draw_bubble(ui, msg, theme, lang, &mut run_wanted, &mut composer_wanted);
+                    }
+                    if let Some(buf) = &st.streaming {
+                        if buf.text.is_empty() {
+                            // No token arrived yet — show the animated
+                            // "thinking" bubble instead of an empty static one.
                             draw_thinking_bubble(ui, theme);
+                        } else {
+                            draw_streaming_bubble(ui, &buf.text, theme);
                         }
-                        if let Some(err) = &st.error {
-                            draw_error(ui, theme, lang, err);
-                        }
-                        ui.add_space(8.0);
-                    });
-                st.input.clone()
-            };
+                    } else if st.running {
+                        draw_thinking_bubble(ui, theme);
+                    }
+                    if let Some(err) = &st.error {
+                        draw_error(ui, theme, lang, err);
+                    }
+                    ui.add_space(8.0);
+                });
+
             // If a Run button was clicked, ask for confirmation.
             if let Some(cmd) = run_wanted {
                 if let Ok(mut st) = handle.lock() { st.confirm_run = Some(cmd); }
             }
-
-            // Composer — fixed block pinned to the bottom.
-            draw_composer(ui, theme, lang, &handle, &mut composer_text, &mut do_send, composer_id);
+            // A bubble's right-click menu asked to drop the message into the
+            // composer draft (newline-joined onto any existing text). The
+            // composer already persisted its draft this frame, so append into
+            // the persisted state — visible on the next frame.
+            if let Some(text) = composer_wanted {
+                if let Ok(mut st) = handle.lock() {
+                    if !st.input.is_empty() {
+                        st.input.push('\n');
+                    }
+                    st.input.push_str(&text);
+                }
+            }
         });
 
     // Send the message (outside the panel borrow).
@@ -306,13 +339,15 @@ fn draw_error(
 }
 
 /// Render a completed message bubble. Assistant replies show "Run" buttons under
-/// fenced code blocks (writing the chosen command into `run_wanted`).
+/// fenced code blocks (writing the chosen command into `run_wanted`); any
+/// bubble's right-click menu offers copy / add-to-composer (`composer_wanted`).
 fn draw_bubble(
     ui: &mut egui::Ui,
     msg: &ChatMessage,
     theme: &crate::ui::theme::ThemeColors,
     lang: crate::ui::Language,
     run_wanted: &mut Option<String>,
+    composer_wanted: &mut Option<String>,
 ) {
     let is_user = msg.role == ChatRole::User;
     let (bg, align) = if is_user {
@@ -329,42 +364,74 @@ fn draw_bubble(
         egui::Frame::none()
             .inner_margin(egui::Margin { left: PAD, right: PAD, top: 0.0, bottom: 0.0 })
             .show(ui, |ui| {
-                let inner = bubble_frame(bg).show(ui, |ui| {
-                    ui.set_max_width(max_w);
-                    if !label.is_empty() {
-                        ui.label(
-                            egui::RichText::new(label).color(theme.accent).size(tk::FONT_XS),
-                        );
-                        ui.add_space(2.0);
-                    }
-                    // Assistant replies render as Markdown; user text stays plain.
-                    if msg.role == ChatRole::Assistant {
-                        // Code blocks are rendered in-place (at their original
-                        // position in the prose) via the callback.
-                        render_markdown(ui, &msg.content, theme, tk::FONT_BASE, max_w, |ui, block| {
-                            code_block(ui, theme, lang, block, run_wanted);
-                        });
-                    } else {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(&msg.content)
-                                    .color(theme.fg_primary)
-                                    .size(tk::FONT_BASE),
+                bubble_frame(bg).show(ui, |ui| {
+                    // Text must read left-aligned even in the right-floating
+                    // user bubble: the outer Align::Max layout would otherwise
+                    // right-align every wrapped line too (ragged left edge).
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.set_max_width(max_w);
+                        if !label.is_empty() {
+                            ui.label(
+                                egui::RichText::new(label).color(theme.accent).size(tk::FONT_XS),
+                            );
+                            ui.add_space(2.0);
+                        }
+                        // Assistant replies render as Markdown; user text stays plain.
+                        if msg.role == ChatRole::Assistant {
+                            // Code blocks are rendered in-place (at their original
+                            // position in the prose) via the callback. Each
+                            // selectable span carries the same right-click menu.
+                            render_markdown(
+                                ui,
+                                &msg.content,
+                                theme,
+                                tk::FONT_BASE,
+                                max_w,
+                                |ui, block| {
+                                    code_block(ui, theme, lang, block, run_wanted);
+                                },
+                                |ui| message_menu(ui, lang, &msg.content, composer_wanted),
+                            );
+                        } else {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&msg.content)
+                                        .color(theme.fg_primary)
+                                        .size(tk::FONT_BASE),
+                                )
+                                .selectable(true)
+                                .wrap(),
                             )
-                            .selectable(true)
-                            .wrap(),
-                        );
-                    }
+                            .context_menu(|ui| {
+                                message_menu(ui, lang, &msg.content, composer_wanted);
+                            });
+                        }
+                    });
                 });
-                // Right-click anywhere on the bubble copies the full message.
-                if inner.response.secondary_clicked() {
-                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                        let _ = clipboard.set_text(msg.content.clone());
-                    }
-                }
             });
         ui.add_space(BUBBLE_GAP);
     });
+}
+
+/// Right-click menu shared by every chat bubble (and every selectable span in
+/// it): copy the whole message to the clipboard, or push it into the composer
+/// as a draft.
+fn message_menu(
+    ui: &mut egui::Ui,
+    lang: crate::ui::Language,
+    content: &str,
+    composer_wanted: &mut Option<String>,
+) {
+    if ui.button(lang.t("copy")).clicked() {
+        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+            let _ = clipboard.set_text(content.to_owned());
+        }
+        ui.close_menu();
+    }
+    if ui.button(lang.t("add_to_input")).clicked() {
+        *composer_wanted = Some(content.to_owned());
+        ui.close_menu();
+    }
 }
 
 /// A single fenced code block: a `input_bg` box with a monospace command and
@@ -474,11 +541,25 @@ fn draw_composer(
                     let edit = egui::TextEdit::multiline(composer_text)
                         .id(composer_id)
                         .hint_text(lang.t("ai_input_placeholder"))
-                        .desired_rows(2)
+                        .desired_rows(COMPOSER_EDIT_ROWS)
                         .desired_width(f32::INFINITY)
                         .font(egui::FontId::proportional(tk::FONT_BASE))
                         .frame(false);
-                    let resp = ui.add(edit);
+                    // egui multiline TextEdits grow unboundedly with content and
+                    // never scroll on their own, so a long draft would push the
+                    // Send button off the drawer. Cap the editor at the fixed
+                    // two-row height and let overflow scroll inside the composer
+                    // (egui scrolls the nearest enclosing ScrollArea only, so
+                    // the message list above is unaffected). The cap must cover
+                    // the TextEdit's own vertical margin, or the bottom of the
+                    // box is clipped.
+                    let edit_h = composer_edit_height(ui);
+                    let resp = egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .max_height(edit_h)
+                        .id_salt(composer_id.with("composer_scroll"))
+                        .show(ui, |ui| ui.add(edit))
+                        .inner;
                     // Enter sends; Shift+Enter inserts a newline.
                     let enter_pressed = resp.has_focus()
                         && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);

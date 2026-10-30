@@ -61,16 +61,7 @@ pub fn render_snippets_view(
 
                     // Filter bar
                     ui.horizontal(|ui| {
-                        let input_bg = ui.visuals().extreme_bg_color;
-                        let border = cx.theme.input_border;
-                        ui.style_mut().visuals.widgets.inactive.bg_fill = input_bg;
-                        ui.style_mut().visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, border);
-                        ui.style_mut().visuals.widgets.hovered.bg_fill = input_bg;
-                        ui.style_mut().visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, cx.theme.focus_ring);
-                        ui.style_mut().visuals.widgets.active.bg_fill = input_bg;
-                        ui.style_mut().visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, cx.theme.accent);
-                        ui.style_mut().visuals.widgets.open.bg_fill = input_bg;
-                        ui.style_mut().visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, cx.theme.accent);
+                        widgets::style_combo_button(ui, cx.theme);
 
                         ui.add_space(ui.available_width() - 110.0);
 
@@ -94,20 +85,12 @@ pub fn render_snippets_view(
                             .width(90.0)
                             .show_ui(ui, |ui| {
                                 widgets::style_dropdown(ui, cx.theme);
-                                if ui.add(egui::Button::new(
-                                    egui::RichText::new(cx.language.t("snippet_default_group"))
-                                        .color(if window.snippet_view_state.group_filter.is_empty() { cx.theme.accent } else { cx.theme.fg_primary })
-                                        .size(FONT_MD)
-                                ).frame(false)).clicked() {
+                                if widgets::dropdown_item(ui, cx.theme, cx.language.t("snippet_default_group"), window.snippet_view_state.group_filter.is_empty()).clicked() {
                                     window.snippet_view_state.group_filter.clear();
                                     ui.close_menu();
                                 }
                                 for group in &all_groups {
-                                    if ui.add(egui::Button::new(
-                                        egui::RichText::new(group)
-                                            .color(if window.snippet_view_state.group_filter == *group { cx.theme.accent } else { cx.theme.fg_primary })
-                                            .size(FONT_MD)
-                                    ).frame(false)).clicked() {
+                                    if widgets::dropdown_item(ui, cx.theme, group.clone(), window.snippet_view_state.group_filter == *group).clicked() {
                                         window.snippet_view_state.group_filter = group.clone();
                                         ui.close_menu();
                                     }
@@ -358,9 +341,13 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
             ui.add(egui::Separator::default().spacing(0.0));
             ui.add_space(24.0);
 
-            // Content
+            // Content. The height is capped so the fixed footer (Save/Cancel)
+            // always stays visible — an unbounded ScrollArea would take all
+            // remaining height and push the buttons below the panel edge.
             egui::ScrollArea::vertical()
                 .id_salt("snippet_drawer_scroll")
+                .auto_shrink([false, false])
+                .max_height((ui.available_height() - widgets::DRAWER_FOOTER_H).max(80.0))
                 .show(ui, |ui| {
                     egui::Frame::none()
                         .inner_margin(egui::Margin::symmetric(widgets::FORM_LEFT_MARGIN, 0.0))
@@ -434,6 +421,8 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                     }
                 });
             });
+            // Minimum distance between the footer buttons and the panel edge.
+            ui.add_space(12.0);
         });
 }
 

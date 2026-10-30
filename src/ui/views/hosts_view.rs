@@ -81,16 +81,7 @@ pub fn render_hosts_view(
 
                     // Filter bar
                     ui.horizontal(|ui| {
-                        let input_bg = ui.visuals().extreme_bg_color;
-                        let border = cx.theme.input_border;
-                        ui.style_mut().visuals.widgets.inactive.bg_fill = input_bg;
-                        ui.style_mut().visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, border);
-                        ui.style_mut().visuals.widgets.hovered.bg_fill = input_bg;
-                        ui.style_mut().visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, cx.theme.focus_ring);
-                        ui.style_mut().visuals.widgets.active.bg_fill = input_bg;
-                        ui.style_mut().visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, cx.theme.accent);
-                        ui.style_mut().visuals.widgets.open.bg_fill = input_bg;
-                        ui.style_mut().visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, cx.theme.accent);
+                        widgets::style_combo_button(ui, cx.theme);
 
                         ui.add_space(ui.available_width() - 210.0);
 
@@ -105,20 +96,12 @@ pub fn render_hosts_view(
                             .width(90.0)
                             .show_ui(ui, |ui| {
                                 widgets::style_dropdown(ui, cx.theme);
-                                if ui.add(egui::Button::new(
-                                    egui::RichText::new(cx.language.t("snippet_default_group"))
-                                        .color(if window.host_filter.group.is_empty() { cx.theme.accent } else { cx.theme.fg_primary })
-                                        .size(FONT_MD)
-                                ).frame(false)).clicked() {
+                                if widgets::dropdown_item(ui, cx.theme, cx.language.t("snippet_default_group"), window.host_filter.group.is_empty()).clicked() {
                                     window.host_filter.group.clear();
                                     ui.close_menu();
                                 }
                                 for group in &all_groups {
-                                    if ui.add(egui::Button::new(
-                                        egui::RichText::new(group)
-                                            .color(if window.host_filter.group == *group { cx.theme.accent } else { cx.theme.fg_primary })
-                                            .size(FONT_MD)
-                                    ).frame(false)).clicked() {
+                                    if widgets::dropdown_item(ui, cx.theme, group.clone(), window.host_filter.group == *group).clicked() {
                                         window.host_filter.group = group.clone();
                                         ui.close_menu();
                                     }
@@ -138,20 +121,12 @@ pub fn render_hosts_view(
                             .width(90.0)
                             .show_ui(ui, |ui| {
                                 widgets::style_dropdown(ui, cx.theme);
-                                if ui.add(egui::Button::new(
-                                    egui::RichText::new(cx.language.t("snippet_default_group"))
-                                        .color(if window.host_filter.tag.is_empty() { cx.theme.accent } else { cx.theme.fg_primary })
-                                        .size(FONT_MD)
-                                ).frame(false)).clicked() {
+                                if widgets::dropdown_item(ui, cx.theme, cx.language.t("snippet_default_group"), window.host_filter.tag.is_empty()).clicked() {
                                     window.host_filter.tag.clear();
                                     ui.close_menu();
                                 }
                                 for tag in &all_tags {
-                                    if ui.add(egui::Button::new(
-                                        egui::RichText::new(tag)
-                                            .color(if window.host_filter.tag == *tag { cx.theme.accent } else { cx.theme.fg_primary })
-                                            .size(FONT_MD)
-                                    ).frame(false)).clicked() {
+                                    if widgets::dropdown_item(ui, cx.theme, tag.clone(), window.host_filter.tag == *tag).clicked() {
                                         window.host_filter.tag = tag.clone();
                                         ui.close_menu();
                                     }
@@ -732,9 +707,14 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
 
             widgets::form_separator(ui);
 
-            // Content with left margin
+            // Content with left margin. The height is capped so the fixed
+            // footer (Test/Save/Cancel) always stays visible — an unbounded
+            // ScrollArea would take all remaining height and push the buttons
+            // below the panel edge.
             egui::ScrollArea::vertical()
                 .id_salt("add_host_drawer_scroll")
+                .auto_shrink([false, false])
+                .max_height((ui.available_height() - widgets::DRAWER_FOOTER_H).max(80.0))
                 .show(ui, |ui| {
                     egui::Frame::none()
                         .inner_margin(egui::Margin::symmetric(widgets::FORM_LEFT_MARGIN, 0.0))
@@ -825,8 +805,9 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                         .and_then(|id| cx.credentials.iter().find(|c| &c.id == id))
                                         .map(|c| c.name.clone())
                                         .unwrap_or_else(|| cx.language.t("select_credential").to_string());
+                                    widgets::style_combo_button(ui, cx.theme);
                                     egui::ComboBox::from_id_salt("existing_credential")
-                                        .selected_text(egui::RichText::new(selected_text).size(widgets::FONT_SIZE_INPUT).color(cx.theme.fg_primary))
+                                        .selected_text(egui::RichText::new(selected_text).size(widgets::FONT_SIZE_INPUT).color(cx.theme.accent))
                                         .width(ui.available_width())
                                         .show_ui(ui, |ui| {
                                             widgets::style_dropdown(ui, cx.theme);
@@ -838,8 +819,9 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                                     crate::config::CredentialType::Agent { .. } => cx.language.t("credential_agent"),
                                                 };
                                                 let label = format!("{} ({})", cred.name, type_label);
-                                                if ui.selectable_label(is_selected, &label).clicked() {
+                                                if widgets::dropdown_item(ui, cx.theme, label, is_selected).clicked() {
                                                     window.add_host_dialog.selected_credential_id = Some(cred.id.clone());
+                                                    ui.close_menu();
                                                 }
                                             }
                                         });
@@ -1179,6 +1161,8 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                     }
                 });
             });
+            // Minimum distance between the footer buttons and the panel edge.
+            ui.add_space(12.0);
         });
 
     // Handle test connection
@@ -1220,16 +1204,10 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                     if key_path.is_empty() {
                                         String::new()
                                     } else {
-                                        let expanded = if key_path.starts_with('~') {
-                                            if let Some(home) = dirs::home_dir() {
-                                                home.join(&key_path[2..]).to_string_lossy().to_string()
-                                            } else {
-                                                key_path.clone()
-                                            }
-                                        } else {
-                                            key_path
-                                        };
-                                        std::fs::read_to_string(&expanded).unwrap_or_default()
+                                        std::fs::read_to_string(
+                                            crate::config::expand_key_path(&key_path),
+                                        )
+                                        .unwrap_or_default()
                                     }
                                 }
                                 KeySourceChoice::ImportContent => {
@@ -1313,16 +1291,8 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                     window.add_host_dialog.error = cx.language.t("key_required").to_string();
                                     return;
                                 }
-                                let expanded = if key_path.starts_with('~') {
-                                    if let Some(home) = dirs::home_dir() {
-                                        home.join(&key_path[2..]).to_string_lossy().to_string()
-                                    } else {
-                                        key_path.to_owned()
-                                    }
-                                } else {
-                                    key_path.to_owned()
-                                };
-                                std::fs::read_to_string(&expanded).unwrap_or_default()
+                                std::fs::read_to_string(crate::config::expand_key_path(key_path))
+                                    .unwrap_or_default()
                             }
                             KeySourceChoice::ImportContent => {
                                 let kc = window.add_host_dialog.key_content.trim().to_owned();

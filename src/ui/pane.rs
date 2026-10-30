@@ -205,6 +205,9 @@ pub enum PaneAction {
     ZmodemDownload,
     /// Cancel the active ZMODEM transfer / dismiss its status chip
     ZmodemCancel,
+    /// Hand the pane's selected text to the AI assistant composer (prefill;
+    /// the dispatcher re-extracts the selection with `selected_text_of`)
+    SendSelectionToAi,
     /// Remove old SSH host key from known_hosts
     RemoveHostKey,
     /// Reconnect a disconnected SSH session

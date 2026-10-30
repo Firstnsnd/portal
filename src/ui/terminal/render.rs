@@ -36,9 +36,10 @@ fn measure_char_width(fonts: &egui::text::Fonts, font_id: &egui::FontId) -> f32 
 
 /// Extract the currently selected text (unified scrollback + grid), if any.
 ///
-/// Computed only on demand (copy) rather than every frame: a Select-All over a
-/// large scrollback is O(scrollback × cols) and used to run per-frame.
-fn selected_text_of(session: &TerminalSession) -> Option<String> {
+/// Computed only on demand (copy / send-to-AI) rather than every frame: a
+/// Select-All over a large scrollback is O(scrollback × cols) and used to
+/// run per-frame.
+pub(crate) fn selected_text_of(session: &TerminalSession) -> Option<String> {
     if !session.selection.has_selection() {
         return None;
     }
@@ -372,6 +373,7 @@ pub fn render_terminal_session(
 
     // Right-click context menu
     let mut ctx_copy = false;
+    let mut ctx_send_to_ai = false;
     let mut ctx_paste = false;
     let mut ctx_select_all = false;
     let mut ctx_broadcast = false;
@@ -389,6 +391,17 @@ pub fn render_terminal_session(
     response.context_menu(|ui| {
         if ui.add_enabled(session.selection.has_selection(), egui::Button::new("Copy")).clicked() {
             ctx_copy = true;
+            ui.close_menu();
+        }
+        // Prefill the AI assistant composer with the selection — same gate
+        // as Copy, and (unlike Copy) the selection is left in place.
+        if ui.add_enabled(
+            session.selection.has_selection(),
+            egui::Button::new(language.t("send_to_ai")),
+        )
+        .clicked()
+        {
+            ctx_send_to_ai = true;
             ui.close_menu();
         }
         if ui.button("Paste").clicked() {
@@ -515,6 +528,7 @@ pub fn render_terminal_session(
     }
     if ctx_split_h { action = Some(PaneAction::SplitHorizontal); }
     if ctx_split_v { action = Some(PaneAction::SplitVertical); }
+    if ctx_send_to_ai { action = Some(PaneAction::SendSelectionToAi); }
     if ctx_broadcast { action = Some(PaneAction::ToggleBroadcast); }
     if ctx_record    { action = Some(PaneAction::ToggleRecording); }
     if ctx_view_recordings { action = Some(PaneAction::ViewHostRecordings); }
@@ -1540,21 +1554,16 @@ pub fn render_terminal_session(
             }
         }
 
-        // ── Local session-ended overlay ─────────────────────────────────────
-        // Shown only when the child process has actually exited. A running
-        // local shell NEVER shows this — it has no "disconnected" state.
+        // ── Local shell exited ──────────────────────────────────────────────
+        // Local terminals have NO session-lifecycle UI (system-Terminal
+        // parity, like the memory note "local terminal has no connection
+        // concept"): when the shell process is really gone the pane simply
+        // closes — no banner, no disconnected state. The exited flag is
+        // waitpid-confirmed by the reader thread, so this never fires while
+        // the shell is alive.
         if let SessionKind::Local(pty, _) = &session.kind {
             if pty.has_exited() {
-                let galley = ui.fonts(|f| f.layout_no_wrap(
-                    language.t("session_ended").to_string(),
-                    egui::FontId::monospace(11.0),
-                    theme.red,
-                ));
-                painter.galley(
-                    egui::pos2(rect.min.x + 4.0, rect.max.y - galley.rect.height() - 4.0),
-                    galley,
-                    egui::Color32::TRANSPARENT,
-                );
+                action = Some(PaneAction::ClosePane);
             }
         }
 

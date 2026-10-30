@@ -291,6 +291,8 @@ pub fn t(key: &str) -> &'static str {
         "ai_run" => "実行",
         "ai_cancel" => "キャンセル",
         "ai_no_key_configured" => "API キーが設定されていません。設定 → AI 統合で追加してください。",
+        "send_to_ai" => "AIに送信",
+        "add_to_input" => "入力欄に追加",
         _ => "???",
     }
 }

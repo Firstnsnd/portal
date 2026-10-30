@@ -679,6 +679,17 @@ pub fn resolve_auth(host: &HostEntry, credentials: &[Credential]) -> ResolvedAut
     resolve_legacy_auth(host)
 }
 
+/// Expand a leading `~/` in a key path to the user's home directory.
+/// (A bare `~` without the slash is left untouched.)
+pub fn expand_key_path(path: &str) -> std::path::PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    std::path::PathBuf::from(path)
+}
+
 /// Resolve a Credential to ResolvedAuth by loading secrets from keychain.
 pub fn resolve_credential(cred: &Credential) -> ResolvedAuth {
     match &cred.credential_type {
@@ -689,9 +700,12 @@ pub fn resolve_credential(cred: &Credential) -> ResolvedAuth {
                 ResolvedAuth::None
             }
         }
-        CredentialType::SshKey { key_in_keychain, has_passphrase, .. } => {
+        CredentialType::SshKey { key_path, key_in_keychain, has_passphrase } => {
             let key_content = if *key_in_keychain {
                 load_credential_secret(&cred.id, &cred.name, "privatekey").unwrap_or_default()
+            } else if !key_path.is_empty() {
+                // Key stored by file path: read it at resolve time.
+                std::fs::read_to_string(expand_key_path(key_path)).unwrap_or_default()
             } else {
                 String::new()
             };
@@ -734,16 +748,7 @@ fn resolve_legacy_auth(host: &HostEntry) -> ResolvedAuth {    match &host.auth {
             } else if !key_content.is_empty() {
                 key_content.clone()
             } else if !key_path.is_empty() {
-                let expanded = if key_path.starts_with('~') {
-                    if let Some(home) = dirs::home_dir() {
-                        home.join(&key_path[2..]).to_string_lossy().to_string()
-                    } else {
-                        key_path.clone()
-                    }
-                } else {
-                    key_path.clone()
-                };
-                std::fs::read_to_string(&expanded).unwrap_or_default()
+                std::fs::read_to_string(expand_key_path(key_path)).unwrap_or_default()
             } else {
                 String::new()
             };

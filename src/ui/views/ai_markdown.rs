@@ -110,6 +110,11 @@ fn is_fence_line(line: &str) -> bool {
 /// their *original* position in the prose, so a reply like "run this\n```sh\n…
 /// ```\nthen check" renders the command between the two paragraphs instead of
 /// collecting it at the bottom of the bubble.
+///
+/// `context_menu` is attached to every selectable span so a right-click over
+/// prose text offers the bubble's actions (copy / add-to-composer) — the
+/// labels sit above the bubble frame in the hit test, so the frame alone
+/// would only ever see right-clicks on the bubble's margins.
 pub fn render_markdown(
     ui: &mut egui::Ui,
     text: &str,
@@ -117,12 +122,13 @@ pub fn render_markdown(
     base_size: f32,
     max_width: f32,
     mut code_block: impl FnMut(&mut egui::Ui, &str),
+    mut context_menu: impl FnMut(&mut egui::Ui),
 ) {
     for block in split_blocks(text) {
         match block {
             MarkdownBlock::Text(s) => {
                 ui.add_space(2.0);
-                render_block(ui, &s, theme, base_size, max_width);
+                render_block(ui, &s, theme, base_size, max_width, &mut context_menu);
             }
             MarkdownBlock::Code(c) => {
                 ui.add_space(4.0);
@@ -133,7 +139,14 @@ pub fn render_markdown(
     }
 }
 
-fn render_block(ui: &mut egui::Ui, line: &str, theme: &ThemeColors, base_size: f32, max_width: f32) {
+fn render_block(
+    ui: &mut egui::Ui,
+    line: &str,
+    theme: &ThemeColors,
+    base_size: f32,
+    max_width: f32,
+    context_menu: &mut dyn FnMut(&mut egui::Ui),
+) {
     let trimmed = line.trim_end();
 
     // Horizontal rule.
@@ -158,7 +171,7 @@ fn render_block(ui: &mut egui::Ui, line: &str, theme: &ThemeColors, base_size: f
         };
         let strong = level <= 3;
         ui.set_max_width(max_width);
-        render_inline(ui, rest, theme, size, strong, max_width);
+        render_inline(ui, rest, theme, size, strong, max_width, context_menu);
         if level <= 2 {
             ui.add_space(2.0);
         }
@@ -176,7 +189,7 @@ fn render_block(ui: &mut egui::Ui, line: &str, theme: &ThemeColors, base_size: f
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(2.0, 12.0), egui::Sense::hover());
                 ui.painter().rect_filled(rect, 2.0, theme.divider);
                 ui.horizontal(|ui| {
-                    render_inline(ui, quote, theme, base_size, false, max_width - 12.0);
+                    render_inline(ui, quote, theme, base_size, false, max_width - 12.0, context_menu);
                 });
             });
         return;
@@ -185,20 +198,20 @@ fn render_block(ui: &mut egui::Ui, line: &str, theme: &ThemeColors, base_size: f
     // Unordered list item: `- `, `* `, or `+ `.
     for marker in ["- ", "* ", "+ "] {
         if let Some(rest) = trimmed.strip_prefix(marker) {
-            render_list_item(ui, "\u{2022}", rest.trim_start(), theme, base_size, max_width);
+            render_list_item(ui, "\u{2022}", rest.trim_start(), theme, base_size, max_width, context_menu);
             return;
         }
     }
     // Ordered list item: `1. `, `2. `, …
     if let Some(rest) = parse_ordered(trimmed) {
         let (num, body) = rest;
-        render_list_item(ui, &format!("{num}."), body, theme, base_size, max_width);
+        render_list_item(ui, &format!("{num}."), body, theme, base_size, max_width, context_menu);
         return;
     }
 
     // Plain paragraph.
     ui.set_max_width(max_width);
-    render_inline(ui, trimmed, theme, base_size, false, max_width);
+    render_inline(ui, trimmed, theme, base_size, false, max_width, context_menu);
 }
 
 /// Parse a leading `1.`/`12.` ordered-list marker; returns `(number, rest)`.
@@ -239,6 +252,7 @@ fn render_list_item(
     theme: &ThemeColors,
     base_size: f32,
     max_width: f32,
+    context_menu: &mut dyn FnMut(&mut egui::Ui),
 ) {
     ui.set_max_width(max_width);
     ui.horizontal_top(|ui| {
@@ -249,7 +263,7 @@ fn render_list_item(
                 .size(base_size),
         );
         ui.add_space(4.0);
-        render_inline(ui, body, theme, base_size, false, max_width - 18.0);
+        render_inline(ui, body, theme, base_size, false, max_width - 18.0, context_menu);
     });
 }
 
@@ -261,6 +275,7 @@ fn render_inline(
     size: f32,
     strong: bool,
     max_width: f32,
+    context_menu: &mut dyn FnMut(&mut egui::Ui),
 ) {
     let spans = parse_spans(text);
     ui.set_max_width(max_width);
@@ -301,8 +316,10 @@ fn render_inline(
                 if resp.clicked() {
                     ui.ctx().open_url(egui::OpenUrl::same_tab(href));
                 }
+                resp.context_menu(|ui| context_menu(ui));
             } else {
-                ui.add(egui::Label::new(rt).selectable(true));
+                ui.add(egui::Label::new(rt).selectable(true))
+                    .context_menu(|ui| context_menu(ui));
             }
         }
     });

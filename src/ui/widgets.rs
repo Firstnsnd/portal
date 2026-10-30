@@ -29,6 +29,13 @@ pub const INPUT_PADDING_Y: f32 = 3.0;
 /// Form layout
 pub const FORM_LEFT_MARGIN: f32 = 12.0;   // Left margin for form content
 
+/// Height to reserve below a drawer's scrolling form for its fixed action
+/// footer: item spacing (8) + gap above buttons (12) + button row (32) +
+/// bottom edge padding (12). A drawer's `ScrollArea` must cap its
+/// `max_height` at `available_height - DRAWER_FOOTER_H`, otherwise a long
+/// form pushes the Save/Cancel buttons below the panel edge.
+pub const DRAWER_FOOTER_H: f32 = 64.0;
+
 // ============================================================================
 // Basic Buttons
 // ============================================================================
@@ -109,6 +116,37 @@ pub fn style_dropdown(ui: &mut egui::Ui, theme: &ThemeColors) {
     ui.style_mut().visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, theme.fg_primary);
     ui.style_mut().visuals.selection.bg_fill = theme.accent_alpha(30);
     ui.style_mut().visuals.selection.stroke = egui::Stroke::NONE;
+}
+
+/// Style the closed combobox button as an input field: input background with
+/// themed border strokes for every interaction state (hover = focus_ring,
+/// active/open = accent). Call BEFORE `ComboBox::show_ui` — the popup `ui`
+/// inside the closure is styled separately by [`style_dropdown`].
+pub fn style_combo_button(ui: &mut egui::Ui, theme: &ThemeColors) {
+    let input_bg = ui.visuals().extreme_bg_color;
+    ui.style_mut().visuals.widgets.inactive.bg_fill = input_bg;
+    ui.style_mut().visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, theme.input_border);
+    ui.style_mut().visuals.widgets.hovered.bg_fill = input_bg;
+    ui.style_mut().visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, theme.focus_ring);
+    ui.style_mut().visuals.widgets.active.bg_fill = input_bg;
+    ui.style_mut().visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, theme.accent);
+    ui.style_mut().visuals.widgets.open.bg_fill = input_bg;
+    ui.style_mut().visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, theme.accent);
+}
+
+/// Frameless dropdown menu item, accent-colored when selected (the standard
+/// combobox menu-item look). Pair with [`style_dropdown`] inside the
+/// `show_ui` closure; the caller handles click + `ui.close_menu()`.
+pub fn dropdown_item(
+    ui: &mut egui::Ui,
+    theme: &ThemeColors,
+    text: impl Into<String>,
+    selected: bool,
+) -> egui::Response {
+    let label = egui::RichText::new(text.into())
+        .color(if selected { theme.accent } else { theme.fg_primary })
+        .size(FONT_SIZE_INPUT);
+    ui.add(egui::Button::new(label).frame(false))
 }
 
 // ============================================================================

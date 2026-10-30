@@ -291,6 +291,8 @@ pub fn t(key: &str) -> &'static str {
         "ai_run" => "Ejecutar",
         "ai_cancel" => "Cancelar",
         "ai_no_key_configured" => "No hay clave API configurada. Añádela en Configuración → Integración de IA.",
+        "send_to_ai" => "Enviar a la IA",
+        "add_to_input" => "Añadir al campo",
         _ => "???",
     }
 }

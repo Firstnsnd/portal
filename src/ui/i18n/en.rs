@@ -309,6 +309,8 @@ pub fn t(key: &str) -> &'static str {
         "ai_run" => "Run",
         "ai_cancel" => "Cancel",
         "ai_no_key_configured" => "No API key configured. Add one in Settings → AI Integration.",
+        "send_to_ai" => "Send to AI",
+        "add_to_input" => "Add to Input",
         _ => "???",
     }
 }

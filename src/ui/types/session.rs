@@ -138,6 +138,32 @@ impl SessionKind {
         guard.take()?.finish().ok()
     }
 
+    // ── AI run-feedback capture ──────────────────────────────────────────
+
+    /// Arm the AI run-output capture tap (see
+    /// [`crate::terminal::ai_capture`]). `None` disarms it.
+    pub fn set_ai_capture(
+        &self,
+        tap: Option<std::sync::Arc<std::sync::Mutex<crate::terminal::ai_capture::AiCapture>>>,
+    ) {
+        let slot = match self {
+            SessionKind::Local(s, _) => &s.ai_capture,
+            SessionKind::Ssh(s, _, _) => &s.ai_capture,
+        };
+        if let Ok(mut guard) = slot.lock() {
+            *guard = tap;
+        }
+    }
+
+    /// A clone of this session's capture-slot handle, so the watcher thread
+    /// can detach its own tap when the capture completes.
+    pub fn ai_capture_slot(&self) -> crate::terminal::ai_capture::AiCaptureSlot {
+        match self {
+            SessionKind::Local(s, _) => Arc::clone(&s.ai_capture),
+            SessionKind::Ssh(s, _, _) => Arc::clone(&s.ai_capture),
+        }
+    }
+
     // ── ZMODEM (unix) ────────────────────────────────────────────────────
 
     /// Whether rz/sz exist on this session's host (probed at connect for

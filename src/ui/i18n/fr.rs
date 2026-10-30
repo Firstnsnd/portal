@@ -291,6 +291,8 @@ pub fn t(key: &str) -> &'static str {
         "ai_run" => "Exécuter",
         "ai_cancel" => "Annuler",
         "ai_no_key_configured" => "Aucune clé API configurée. Ajoutez-en une dans Paramètres → Intégration IA.",
+        "send_to_ai" => "Envoyer à l'IA",
+        "add_to_input" => "Ajouter au champ",
         _ => "???",
     }
 }

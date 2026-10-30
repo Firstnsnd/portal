@@ -277,6 +277,10 @@ pub struct SshSession {
     /// Asciicast recorder slot: `Some` while the session is being recorded.
     /// Cloned into ssh_task at spawn, so the data taps see it.
     pub recorder: Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>>,
+    /// AI run-feedback capture slot: `Some` while a confirmed AI command's
+    /// output is being captured for the chat. Cloned into ssh_task at spawn,
+    /// like the recorder slot.
+    pub ai_capture: crate::terminal::ai_capture::AiCaptureSlot,
     /// ZMODEM tap: watches output for a remote `sz` ZRQINIT and, once armed
     /// or triggered, diverts all output into the transfer bridge. Cloned
     /// into ssh_task at spawn, like the recorder slot.
@@ -426,6 +430,8 @@ impl SshSession {
             },
         ));
         let recorder_clone = Arc::clone(&recorder);
+        let ai_capture = Arc::new(Mutex::new(None));
+        let ai_capture_task = Arc::clone(&ai_capture);
 
         // ZMODEM slots — cloned into ssh_task like the recorder.
         #[cfg(unix)]
@@ -456,6 +462,7 @@ impl SshSession {
                 keepalive_interval, agent_forwarding, port_forward_configs,
                 port_forwards_clone, notifications_clone, metrics_clone,
                 metrics_enabled_clone, auth_prompt_clone, recorder_clone,
+                ai_capture_task,
                 zmodem_tap_task, zmodem_bridge_task, zmodem_support_probe,
                 sftp_support_probe, jump_host,
                 proxy,
@@ -476,6 +483,7 @@ impl SshSession {
             metrics_enabled,
             auth_prompt,
             recorder,
+            ai_capture,
             #[cfg(unix)]
             zmodem_tap,
             #[cfg(unix)]
@@ -513,6 +521,7 @@ impl SshSession {
         metrics_enabled: Arc<AtomicBool>,
         auth_bridge: Arc<super::auth_prompt::AuthPromptBridge>,
         recorder: Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>>,
+        ai_capture: crate::terminal::ai_capture::AiCaptureSlot,
         zmodem_tap: ZmodemTapSlot,
         zmodem_bridge: ZmodemBridgeSlot,
         zmodem_support: ZmodemSupportSlot,
@@ -853,6 +862,15 @@ impl SshSession {
                                                 rec.output(bytes);
                                             }
                                         }
+                                        // AI run-feedback tap (same tap point;
+                                        // only armed while a capture is active).
+                                        if let Ok(slot) = ai_capture.lock() {
+                                            if let Some(cap) = slot.as_ref() {
+                                                if let Ok(mut cap) = cap.lock() {
+                                                    cap.feed(bytes);
+                                                }
+                                            }
+                                        }
                                     },
                                 );
                                 if diverted
@@ -877,6 +895,13 @@ impl SshSession {
                                 if let Ok(mut slot) = recorder.lock() {
                                     if let Some(rec) = slot.as_mut() {
                                         rec.output(&data);
+                                    }
+                                }
+                                if let Ok(slot) = ai_capture.lock() {
+                                    if let Some(cap) = slot.as_ref() {
+                                        if let Ok(mut cap) = cap.lock() {
+                                            cap.feed(&data);
+                                        }
                                     }
                                 }
                             }
@@ -908,6 +933,14 @@ impl SshSession {
                                                 rec.output(bytes);
                                             }
                                         }
+                                        // AI run-feedback tap (same tap point).
+                                        if let Ok(slot) = ai_capture.lock() {
+                                            if let Some(cap) = slot.as_ref() {
+                                                if let Ok(mut cap) = cap.lock() {
+                                                    cap.feed(bytes);
+                                                }
+                                            }
+                                        }
                                     },
                                 );
                                 if diverted
@@ -932,6 +965,13 @@ impl SshSession {
                                 if let Ok(mut slot) = recorder.lock() {
                                     if let Some(rec) = slot.as_mut() {
                                         rec.output(&data);
+                                    }
+                                }
+                                if let Ok(slot) = ai_capture.lock() {
+                                    if let Some(cap) = slot.as_ref() {
+                                        if let Ok(mut cap) = cap.lock() {
+                                            cap.feed(&data);
+                                        }
                                     }
                                 }
                             }

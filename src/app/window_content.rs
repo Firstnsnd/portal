@@ -1318,6 +1318,29 @@ impl PortalApp {
                         }
                     }
                 }
+                PaneAction::SendSelectionToAi => {
+                    let window = &mut self.windows[window_idx];
+                    if let Some(session) = window.tabs[active].sessions.get(idx) {
+                        if let Some(text) =
+                            crate::ui::terminal::render::selected_text_of(session)
+                        {
+                            let tab = &mut window.tabs[active];
+                            {
+                                let mut ai = tab.ai_chat.lock().unwrap();
+                                // Append to any existing draft so a
+                                // half-typed question survives.
+                                if !ai.input.is_empty() {
+                                    ai.input.push('\n');
+                                }
+                                ai.input.push_str(&text);
+                                ai.open = true;
+                            }
+                            // The AI drawer and tools drawer share the
+                            // right-hand rail — same exclusion as orb click.
+                            tab.tools_drawer_open = false;
+                        }
+                    }
+                }
                 PaneAction::RemoveHostKey => {
                     let window = &mut self.windows[window_idx];
                     let host_opt = match &window.tabs[active].sessions.get(idx).map(|s| &s.kind) {
@@ -1450,8 +1473,71 @@ impl PortalApp {
                     session.write("\r");
                 }
             } else if let Some(session) = tab.sessions.get_mut(focused) {
-                session.write(&cmd);
+                // Feed the result back to the AI: wrap the command in sentinel
+                // markers (shell echo can't match them — they go through
+                // printf templates), tap the session's output stream, and let
+                // a watcher thread collect the output. The command still runs
+                // interactively exactly as before, visible in the terminal.
+                // The manual path (Copy button) never taps anything.
+                let mut env = session.kind.environment_summary();
+                if let Some(cwd) = &session.cwd {
+                    env.cwd = cwd.clone();
+                }
+                let capture = std::sync::Arc::new(std::sync::Mutex::new(
+                    crate::terminal::ai_capture::AiCapture::new(),
+                ));
+                let slot = session.kind.ai_capture_slot();
+                session.kind.set_ai_capture(Some(std::sync::Arc::clone(&capture)));
+                let wrapped = crate::terminal::ai_capture::wrap_command(&cmd);
+                session.write(&wrapped);
                 session.write("\r");
+
+                let ai = std::sync::Arc::clone(&tab.ai_chat);
+                let llm_config = self.llm_config.clone();
+                // The drawer shares the right rail with the tools drawer; the
+                // feedback will re-open the AI drawer when it lands.
+                tab.tools_drawer_open = false;
+                let _ = std::thread::Builder::new()
+                    .name("ai-run-feedback".to_string())
+                    .spawn(move || {
+                        use crate::terminal::ai_capture::FEEDBACK_TIMEOUT_SECS;
+                        let deadline = std::time::Instant::now()
+                            + std::time::Duration::from_secs(FEEDBACK_TIMEOUT_SECS);
+                        let timed_out;
+                        loop {
+                            let done = capture.lock().map(|c| c.done).unwrap_or(false);
+                            if done || std::time::Instant::now() >= deadline {
+                                timed_out = !done;
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        }
+                        // Detach the tap — but only if no newer Run already
+                        // replaced this capture.
+                        if let Ok(mut slot) = slot.lock() {
+                            if slot.as_ref().is_some_and(|c| std::sync::Arc::ptr_eq(c, &capture)) {
+                                *slot = None;
+                            }
+                        }
+                        let (output, exit_code) = match capture.lock() {
+                            Ok(mut c) => (c.take_output(), c.exit_code),
+                            Err(_) => (String::new(), None),
+                        };
+                        let feedback = crate::terminal::ai_capture::feedback_text(
+                            &cmd, &output, exit_code, timed_out,
+                        );
+                        let messages = {
+                            let mut st = ai.lock().unwrap();
+                            st.push_user(feedback);
+                            // Surface the reply even if the drawer was closed.
+                            st.open = true;
+                            st.messages.clone()
+                        };
+                        crate::ui::state::ai_chat::spawn_chat(
+                            llm_config, String::new(), messages, env, ai,
+                        );
+                        crate::repaint::notify_repaint();
+                    });
             }
         }
     }

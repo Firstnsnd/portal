@@ -309,6 +309,8 @@ pub fn t(key: &str) -> &'static str {
         "ai_run" => "运行",
         "ai_cancel" => "取消",
         "ai_no_key_configured" => "未配置 API 密钥。请在「设置 → AI 接入」中添加。",
+        "send_to_ai" => "发送到 AI",
+        "add_to_input" => "填入输入框",
         _ => "???",
     }
 }
