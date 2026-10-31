@@ -164,7 +164,13 @@ pub fn build_system_prompt(env: &ExecutionEnvironment) -> String {
          {os} ({arch}), shell {shell}, working directory {cwd}. When you suggest \
          a command to run, wrap it in a ```sh code block so it can be executed, \
          and ensure the command is valid for {os} with shell {shell} and working \
-         directory {cwd}.",
+         directory {cwd}.\n\n\
+         Every reply must follow this Markdown contract:\n\
+         - Never use ATX headings (no `#`, `##`, ... `######` lines). Use a \
+         **bold** line for emphasis instead.\n\
+         - Use `- ` for bullet lists and `1.` `2.` for ordered lists.\n\
+         - Do not use Markdown tables; present tabular data as lists.\n\
+         - Write math in LaTeX: inline `$...$`, display `$$...$$`.",
         location = location,
         os = env.os,
         arch = env.arch,
@@ -265,6 +271,12 @@ mod tests {
         assert!(prompt.contains("local machine"));
         // The prompt must instruct code-block formatting so Run works.
         assert!(prompt.contains("```sh"));
+        // The Markdown contract: no ATX headings, dash/number lists only,
+        // no tables, LaTeX math.
+        assert!(prompt.contains("Never use ATX headings"));
+        assert!(prompt.contains("`- ` for bullet lists"));
+        assert!(prompt.contains("Do not use Markdown tables"));
+        assert!(prompt.contains("inline `$...$`"));
     }
 
     #[test]
