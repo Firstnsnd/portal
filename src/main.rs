@@ -226,6 +226,8 @@ impl eframe::App for PortalApp {
             let window = &mut self.windows[window_idx];
 
             // Poll right panel SFTP browser
+            let mut pending_content: Option<(String, Vec<u8>)> = None;
+            let mut pending_too_large: Option<(String, u64)> = None;
             if let Some(ref mut browser) = window.sftp_browser {
                 if browser.transfer.is_some() {
                     sftp_active = true;
@@ -237,36 +239,22 @@ impl eframe::App for PortalApp {
                 if had_transfer && browser.transfer.is_none() && was_download {
                     window.local_browser_right.refresh();
                 }
-                // Handle async file read results for the editor
-                if let Some((path, data)) = browser.pending_file_content.take() {
-                    if let Some(ref mut dialog) = window.sftp_editor_dialog {
-                        if dialog.loading && dialog.panel == ui::types::SftpPanel::RightRemote {
-                            match String::from_utf8(data) {
-                                Ok(text) => {
-                                    dialog.content = text.clone();
-                                    dialog.original_content = text;
-                                    dialog.loading = false;
-                                    dialog.file_path = path;
-                                }
-                                Err(_) => {
-                                    dialog.error = "Not valid UTF-8".to_string();
-                                    dialog.loading = false;
-                                }
-                            }
-                        }
-                    }
-                }
-                if let Some((_path, size)) = browser.pending_file_too_large.take() {
-                    if let Some(ref mut dialog) = window.sftp_editor_dialog {
-                        if dialog.loading && dialog.panel == ui::types::SftpPanel::RightRemote {
-                            dialog.loading = false;
-                            dialog.error = format!("File too large ({} bytes)", size);
-                        }
-                    }
-                }
+                // Park async editor reads; delivered after the borrow ends.
+                pending_content = browser.pending_file_content.take();
+                pending_too_large = browser.pending_file_too_large.take();
+            }
+
+            // Handle async file read results for the editor
+            if let Some((path, data)) = pending_content {
+                window.sftp_editor_deliver_file_content(ui::types::SftpPanel::RightRemote, path, data);
+            }
+            if let Some((_path, size)) = pending_too_large {
+                window.sftp_editor_deliver_file_too_large(ui::types::SftpPanel::RightRemote, size);
             }
 
             // Poll left panel SFTP browser
+            let mut pending_content: Option<(String, Vec<u8>)> = None;
+            let mut pending_too_large: Option<(String, u64)> = None;
             if let Some(ref mut browser) = window.sftp_browser_left {
                 if browser.transfer.is_some() {
                     sftp_active = true;
@@ -278,33 +266,17 @@ impl eframe::App for PortalApp {
                 if had_transfer && browser.transfer.is_none() && was_download {
                     window.local_browser_left.refresh();
                 }
-                // Handle async file read results for the editor
-                if let Some((path, data)) = browser.pending_file_content.take() {
-                    if let Some(ref mut dialog) = window.sftp_editor_dialog {
-                        if dialog.loading && dialog.panel == ui::types::SftpPanel::LeftRemote {
-                            match String::from_utf8(data) {
-                                Ok(text) => {
-                                    dialog.content = text.clone();
-                                    dialog.original_content = text;
-                                    dialog.loading = false;
-                                    dialog.file_path = path;
-                                }
-                                Err(_) => {
-                                    dialog.error = "Not valid UTF-8".to_string();
-                                    dialog.loading = false;
-                                }
-                            }
-                        }
-                    }
-                }
-                if let Some((_path, size)) = browser.pending_file_too_large.take() {
-                    if let Some(ref mut dialog) = window.sftp_editor_dialog {
-                        if dialog.loading && dialog.panel == ui::types::SftpPanel::LeftRemote {
-                            dialog.loading = false;
-                            dialog.error = format!("File too large ({} bytes)", size);
-                        }
-                    }
-                }
+                // Park async editor reads; delivered after the borrow ends.
+                pending_content = browser.pending_file_content.take();
+                pending_too_large = browser.pending_file_too_large.take();
+            }
+
+            // Handle async file read results for the editor
+            if let Some((path, data)) = pending_content {
+                window.sftp_editor_deliver_file_content(ui::types::SftpPanel::LeftRemote, path, data);
+            }
+            if let Some((_path, size)) = pending_too_large {
+                window.sftp_editor_deliver_file_too_large(ui::types::SftpPanel::LeftRemote, size);
             }
         }
 

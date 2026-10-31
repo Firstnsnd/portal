@@ -11,10 +11,27 @@ pub enum SftpPanel {
     RightRemote,
 }
 
+/// Which half of the SFTP view a panel lives in (embedded editors occupy a half).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SftpSide {
+    Left,
+    Right,
+}
+
 impl SftpPanel {
     #[allow(dead_code)]
     pub fn is_local(self) -> bool {
         matches!(self, SftpPanel::LeftLocal | SftpPanel::RightLocal)
+    }
+
+    /// Half of the view this panel belongs to. Drives editor placement,
+    /// per-half keyboard gating, and OS-drop exclusion.
+    pub fn side(self) -> SftpSide {
+        if matches!(self, SftpPanel::LeftLocal | SftpPanel::LeftRemote) {
+            SftpSide::Left
+        } else {
+            SftpSide::Right
+        }
     }
 }
 
@@ -62,8 +79,10 @@ pub struct SftpErrorDialog {
     pub message: String,
 }
 
-/// SFTP editor dialog state
-pub struct SftpEditorDialog {
+/// SFTP file editor embedded in one half of the SFTP view. While open it
+/// replaces that half's file list; `panel` is fixed at open time and routes
+/// read/write I/O to the owning browser.
+pub struct SftpEmbeddedEditor {
     pub panel: SftpPanel,
     pub file_path: String,
     pub file_name: String,
@@ -71,7 +90,46 @@ pub struct SftpEditorDialog {
     pub content: String,
     pub original_content: String,
     pub loading: bool,
-    pub is_new_file: bool,
     pub error: String,
-    pub save_as_name: String,
+    /// Two-step close guard: the first ✕ press while dirty arms this flag
+    /// (✕ turns red); the second press actually closes.
+    pub confirm_close: bool,
+}
+
+impl SftpEmbeddedEditor {
+    pub fn is_dirty(&self) -> bool {
+        self.content != self.original_content
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_panel_side_mapping() {
+        assert_eq!(SftpPanel::LeftLocal.side(), SftpSide::Left);
+        assert_eq!(SftpPanel::LeftRemote.side(), SftpSide::Left);
+        assert_eq!(SftpPanel::RightLocal.side(), SftpSide::Right);
+        assert_eq!(SftpPanel::RightRemote.side(), SftpSide::Right);
+    }
+
+    #[test]
+    fn test_editor_dirty_detection() {
+        let editor = SftpEmbeddedEditor {
+            panel: SftpPanel::LeftLocal,
+            file_path: "/tmp/a.txt".to_string(),
+            file_name: "a.txt".to_string(),
+            directory: "/tmp".to_string(),
+            content: "hello".to_string(),
+            original_content: "hello".to_string(),
+            loading: false,
+            error: String::new(),
+            confirm_close: false,
+        };
+        assert!(!editor.is_dirty());
+        let mut edited = editor;
+        edited.content.push('!');
+        assert!(edited.is_dirty());
+    }
 }

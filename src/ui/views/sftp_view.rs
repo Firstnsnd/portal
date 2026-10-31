@@ -16,7 +16,8 @@ use crate::sftp::drag_out::{begin_file_promise_drag, PromiseSpec};
 use crate::sftp::drop_planner::{plan_os_drop, DropSide};
 use crate::ui::pane_view::{ViewActions, WindowContext};
 use crate::ui::pane::AppWindow;
-use crate::ui::types::sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog, SftpPanel};
+use crate::ui::types::sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpErrorDialog, SftpPanel};
+use crate::ui::views::sftp::editor::{EditorOutput, execute_editor_save, open_editor_in_side, render_embedded_editor};
 use crate::ui::types::TerminalSession;
 use crate::sftp::{SftpConnectionState, SftpEntryKind};
 use crate::config;
@@ -97,17 +98,26 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         }
     }
 
+    // Halves currently occupied by an embedded editor (no drop target and no
+    // file-panel keyboard shortcuts there).
+    let left_editor_open = window.sftp_editor_left.is_some();
+    let right_editor_open = window.sftp_editor_right.is_some();
+
     // ── OS-level drop intake (Finder → panel) ──
     // DroppedFile events are a one-frame pulse from egui-winit; take them
-    // once here. Skipped while the editor dialog is open (it swallows focus).
-    if window.sftp_editor_dialog.is_none() {
-        let dropped: Vec<std::path::PathBuf> = ui.ctx().input(|i| {
-            i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect()
-        });
-        if !dropped.is_empty() {
-            if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
-                let active_hint = if window.sftp_active_side_left { DropSide::Left } else { DropSide::Right };
-                let side = resolve_os_drop_target(pos, left_panel_rect, right_panel_rect, active_hint);
+    // once here. A half occupied by an embedded editor is not a drop target.
+    let dropped: Vec<std::path::PathBuf> = ui.ctx().input(|i| {
+        i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect()
+    });
+    if !dropped.is_empty() {
+        if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
+            let active_hint = if window.sftp_active_side_left { DropSide::Left } else { DropSide::Right };
+            let side = resolve_os_drop_target(pos, left_panel_rect, right_panel_rect, active_hint);
+            let editor_covers_target = match side {
+                DropSide::Left => left_editor_open,
+                DropSide::Right => right_editor_open,
+            };
+            if !editor_covers_target {
                 match os_drop_target_for(window, side) {
                     OsDropResolution::Target(target) => {
                         let plan = plan_os_drop(&dropped, &target, |p: &std::path::Path| p.is_dir());
@@ -138,8 +148,12 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     let mut left_disconnect_request = false;
     let mut left_toggle_hidden_files = false;
     let mut left_remote_reconnect_request = false;
+    let mut left_editor_output: Option<EditorOutput> = None;
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(left_panel_rect), |ui| {
-        if window.left_panel_is_local {
+        // An embedded editor replaces the whole half while it's open.
+        if let Some(editor) = window.sftp_editor_left.as_mut() {
+            left_editor_output = Some(render_embedded_editor(editor, "left", ui, cx));
+        } else if window.left_panel_is_local {
             // ── LEFT PANEL: Local ──
             // Path bar with breadcrumbs
             egui::Frame {
@@ -234,14 +248,13 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                 window.sftp_active_panel_is_local,
                 &cx.language,
                 "local_left_scroll",
-                window.sftp_editor_dialog.is_some(),
+                left_editor_open,
                 &mut local_left_move_to_dir,
             );
         } else {
             // ── LEFT PANEL: Remote (independent connection) ──
             let sftp_left_remote_refresh_start = window.sftp_left_remote_refresh_start;
             let sftp_active_panel_is_local = window.sftp_active_panel_is_local;
-            let sftp_editor_dialog_is_some = window.sftp_editor_dialog.is_some();
 
             match window.sftp_browser_left.as_mut() {
                 None => {
@@ -531,7 +544,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                                 sftp_active_panel_is_local,
                                 &cx.language,
                                 "left_remote_scroll",
-                                sftp_editor_dialog_is_some,
+                                left_editor_open,
                                 &mut left_remote_move_to_dir,
                             );
                         }
@@ -601,9 +614,13 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     let mut right_disconnect_request = false;
     let mut right_toggle_hidden_files = false;
     let mut right_remote_reconnect_request = false;
+    let mut right_editor_output: Option<EditorOutput> = None;
 
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(right_panel_rect), |ui| {
-        if window.right_panel_is_local {
+        // An embedded editor replaces the whole half while it's open.
+        if let Some(editor) = window.sftp_editor_right.as_mut() {
+            right_editor_output = Some(render_embedded_editor(editor, "right", ui, cx));
+        } else if window.right_panel_is_local {
             // ── RIGHT PANEL: Local ──
             egui::Frame {
                 fill: cx.theme.bg_secondary,
@@ -692,14 +709,13 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                 !window.sftp_active_panel_is_local,
                 &cx.language,
                 "local_right_scroll",
-                window.sftp_editor_dialog.is_some(),
+                right_editor_open,
                 &mut local_right_move_to_dir,
             );
         } else {
             // ── RIGHT PANEL: Remote (host list or remote browser) ──
             let sftp_remote_refresh_start = window.sftp_remote_refresh_start;
             let sftp_active_panel_is_local = window.sftp_active_panel_is_local;
-            let sftp_editor_dialog_is_some = window.sftp_editor_dialog.is_some();
 
             match window.sftp_browser.as_mut() {
                 None => {
@@ -981,7 +997,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                                 !sftp_active_panel_is_local,
                                 &cx.language,
                                 "right_remote_scroll",
-                                sftp_editor_dialog_is_some,
+                                right_editor_open,
                                 &mut remote_move_to_dir,
                             );
                         }
@@ -1255,32 +1271,40 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
             if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
                 let active_hint = if window.sftp_active_side_left { DropSide::Left } else { DropSide::Right };
                 let side = resolve_os_drop_target(pos, left_panel_rect, right_panel_rect, active_hint);
-                let panel_rect = match side {
-                    DropSide::Left => left_panel_rect,
-                    DropSide::Right => right_panel_rect,
+                // A half showing an embedded editor is not a drop target —
+                // no highlight, no badge.
+                let editor_covers_target = match side {
+                    DropSide::Left => left_editor_open,
+                    DropSide::Right => right_editor_open,
                 };
-                let inner = panel_rect.shrink(2.0);
-                ui.painter().rect_filled(inner, tokens::RADIUS_SM, cx.theme.accent_alpha(24));
-                ui.painter().rect_stroke(inner, tokens::RADIUS_SM, egui::Stroke::new(2.0, cx.theme.accent));
+                if !editor_covers_target {
+                    let panel_rect = match side {
+                        DropSide::Left => left_panel_rect,
+                        DropSide::Right => right_panel_rect,
+                    };
+                    let inner = panel_rect.shrink(2.0);
+                    ui.painter().rect_filled(inner, tokens::RADIUS_SM, cx.theme.accent_alpha(24));
+                    ui.painter().rect_stroke(inner, tokens::RADIUS_SM, egui::Stroke::new(2.0, cx.theme.accent));
 
-                // "⤓ Drop to Upload" badge at the top of the target panel
-                let badge_text = format!("\u{2913} {}", cx.language.t("drop_to_upload"));
-                let galley = ui.painter().layout_no_wrap(
-                    badge_text,
-                    egui::FontId::proportional(tokens::FONT_SM),
-                    cx.theme.accent,
-                );
-                let padding = egui::vec2(tokens::SPACE_MD, tokens::SPACE_XS);
-                let badge_rect = egui::Rect::from_min_size(
-                    egui::pos2(
-                        panel_rect.center().x - (galley.size().x + padding.x * 2.0) / 2.0,
-                        panel_rect.top() + tokens::SPACE_LG,
-                    ),
-                    galley.size() + padding * 2.0,
-                );
-                ui.painter().rect_filled(badge_rect, tokens::RADIUS_SM, cx.theme.bg_elevated);
-                ui.painter().rect_stroke(badge_rect, tokens::RADIUS_SM, egui::Stroke::new(1.0, cx.theme.accent));
-                ui.painter().galley(badge_rect.min + padding, galley, cx.theme.fg_primary);
+                    // "⤓ Drop to Upload" badge at the top of the target panel
+                    let badge_text = format!("\u{2913} {}", cx.language.t("drop_to_upload"));
+                    let galley = ui.painter().layout_no_wrap(
+                        badge_text,
+                        egui::FontId::proportional(tokens::FONT_SM),
+                        cx.theme.accent,
+                    );
+                    let padding = egui::vec2(tokens::SPACE_MD, tokens::SPACE_XS);
+                    let badge_rect = egui::Rect::from_min_size(
+                        egui::pos2(
+                            panel_rect.center().x - (galley.size().x + padding.x * 2.0) / 2.0,
+                            panel_rect.top() + tokens::SPACE_LG,
+                        ),
+                        galley.size() + padding * 2.0,
+                    );
+                    ui.painter().rect_filled(badge_rect, tokens::RADIUS_SM, cx.theme.bg_elevated);
+                    ui.painter().rect_stroke(badge_rect, tokens::RADIUS_SM, egui::Stroke::new(1.0, cx.theme.accent));
+                    ui.painter().galley(badge_rect.min + padding, galley, cx.theme.fg_primary);
+                }
             }
         }
 
@@ -1292,19 +1316,26 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                 if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                     let active_hint = if window.sftp_active_side_left { DropSide::Left } else { DropSide::Right };
                     let side = resolve_os_drop_target(pos, left_panel_rect, right_panel_rect, active_hint);
-                    let target = match side {
-                        DropSide::Left if window.left_panel_is_local => SftpPanel::LeftLocal,
-                        DropSide::Left => SftpPanel::LeftRemote,
-                        DropSide::Right if window.right_panel_is_local => SftpPanel::RightLocal,
-                        DropSide::Right => SftpPanel::RightRemote,
+                    // Releasing over an embedded editor is a no-op.
+                    let editor_covers_target = match side {
+                        DropSide::Left => left_editor_open,
+                        DropSide::Right => right_editor_open,
                     };
-                    let dirs = panel_dirs_for(window);
-                    let plan = plan_in_app_drop(&payload, payload.origin, target, &dirs);
-                    if let Some(detail) = execute_transfer_plan(window, &plan) {
-                        window.sftp_error_dialog = Some(SftpErrorDialog {
-                            title: cx.language.t("drop_not_connected").to_string(),
-                            message: detail,
-                        });
+                    if !editor_covers_target {
+                        let target = match side {
+                            DropSide::Left if window.left_panel_is_local => SftpPanel::LeftLocal,
+                            DropSide::Left => SftpPanel::LeftRemote,
+                            DropSide::Right if window.right_panel_is_local => SftpPanel::RightLocal,
+                            DropSide::Right => SftpPanel::RightRemote,
+                        };
+                        let dirs = panel_dirs_for(window);
+                        let plan = plan_in_app_drop(&payload, payload.origin, target, &dirs);
+                        if let Some(detail) = execute_transfer_plan(window, &plan) {
+                            window.sftp_error_dialog = Some(SftpErrorDialog {
+                                title: cx.language.t("drop_not_connected").to_string(),
+                                message: detail,
+                            });
+                        }
                     }
                 }
             }
@@ -1596,7 +1627,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                                     egui::RichText::new(cx.language.t("edit_file")).size(12.0).color(cx.theme.fg_primary)
                                 ).frame(false)
                             ).clicked() {
-                                open_file_for_editing_with_panel(window, panel, &entry_names[0]);
+                                open_editor_in_side(window, panel, &entry_names[0]);
                                 close_menu = true;
                             }
 
@@ -1663,12 +1694,18 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     // ── Render all dialogs (rename, new folder, new file, delete confirm, error) ──
     render_sftp_dialogs(window, ui, cx);
 
+    // ── Resolve embedded-editor outputs (close / save) ──
+    resolve_editor_output(window, left_editor_output, true);
+    resolve_editor_output(window, right_editor_output, false);
+
     // ── Handle double-click open file requests ──
+    // Each panel routes through the editor occupying its own half — the old
+    // path hardcoded the left/right browsers and opened the wrong file.
     if let Some(idx) = local_left_open_file_req {
         let filtered = window.local_browser_left.filtered_entries();
         if let Some(entry) = filtered.get(idx) {
             if entry.kind != SftpEntryKind::Directory {
-                open_file_for_editing(window, true, &entry.name.clone());
+                open_editor_in_side(window, SftpPanel::LeftLocal, &entry.name.clone());
             }
         }
     }
@@ -1676,7 +1713,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         let filtered = window.local_browser_right.filtered_entries();
         if let Some(entry) = filtered.get(idx) {
             if entry.kind != SftpEntryKind::Directory {
-                open_file_for_editing(window, true, &entry.name.clone());
+                open_editor_in_side(window, SftpPanel::RightLocal, &entry.name.clone());
             }
         }
     }
@@ -1685,7 +1722,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
             let filtered = browser.filtered_entries();
             if let Some(entry) = filtered.get(idx) {
                 if entry.kind != SftpEntryKind::Directory {
-                    open_file_for_editing(window, false, &entry.name.clone());
+                    open_editor_in_side(window, SftpPanel::RightRemote, &entry.name.clone());
                 }
             }
         }
@@ -1695,16 +1732,44 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
             let filtered = browser.filtered_entries();
             if let Some(entry) = filtered.get(idx) {
                 if entry.kind != SftpEntryKind::Directory {
-                    open_file_for_editing(window, false, &entry.name.clone());
+                    open_editor_in_side(window, SftpPanel::LeftRemote, &entry.name.clone());
                 }
             }
         }
     }
 
-    // ── Editor dialog ──
-    render_editor_dialog(window, ui, cx);
-
     ViewActions::default()
+}
+
+/// Apply one embedded editor's output to its half: close on demand, or
+/// persist the edited content (closing on success, surfacing errors inline).
+fn resolve_editor_output(window: &mut AppWindow, out: Option<EditorOutput>, left: bool) {
+    let Some(out) = out else { return };
+    let slot = if left { &mut window.sftp_editor_left } else { &mut window.sftp_editor_right };
+    if out.close {
+        *slot = None;
+        return;
+    }
+    if let Some(content) = out.save {
+        let target = slot.as_ref().map(|e| (e.panel, e.file_path.clone()));
+        if let Some((panel, path)) = target {
+            match execute_editor_save(window, panel, &path, &content) {
+                Ok(()) => {
+                    if left {
+                        window.sftp_editor_left = None;
+                    } else {
+                        window.sftp_editor_right = None;
+                    }
+                }
+                Err(e) => {
+                    let slot = if left { window.sftp_editor_left.as_mut() } else { window.sftp_editor_right.as_mut() };
+                    if let Some(ed) = slot {
+                        ed.error = e;
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Render SFTP-related dialogs
@@ -2119,466 +2184,119 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
     }
 }
 
-/// Open a file for editing in the built-in editor
-fn open_file_for_editing(window: &mut AppWindow, is_local: bool, file_name: &str) {
-    if is_local {
-        let dir = window.local_browser_left.current_path.clone();
-        match window.local_browser_left.read_file(file_name) {
-            Ok(content) => {
-                window.sftp_editor_dialog = Some(SftpEditorDialog {
-                    panel: SftpPanel::LeftLocal,
-                    file_path: format!("{}/{}", dir.trim_end_matches('/'), file_name),
-                    file_name: file_name.to_string(),
-                    directory: dir,
-                    content: content.clone(),
-                    original_content: content,
-                    loading: false,
-                    is_new_file: false,
-                    error: String::new(),
-                    save_as_name: String::new(),
-                });
-            }
-            Err(e) => {
-                window.sftp_editor_dialog = Some(SftpEditorDialog {
-                    panel: SftpPanel::LeftLocal,
-                    file_path: format!("{}/{}", dir.trim_end_matches('/'), file_name),
-                    file_name: file_name.to_string(),
-                    directory: dir,
-                    content: String::new(),
-                    original_content: String::new(),
-                    loading: false,
-                    is_new_file: false,
-                    error: e,
-                    save_as_name: String::new(),
-                });
-            }
-        }
-    } else if let Some(ref mut browser) = window.sftp_browser {
-        let dir = browser.current_path.clone();
-        let full_path = format!("{}/{}", dir.trim_end_matches('/'), file_name);
-        browser.read_file(&full_path);
-        window.sftp_editor_dialog = Some(SftpEditorDialog {
-            panel: SftpPanel::RightRemote,
-            file_path: full_path,
-            file_name: file_name.to_string(),
-            directory: dir,
-            content: String::new(),
-            original_content: String::new(),
-            loading: true,
-            is_new_file: false,
+#[cfg(test)]
+mod editor_resolve_tests {
+    use super::*;
+    use crate::ui::pane::test_tab;
+    use crate::ui::types::sftp_types::SftpEmbeddedEditor;
+
+    fn test_window(tag: &str) -> AppWindow {
+        AppWindow::new_window(
+            egui::ViewportId(egui::Id::new(format!("resolve-test-{}", tag))),
+            "Portal",
+            test_tab("Tab 1"),
+            1,
+        )
+    }
+
+    fn make_editor(panel: SftpPanel, file_path: String) -> SftpEmbeddedEditor {
+        SftpEmbeddedEditor {
+            panel,
+            file_path,
+            file_name: "a.txt".to_string(),
+            directory: String::new(),
+            content: "buffer".to_string(),
+            original_content: "buffer".to_string(),
+            loading: false,
             error: String::new(),
-            save_as_name: String::new(),
-        });
-    }
-}
-
-/// Open a file for editing with panel support
-fn open_file_for_editing_with_panel(window: &mut AppWindow, panel: SftpPanel, file_name: &str) {
-    match panel {
-        SftpPanel::LeftLocal => {
-            let dir = window.local_browser_left.current_path.clone();
-            match window.local_browser_left.read_file(file_name) {
-                Ok(content) => {
-                    window.sftp_editor_dialog = Some(SftpEditorDialog {
-                        panel: SftpPanel::LeftLocal,
-                        file_path: format!("{}/{}", dir.trim_end_matches('/'), file_name),
-                        file_name: file_name.to_string(),
-                        directory: dir,
-                        content: content.clone(),
-                        original_content: content,
-                        loading: false,
-                        is_new_file: false,
-                        error: String::new(),
-                        save_as_name: String::new(),
-                    });
-                }
-                Err(e) => {
-                    window.sftp_editor_dialog = Some(SftpEditorDialog {
-                        panel: SftpPanel::LeftLocal,
-                        file_path: format!("{}/{}", dir.trim_end_matches('/'), file_name),
-                        file_name: file_name.to_string(),
-                        directory: dir,
-                        content: String::new(),
-                        original_content: String::new(),
-                        loading: false,
-                        is_new_file: false,
-                        error: e,
-                        save_as_name: String::new(),
-                    });
-                }
-            }
-        }
-        SftpPanel::LeftRemote => {
-            if let Some(ref mut browser) = window.sftp_browser_left {
-                let dir = browser.current_path.clone();
-                let full_path = format!("{}/{}", dir.trim_end_matches('/'), file_name);
-                browser.read_file(&full_path);
-                window.sftp_editor_dialog = Some(SftpEditorDialog {
-                    panel: SftpPanel::LeftRemote,
-                    file_path: full_path,
-                    file_name: file_name.to_string(),
-                    directory: dir,
-                    content: String::new(),
-                    original_content: String::new(),
-                    loading: true,
-                    is_new_file: false,
-                    error: String::new(),
-                    save_as_name: String::new(),
-                });
-            }
-        }
-        SftpPanel::RightRemote => {
-            if let Some(ref mut browser) = window.sftp_browser {
-                let dir = browser.current_path.clone();
-                let full_path = format!("{}/{}", dir.trim_end_matches('/'), file_name);
-                browser.read_file(&full_path);
-                window.sftp_editor_dialog = Some(SftpEditorDialog {
-                    panel: SftpPanel::RightRemote,
-                    file_path: full_path,
-                    file_name: file_name.to_string(),
-                    directory: dir,
-                    content: String::new(),
-                    original_content: String::new(),
-                    loading: true,
-                    is_new_file: false,
-                    error: String::new(),
-                    save_as_name: String::new(),
-                });
-            }
-        }
-        SftpPanel::RightLocal => {
-            let dir = window.local_browser_right.current_path.clone();
-            match window.local_browser_right.read_file(file_name) {
-                Ok(content) => {
-                    window.sftp_editor_dialog = Some(SftpEditorDialog {
-                        panel: SftpPanel::RightLocal,
-                        file_path: format!("{}/{}", dir.trim_end_matches('/'), file_name),
-                        file_name: file_name.to_string(),
-                        directory: dir,
-                        content: content.clone(),
-                        original_content: content,
-                        loading: false,
-                        is_new_file: false,
-                        error: String::new(),
-                        save_as_name: String::new(),
-                    });
-                }
-                Err(e) => {
-                    window.sftp_editor_dialog = Some(SftpEditorDialog {
-                        panel: SftpPanel::RightLocal,
-                        file_path: format!("{}/{}", dir.trim_end_matches('/'), file_name),
-                        file_name: file_name.to_string(),
-                        directory: dir,
-                        content: String::new(),
-                        original_content: String::new(),
-                        loading: false,
-                        is_new_file: false,
-                        error: e,
-                        save_as_name: String::new(),
-                    });
-                }
-            }
-        }
-    }
-}
-
-/// Render the editor dialog
-pub fn render_editor_dialog(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut WindowContext) {
-    let mut close_editor = false;
-    let mut save_action: Option<(SftpPanel, String, String)> = None;
-
-    if let Some(ref mut dialog) = window.sftp_editor_dialog {
-        let has_unsaved = dialog.content != dialog.original_content;
-
-        let mut open = true;
-        egui::Window::new("sftp_editor")
-            .id(egui::Id::new("sftp_editor_window"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .min_size(egui::vec2(400.0, 200.0))
-            .default_width(680.0)
-            .default_height(500.0)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .pivot(egui::Align2::CENTER_CENTER)
-            .title_bar(false)
-            .frame(egui::Frame {
-                fill: cx.theme.bg_primary,
-                rounding: egui::Rounding::same(crate::ui::tokens::DIALOG_ROUNDING),
-                inner_margin: egui::Margin::ZERO,
-                stroke: egui::Stroke::new(1.0, cx.theme.border),
-                shadow: egui::epaint::Shadow {
-                    offset: egui::vec2(0.0, 6.0),
-                    blur: 24.0,
-                    spread: 4.0,
-                    color: egui::Color32::from_black_alpha(100),
-                },
-                ..Default::default()
-            })
-            .show(ui.ctx(), |ui| {
-                let is_new_unnamed = dialog.is_new_file && dialog.file_path.is_empty();
-
-                // ── Title bar ──
-                {
-                    let title_frame = egui::Frame {
-                        fill: cx.theme.bg_secondary,
-                        inner_margin: egui::Margin { left: 16.0, right: 16.0, top: 12.0, bottom: 12.0 },
-                        rounding: egui::Rounding { nw: crate::ui::tokens::DIALOG_ROUNDING, ne: crate::ui::tokens::DIALOG_ROUNDING, sw: 0.0, se: 0.0 },
-                        ..Default::default()
-                    };
-                    title_frame.show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("\u{1F4C4}").size(14.0).color(cx.theme.accent));
-                            ui.add_space(6.0);
-                            ui.label(egui::RichText::new(&dialog.file_name).size(13.0).color(cx.theme.fg_primary).strong());
-                            if has_unsaved {
-                                ui.add_space(4.0);
-                                ui.label(egui::RichText::new("\u{25CF}").size(10.0).color(cx.theme.accent));
-                            }
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.add(
-                                    egui::Button::new(
-                                        egui::RichText::new("\u{2715}").size(12.0).color(cx.theme.fg_dim)
-                                    ).frame(false)
-                                ).clicked() {
-                                    close_editor = true;
-                                }
-                                ui.add_space(8.0);
-                                if !dialog.directory.is_empty() {
-                                    let dir_display = if dialog.directory.len() > 40 {
-                                        format!("...{}", &dialog.directory[dialog.directory.len()-37..])
-                                    } else {
-                                        dialog.directory.clone()
-                                    };
-                                    ui.label(egui::RichText::new(dir_display).size(11.0).color(cx.theme.fg_dim).family(egui::FontFamily::Monospace));
-                                }
-                            });
-                        });
-                    });
-                }
-
-                // Separator line
-                let sep_rect = ui.available_rect_before_wrap();
-                ui.painter().hline(
-                    sep_rect.min.x..=sep_rect.max.x,
-                    sep_rect.min.y,
-                    egui::Stroke::new(1.0, cx.theme.border),
-                );
-
-                if dialog.loading {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(60.0);
-                        ui.spinner();
-                        ui.add_space(8.0);
-                        ui.label(egui::RichText::new(cx.language.t("loading")).color(cx.theme.fg_dim));
-                    });
-                    return;
-                }
-
-                if !dialog.error.is_empty() {
-                    let err_frame = egui::Frame {
-                        fill: cx.theme.bg_primary,
-                        inner_margin: egui::Margin::same(20.0),
-                        ..Default::default()
-                    };
-                    err_frame.show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("\u{26A0}").size(16.0).color(cx.theme.red));
-                            ui.add_space(6.0);
-                            ui.label(egui::RichText::new(&dialog.error).color(cx.theme.red).size(12.0));
-                        });
-                        ui.add_space(16.0);
-                        ui.horizontal(|ui| {
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.add(
-                                    egui::Button::new(
-                                        egui::RichText::new(cx.language.t("cancel")).color(cx.theme.fg_dim).size(13.0)
-                                    )
-                                    .fill(cx.theme.bg_elevated)
-                                    .rounding(6.0)
-                                    .min_size(egui::vec2(70.0, 32.0))
-                                ).clicked() {
-                                    close_editor = true;
-                                }
-                            });
-                        });
-                    });
-                    return;
-                }
-
-                // ── New file name input ──
-                if is_new_unnamed {
-                    let name_frame = egui::Frame {
-                        fill: cx.theme.bg_secondary,
-                        inner_margin: egui::Margin { left: 16.0, right: 16.0, top: 8.0, bottom: 8.0 },
-                        ..Default::default()
-                    };
-                    name_frame.show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(cx.language.t("file_name")).size(12.0).color(cx.theme.fg_dim));
-                            ui.add_space(6.0);
-                            ui.add(
-                                egui::TextEdit::singleline(&mut dialog.save_as_name)
-                                    .desired_width(ui.available_width())
-                                    .font(egui::FontId::monospace(12.0))
-                                    .hint_text(egui::RichText::new(cx.language.t("file_name")).color(cx.theme.hint_color()).italics())
-                                    .text_color(cx.theme.fg_primary)
-                            );
-                        });
-                    });
-                    let sep_rect2 = ui.available_rect_before_wrap();
-                    ui.painter().hline(
-                        sep_rect2.min.x..=sep_rect2.max.x,
-                        sep_rect2.min.y,
-                        egui::Stroke::new(1.0, cx.theme.border),
-                    );
-                }
-
-                // ── Code editor area ──
-                {
-                    let editor_frame = egui::Frame {
-                        fill: cx.theme.bg_primary,
-                        inner_margin: egui::Margin { left: 4.0, right: 4.0, top: 4.0, bottom: 4.0 },
-                        ..Default::default()
-                    };
-                    let max_editor_h = 500.0_f32;
-                    editor_frame.show(ui, |ui| {
-                        egui::ScrollArea::both()
-                            .max_height(max_editor_h)
-                            .show(ui, |ui| {
-                                let response = ui.add(
-                                    egui::TextEdit::multiline(&mut dialog.content)
-                                        .id(egui::Id::new("sftp_editor_content"))
-                                        .desired_width(f32::INFINITY)
-                                        .desired_rows(20)
-                                        .font(egui::FontId::monospace(cx.font_size))
-                                        .code_editor()
-                                        .lock_focus(true)
-                                        .hint_text(egui::RichText::new(cx.language.t("file_content")).color(cx.theme.hint_color()).italics())
-                                        .text_color(cx.theme.fg_primary)
-                                );
-                                let _ = response;
-                            });
-                    });
-                }
-
-                // ── Bottom bar ──
-                {
-                    let sep_rect3 = ui.available_rect_before_wrap();
-                    ui.painter().hline(
-                        sep_rect3.min.x..=sep_rect3.max.x,
-                        sep_rect3.min.y,
-                        egui::Stroke::new(1.0, cx.theme.border),
-                    );
-                    let bar_frame = egui::Frame {
-                        fill: cx.theme.bg_secondary,
-                        inner_margin: egui::Margin { left: 16.0, right: 16.0, top: 8.0, bottom: 8.0 },
-                        rounding: egui::Rounding { nw: 0.0, ne: 0.0, sw: crate::ui::tokens::DIALOG_ROUNDING, se: crate::ui::tokens::DIALOG_ROUNDING },
-                        ..Default::default()
-                    };
-                    bar_frame.show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let line_count = dialog.content.lines().count().max(1);
-                            let char_count = dialog.content.len();
-                            ui.label(
-                                egui::RichText::new(cx.language.tf2("lines_and_chars", &line_count.to_string(), &char_count.to_string()))
-                                    .size(11.0).color(cx.theme.fg_dim).family(egui::FontFamily::Monospace)
-                            );
-
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.add(
-                                    egui::Button::new(
-                                        egui::RichText::new(cx.language.t("save")).color(cx.theme.button_text).size(12.0)
-                                    )
-                                    .fill(cx.theme.accent)
-                                    .rounding(6.0)
-                                    .min_size(egui::vec2(64.0, 28.0))
-                                ).clicked() {
-                                    if is_new_unnamed {
-                                        if !dialog.save_as_name.is_empty() {
-                                            let path = format!(
-                                                "{}/{}",
-                                                dialog.directory.trim_end_matches('/'),
-                                                dialog.save_as_name
-                                            );
-                                            save_action = Some((dialog.panel, path, dialog.content.clone()));
-                                        }
-                                    } else {
-                                        save_action = Some((dialog.panel, dialog.file_path.clone(), dialog.content.clone()));
-                                    }
-                                }
-                                if has_unsaved {
-                                    ui.add_space(4.0);
-                                    ui.label(egui::RichText::new(cx.language.t("unsaved_changes")).color(cx.theme.fg_dim).size(11.0));
-                                }
-                            });
-                        });
-                    });
-                }
-            });
-
-        if !open {
-            close_editor = true;
+            confirm_close: false,
         }
     }
 
-    // Execute save
-    if let Some((panel, path, content)) = save_action {
-        match panel {
-            SftpPanel::LeftLocal => {
-                let file_name = std::path::Path::new(&path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                match window.local_browser_left.write_file(&file_name, &content) {
-                    Ok(_) => {
-                        close_editor = true;
-                    }
-                    Err(e) => {
-                        if let Some(ref mut dialog) = window.sftp_editor_dialog {
-                            dialog.error = e;
-                        }
-                    }
-                }
-            }
-            SftpPanel::LeftRemote => {
-                if let Some(ref mut browser) = window.sftp_browser_left {
-                    browser.write_file(&path, content.as_bytes().to_vec());
-                    let current = browser.current_path.clone();
-                    browser.navigate(&current);
-                    close_editor = true;
-                }
-            }
-            SftpPanel::RightRemote => {
-                if let Some(ref mut browser) = window.sftp_browser {
-                    browser.write_file(&path, content.as_bytes().to_vec());
-                    let current = browser.current_path.clone();
-                    browser.navigate(&current);
-                    close_editor = true;
-                }
-            }
-            SftpPanel::RightLocal => {
-                let file_name = std::path::Path::new(&path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                match window.local_browser_right.write_file(&file_name, &content) {
-                    Ok(_) => {
-                        close_editor = true;
-                    }
-                    Err(e) => {
-                        if let Some(ref mut dialog) = window.sftp_editor_dialog {
-                            dialog.error = e;
-                        }
-                    }
-                }
-            }
+    fn temp_dir_with(tag: &str, files: &[(&str, &str)]) -> String {
+        let dir = std::env::temp_dir().join(format!("portal_resolve_{}_{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, content) in files {
+            std::fs::write(dir.join(name), content).unwrap();
         }
+        dir.to_string_lossy().to_string()
     }
 
-    if close_editor {
-        window.sftp_editor_dialog = None;
+    #[test]
+    fn none_output_is_noop() {
+        let mut window = test_window("noop");
+        window.sftp_editor_left = Some(make_editor(SftpPanel::LeftLocal, "/tmp/a.txt".into()));
+        resolve_editor_output(&mut window, None, true);
+        assert!(window.sftp_editor_left.is_some());
+    }
+
+    #[test]
+    fn close_clears_slot_and_never_touches_file() {
+        let dir = temp_dir_with("close", &[("a.txt", "on disk")]);
+        let mut window = test_window("close");
+        window.local_browser_left.current_path = dir.clone();
+        window.sftp_editor_left = Some(make_editor(SftpPanel::LeftLocal, format!("{}/a.txt", dir)));
+        window.sftp_editor_right = Some(make_editor(SftpPanel::RightLocal, "/tmp/other.txt".into()));
+
+        resolve_editor_output(&mut window, Some(EditorOutput { close: true, save: None }), true);
+        assert!(window.sftp_editor_left.is_none());
+        assert!(window.sftp_editor_right.is_some(), "the other half's editor must survive");
+        assert_eq!(std::fs::read_to_string(format!("{}/a.txt", dir)).unwrap(), "on disk");
+    }
+
+    #[test]
+    fn save_persists_then_closes() {
+        let dir = temp_dir_with("save_ok", &[("a.txt", "old")]);
+        let mut window = test_window("save_ok");
+        window.local_browser_left.current_path = dir.clone();
+        window.sftp_editor_left = Some(make_editor(SftpPanel::LeftLocal, format!("{}/a.txt", dir)));
+
+        resolve_editor_output(
+            &mut window,
+            Some(EditorOutput { close: false, save: Some("saved!".into()) }),
+            true,
+        );
+        assert!(window.sftp_editor_left.is_none(), "successful save closes the editor");
+        assert_eq!(std::fs::read_to_string(format!("{}/a.txt", dir)).unwrap(), "saved!");
+    }
+
+    #[test]
+    fn failed_save_keeps_editor_with_error() {
+        let dir = temp_dir_with("save_err", &[]);
+        std::fs::create_dir(format!("{}/subdir", dir)).unwrap();
+        let mut window = test_window("save_err");
+        window.local_browser_left.current_path = dir.clone();
+        window.sftp_editor_left = Some(make_editor(SftpPanel::LeftLocal, format!("{}/subdir", dir)));
+
+        resolve_editor_output(
+            &mut window,
+            Some(EditorOutput { close: false, save: Some("x".into()) }),
+            true,
+        );
+        let ed = window
+            .sftp_editor_left
+            .as_ref()
+            .expect("failed save keeps the editor open");
+        assert!(!ed.error.is_empty());
+    }
+
+    #[test]
+    fn right_side_save_routes_through_right_browser() {
+        let dir = temp_dir_with("save_right", &[("b.txt", "right-old")]);
+        let mut window = test_window("save_right");
+        window.local_browser_right.current_path = dir.clone();
+        window.sftp_editor_right = Some(make_editor(SftpPanel::RightLocal, format!("{}/b.txt", dir)));
+
+        resolve_editor_output(
+            &mut window,
+            Some(EditorOutput { close: false, save: Some("right-new".into()) }),
+            false,
+        );
+        assert!(window.sftp_editor_right.is_none());
+        assert_eq!(
+            std::fs::read_to_string(format!("{}/b.txt", dir)).unwrap(),
+            "right-new"
+        );
     }
 }

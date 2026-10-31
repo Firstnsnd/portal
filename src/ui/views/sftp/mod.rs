@@ -11,9 +11,11 @@ pub mod format;
 pub mod panel;
 pub mod progress;
 pub mod drop_logic;
+pub mod editor;
 
 // Re-export commonly used types
 pub use types::{DragEntry, DragPayload, SelectionAction, MoveToDirRequest};
 pub use format::{format_transfer_speed, format_file_size, format_permissions};
 pub use panel::{render_breadcrumbs, render_file_panel, apply_selection_action};
 pub use progress::render_transfer_progress;
+pub use editor::{open_editor_in_side, execute_editor_save, render_embedded_editor, EditorOutput};

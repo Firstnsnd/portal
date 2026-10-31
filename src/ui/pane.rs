@@ -77,7 +77,7 @@ use crate::sftp::{LocalBrowser, SftpBrowser};
 use crate::ui::types::{
     session::TerminalSession,
     dialogs::{AppView, BroadcastState, AddHostDialog, CredentialDialog, SnippetViewState, HostFilter},
-    sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEditorDialog, SftpErrorDialog},
+    sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEmbeddedEditor, SftpErrorDialog, SftpPanel, SftpSide},
 };
 
 /// Split direction for pane layout
@@ -385,7 +385,8 @@ pub struct AppWindow {
     pub sftp_new_folder_dialog: Option<SftpNewFolderDialog>,
     pub sftp_new_file_dialog: Option<SftpNewFileDialog>,
     pub sftp_confirm_delete: Option<SftpConfirmDelete>,
-    pub sftp_editor_dialog: Option<SftpEditorDialog>,
+    pub sftp_editor_left: Option<SftpEmbeddedEditor>,  // editor occupying the left half
+    pub sftp_editor_right: Option<SftpEmbeddedEditor>, // editor occupying the right half
     pub sftp_error_dialog: Option<SftpErrorDialog>,
     pub sftp_local_left_refresh_start: Option<std::time::Instant>,
     pub sftp_local_right_refresh_start: Option<std::time::Instant>,
@@ -410,6 +411,47 @@ impl AppWindow {
     /// it to decide when to stand down from re-claiming keyboard focus.
     pub fn ai_composer_id(&self) -> egui::Id {
         egui::Id::new("ai_composer").with(self.viewport_id)
+    }
+
+    /// Deliver an async remote file read to the embedded editor that
+    /// requested it. Safe no-op when the editor was closed (or replaced by
+    /// another file) mid-flight.
+    pub fn sftp_editor_deliver_file_content(&mut self, panel: SftpPanel, path: String, data: Vec<u8>) {
+        let slot = match panel.side() {
+            SftpSide::Left => &mut self.sftp_editor_left,
+            SftpSide::Right => &mut self.sftp_editor_right,
+        };
+        let Some(editor) = slot.as_mut() else { return };
+        if !editor.loading || editor.panel != panel {
+            return;
+        }
+        match String::from_utf8(data) {
+            Ok(text) => {
+                editor.content = text.clone();
+                editor.original_content = text;
+                editor.file_path = path;
+                editor.loading = false;
+            }
+            Err(_) => {
+                editor.error = "Not valid UTF-8".to_string();
+                editor.loading = false;
+            }
+        }
+    }
+
+    /// Deliver a "file exceeds the 10 MB read cap" reply to the requesting
+    /// editor (same routing rules as [`Self::sftp_editor_deliver_file_content`]).
+    pub fn sftp_editor_deliver_file_too_large(&mut self, panel: SftpPanel, size: u64) {
+        let slot = match panel.side() {
+            SftpSide::Left => &mut self.sftp_editor_left,
+            SftpSide::Right => &mut self.sftp_editor_right,
+        };
+        let Some(editor) = slot.as_mut() else { return };
+        if !editor.loading || editor.panel != panel {
+            return;
+        }
+        editor.loading = false;
+        editor.error = format!("File too large ({} bytes)", size);
     }
 
     /// Create a fresh window around a single tab with fresh SFTP/dialog state.
@@ -455,7 +497,8 @@ impl AppWindow {
             sftp_new_folder_dialog: None,
             sftp_new_file_dialog: None,
             sftp_confirm_delete: None,
-            sftp_editor_dialog: None,
+            sftp_editor_left: None,
+            sftp_editor_right: None,
             sftp_error_dialog: None,
             sftp_local_left_refresh_start: None,
             sftp_local_right_refresh_start: None,
@@ -474,26 +517,33 @@ impl AppWindow {
     }
 }
 
+/// Minimal Tab for tests in other modules (pane-local tests use
+/// [`create_test_tab`], which delegates here).
+#[cfg(test)]
+pub(crate) fn test_tab(title: &str) -> Tab {
+    Tab {
+        title: title.to_string(),
+        sessions: vec![],
+        layout: PaneNode::Terminal(0),
+        focused_session: 0,
+        broadcast_enabled: false,
+        tools_drawer_open: false,
+        tools_tab: 0,
+        pending_snippet: None,
+        ai_chat: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::ui::state::ai_chat::AiChatState::default(),
+        )),
+        pending_ai_command: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// Helper to create a minimal Tab for testing
     fn create_test_tab(title: &str) -> Tab {
-        Tab {
-            title: title.to_string(),
-            sessions: vec![],
-            layout: PaneNode::Terminal(0),
-            focused_session: 0,
-            broadcast_enabled: false,
-            tools_drawer_open: false,
-            tools_tab: 0,
-            pending_snippet: None,
-            ai_chat: std::sync::Arc::new(std::sync::Mutex::new(
-                crate::ui::state::ai_chat::AiChatState::default(),
-            )),
-            pending_ai_command: None,
-        }
+        test_tab(title)
     }
 
     #[test]
@@ -821,5 +871,78 @@ mod tests {
             }
             _ => panic!("Tree must remain a Split after closing one of 3 panes"),
         }
+    }
+
+    fn make_loading_editor(panel: SftpPanel) -> SftpEmbeddedEditor {
+        SftpEmbeddedEditor {
+            panel,
+            file_path: "/srv/a.txt".to_string(),
+            file_name: "a.txt".to_string(),
+            directory: "/srv".to_string(),
+            content: String::new(),
+            original_content: String::new(),
+            loading: true,
+            error: String::new(),
+            confirm_close: false,
+        }
+    }
+
+    #[test]
+    fn test_sftp_editor_delivery_routes_by_side() {
+        let mut window = AppWindow::new_window(
+            egui::ViewportId(egui::Id::new("test-editor-win")),
+            "Portal",
+            create_test_tab("Tab 1"),
+            1,
+        );
+        window.sftp_editor_left = Some(make_loading_editor(SftpPanel::LeftRemote));
+
+        // The matching payload lands in the left slot.
+        window.sftp_editor_deliver_file_content(SftpPanel::LeftRemote, "/srv/a.txt".to_string(), b"hello".to_vec());
+        {
+            let ed = window.sftp_editor_left.as_ref().unwrap();
+            assert_eq!(ed.content, "hello");
+            assert_eq!(ed.original_content, "hello");
+            assert_eq!(ed.file_path, "/srv/a.txt");
+            assert!(!ed.loading);
+            assert!(!ed.is_dirty());
+        }
+
+        // A payload for the other side's remote panel must not touch it.
+        window.sftp_editor_deliver_file_content(SftpPanel::RightRemote, "/x".to_string(), b"nope".to_vec());
+        assert_eq!(window.sftp_editor_left.as_ref().unwrap().content, "hello");
+        assert!(window.sftp_editor_right.is_none());
+
+        // A non-loading editor ignores further deliveries.
+        window.sftp_editor_deliver_file_content(SftpPanel::LeftRemote, "/srv/a.txt".to_string(), b"late".to_vec());
+        assert_eq!(window.sftp_editor_left.as_ref().unwrap().content, "hello");
+
+        // Closed editor → delivery is a safe no-op (no panic).
+        window.sftp_editor_left = None;
+        window.sftp_editor_deliver_file_content(SftpPanel::LeftRemote, "/srv/a.txt".to_string(), b"boom".to_vec());
+        assert!(window.sftp_editor_left.is_none());
+    }
+
+    #[test]
+    fn test_sftp_editor_too_large_delivery() {
+        let mut window = AppWindow::new_window(
+            egui::ViewportId(egui::Id::new("test-editor-win2")),
+            "Portal",
+            create_test_tab("Tab 1"),
+            1,
+        );
+        window.sftp_editor_right = Some(make_loading_editor(SftpPanel::RightRemote));
+
+        window.sftp_editor_deliver_file_too_large(SftpPanel::RightRemote, 12_582_912);
+        {
+            let ed = window.sftp_editor_right.as_ref().unwrap();
+            assert!(!ed.loading);
+            assert!(ed.error.contains("File too large"), "error: {}", ed.error);
+            assert!(ed.error.contains("12582912"), "error: {}", ed.error);
+        }
+
+        // Mismatched panel is ignored.
+        window.sftp_editor_deliver_file_too_large(SftpPanel::LeftRemote, 1);
+        assert!(!window.sftp_editor_right.as_ref().unwrap().error.contains("(1 bytes)"));
     }
 }
