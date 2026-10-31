@@ -293,6 +293,12 @@ pub fn t(key: &str) -> &'static str {
         "ai_no_key_configured" => "No hay clave API configurada. Añádela en Configuración → Integración de IA.",
         "send_to_ai" => "Enviar a la IA",
         "add_to_input" => "Añadir al campo",
+        "terminal_background" => "Imagen de fondo",
+        "terminal_background_desc" => "Imagen mostrada detrás de los paneles de terminal, en todas las pestañas y ventanas.",
+        "terminal_background_image" => "Imagen",
+        "choose_image" => "Elegir imagen…",
+        "clear_image" => "Borrar",
+        "background_opacity" => "Opacidad de la imagen",
         _ => "???",
     }
 }

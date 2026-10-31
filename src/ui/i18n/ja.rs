@@ -293,6 +293,12 @@ pub fn t(key: &str) -> &'static str {
         "ai_no_key_configured" => "API キーが設定されていません。設定 → AI 統合で追加してください。",
         "send_to_ai" => "AIに送信",
         "add_to_input" => "入力欄に追加",
+        "terminal_background" => "背景画像",
+        "terminal_background_desc" => "すべてのペイン・タブ・ウィンドウの端末の背後に表示される画像。",
+        "terminal_background_image" => "画像",
+        "choose_image" => "画像を選択…",
+        "clear_image" => "クリア",
+        "background_opacity" => "画像の不透明度",
         _ => "???",
     }
 }

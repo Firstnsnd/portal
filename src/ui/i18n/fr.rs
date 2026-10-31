@@ -293,6 +293,12 @@ pub fn t(key: &str) -> &'static str {
         "ai_no_key_configured" => "Aucune clé API configurée. Ajoutez-en une dans Paramètres → Intégration IA.",
         "send_to_ai" => "Envoyer à l'IA",
         "add_to_input" => "Ajouter au champ",
+        "terminal_background" => "Image d'arrière-plan",
+        "terminal_background_desc" => "Image affichée derrière les volets du terminal, dans tous les onglets et fenêtres.",
+        "terminal_background_image" => "Image",
+        "choose_image" => "Choisir une image…",
+        "clear_image" => "Effacer",
+        "background_opacity" => "Opacité de l'image",
         _ => "???",
     }
 }

@@ -1107,6 +1107,10 @@ impl PortalApp {
         let can_close = self.windows[window_idx].tabs.len() > 1
             || self.windows[window_idx].tabs[active].sessions.len() > 1;
 
+        // Owned value, computed before the pane block below borrows
+        // `self.windows` mutably (TextureHandle clones are cheap).
+        let background = self.ensure_background_texture(ctx);
+
         let pane_result = {
             let window = &mut self.windows[window_idx];
             let ai_composer_id = window.ai_composer_id();
@@ -1141,6 +1145,7 @@ impl PortalApp {
                 self.font_size,
                 &self.language,
                 &self.shortcut_resolver,
+                background,
             )
         };
 

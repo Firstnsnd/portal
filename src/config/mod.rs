@@ -1085,6 +1085,12 @@ pub struct PortalSettings {
     /// Directory ZMODEM downloads land in. Empty/None → ~/Downloads.
     #[serde(default)]
     pub zmodem_download_dir: Option<String>,
+    /// Absolute path of the image painted behind terminal panes (None = off).
+    #[serde(default)]
+    pub terminal_background_image: Option<String>,
+    /// Opacity of the terminal background image, 0.0–1.0.
+    #[serde(default = "default_terminal_background_opacity")]
+    pub terminal_background_opacity: f32,
 }
 
 fn default_true() -> bool {
@@ -1097,6 +1103,10 @@ fn default_keepalive_interval() -> u32 {
 
 fn default_check_for_updates() -> bool {
     true
+}
+
+fn default_terminal_background_opacity() -> f32 {
+    0.35
 }
 
 impl PortalSettings {
@@ -1124,6 +1134,8 @@ impl Default for PortalSettings {
             recordings_max_total_mb: 0,
             restore_sessions: true,
             zmodem_download_dir: None,
+            terminal_background_image: None,
+            terminal_background_opacity: default_terminal_background_opacity(),
         }
     }
 }

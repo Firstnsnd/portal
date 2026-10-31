@@ -12,6 +12,7 @@ use crate::config::{HostEntry, Credential, ConnectionRecord, ShortcutAction, Sni
 use crate::ui::types::session::TerminalSession;
 use crate::ui::pane::{Tab, AppWindow};
 use crate::ui::input::ShortcutResolver;
+use crate::ui::terminal::TerminalBackground;
 use crate::ui::{ThemeColors, ThemePreset, Language, fonts};
 use std::path::PathBuf;
 
@@ -59,6 +60,13 @@ pub struct PortalApp {
     pub restore_sessions: bool,
     /// Mirror of PortalSettings.zmodem_download_dir (Settings → General).
     pub zmodem_download_dir: String,
+    /// Mirror of PortalSettings.terminal_background_image (empty = off).
+    pub terminal_background_image: String,
+    /// Mirror of PortalSettings.terminal_background_opacity.
+    pub terminal_background_opacity: f32,
+    /// Decoded background-texture cache: `(path key, Some(loaded) | None(failed
+    /// — do not retry))`. Re-decodes only when the path key changes.
+    pub terminal_bg_cache: Option<(String, Option<eframe::egui::TextureHandle>)>,
     /// Next periodic retention sweep (hourly; startup already swept).
     pub next_retention_check: std::time::Instant,
     // LLM integration
@@ -129,6 +137,11 @@ impl PortalApp {
             .zmodem_download_dir
             .clone()
             .unwrap_or_default();
+        let terminal_background_image = settings
+            .terminal_background_image
+            .clone()
+            .unwrap_or_default();
+        let terminal_background_opacity = settings.terminal_background_opacity;
 
         // Retention sweep at startup: with auto-record on, recordings would
         // otherwise accumulate forever. Cheap no-op when both limits are 0.
@@ -242,6 +255,9 @@ impl PortalApp {
             recordings_max_total_mb,
             restore_sessions,
             zmodem_download_dir,
+            terminal_background_image,
+            terminal_background_opacity,
+            terminal_bg_cache: None,
             // First periodic sweep one hour after launch (startup already swept).
             next_retention_check: std::time::Instant::now() + std::time::Duration::from_secs(3600),
             llm_config,
@@ -257,6 +273,41 @@ impl PortalApp {
     /// snapshot it within [`SESSION_SAVE_DEBOUNCE`].
     pub fn mark_sessions_dirty(&mut self) {
         self.sessions_dirty = true;
+    }
+
+    /// Prepare the terminal background-image layer for this frame: decode and
+    /// upload the texture only when the configured path changed (opacity edits
+    /// do not reload). A failed decode is cached as `None` so a bad path logs
+    /// once instead of retrying every frame; picking a different file or
+    /// clearing the setting resets the key and recovers.
+    pub fn ensure_background_texture(&mut self, ctx: &eframe::egui::Context) -> TerminalBackground {
+        let key = self.terminal_background_image.trim().to_string();
+        let needs_load = match &self.terminal_bg_cache {
+            None => !key.is_empty(),
+            Some((cached_key, _)) => *cached_key != key,
+        };
+        if needs_load {
+            let texture = if key.is_empty() {
+                None
+            } else {
+                match crate::ui::terminal::background::load_background_image(&key) {
+                    Ok(img) => Some(ctx.load_texture(
+                        "terminal_bg",
+                        img,
+                        eframe::egui::TextureOptions::LINEAR,
+                    )),
+                    Err(e) => {
+                        log::warn!("terminal background image {key:?} failed to load: {e}");
+                        None
+                    }
+                }
+            };
+            self.terminal_bg_cache = Some((key.clone(), texture));
+        }
+        TerminalBackground {
+            texture: self.terminal_bg_cache.as_ref().and_then(|(_, t)| t.clone()),
+            opacity: self.terminal_background_opacity.clamp(0.0, 1.0),
+        }
     }
 
     /// Pull capability probe results from live SSH sessions into the

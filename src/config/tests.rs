@@ -218,6 +218,26 @@ mod tests {
         assert!(!settings.keyboard_shortcuts.is_empty());
         assert_eq!(settings.llm.backend, crate::llm::types::LlmBackend::OpenAiCompatible);
         assert!(!settings.llm.has_api_key);
+        assert!(settings.terminal_background_image.is_none());
+        assert!((settings.terminal_background_opacity - 0.35).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_settings_background_image_additive_compat() {
+        // Old settings.json files have no background fields at all — they
+        // must still load, defaulting to disabled.
+        let legacy: PortalSettings = serde_json::from_str(r#"{"font_size":14.0}"#).unwrap();
+        assert!(legacy.terminal_background_image.is_none());
+        assert!((legacy.terminal_background_opacity - 0.35).abs() < 1e-6);
+
+        // New fields roundtrip through serde when present.
+        let configured: PortalSettings = serde_json::from_str(
+            r#"{"font_size":14.0,"terminal_background_image":"/tmp/x.png",
+                "terminal_background_opacity":0.8}"#,
+        )
+        .unwrap();
+        assert_eq!(configured.terminal_background_image.as_deref(), Some("/tmp/x.png"));
+        assert!((configured.terminal_background_opacity - 0.8).abs() < 1e-6);
     }
 
     #[test]

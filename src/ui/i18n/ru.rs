@@ -293,6 +293,12 @@ pub fn t(key: &str) -> &'static str {
         "ai_no_key_configured" => "API-ключ не настроен. Добавьте его в Настройки → Интеграция ИИ.",
         "send_to_ai" => "Отправить в ИИ",
         "add_to_input" => "В поле ввода",
+        "terminal_background" => "Фоновое изображение",
+        "terminal_background_desc" => "Изображение позади панелей терминала во всех вкладках и окнах.",
+        "terminal_background_image" => "Изображение",
+        "choose_image" => "Выбрать изображение…",
+        "clear_image" => "Очистить",
+        "background_opacity" => "Непрозрачность изображения",
         _ => "???",
     }
 }

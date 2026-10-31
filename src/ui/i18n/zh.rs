@@ -311,6 +311,12 @@ pub fn t(key: &str) -> &'static str {
         "ai_no_key_configured" => "未配置 API 密钥。请在「设置 → AI 接入」中添加。",
         "send_to_ai" => "发送到 AI",
         "add_to_input" => "填入输入框",
+        "terminal_background" => "背景图片",
+        "terminal_background_desc" => "显示在所有终端窗格、标签页和窗口背后的图片。",
+        "terminal_background_image" => "图片",
+        "choose_image" => "选择图片…",
+        "clear_image" => "清除",
+        "background_opacity" => "图片不透明度",
         _ => "???",
     }
 }

@@ -311,6 +311,12 @@ pub fn t(key: &str) -> &'static str {
         "ai_no_key_configured" => "No API key configured. Add one in Settings → AI Integration.",
         "send_to_ai" => "Send to AI",
         "add_to_input" => "Add to Input",
+        "terminal_background" => "Background Image",
+        "terminal_background_desc" => "Image shown behind terminal panes, tabs, and windows.",
+        "terminal_background_image" => "Image",
+        "choose_image" => "Choose Image…",
+        "clear_image" => "Clear",
+        "background_opacity" => "Image Opacity",
         _ => "???",
     }
 }

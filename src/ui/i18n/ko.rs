@@ -293,6 +293,12 @@ pub fn t(key: &str) -> &'static str {
         "ai_no_key_configured" => "API 키가 설정되지 않았습니다. 설정 → AI 통합에서 추가하세요.",
         "send_to_ai" => "AI로 보내기",
         "add_to_input" => "입력창에 추가",
+        "terminal_background" => "배경 이미지",
+        "terminal_background_desc" => "모든 창·탭·분할 창의 터미널 뒤에 표시되는 이미지입니다.",
+        "terminal_background_image" => "이미지",
+        "choose_image" => "이미지 선택…",
+        "clear_image" => "지우기",
+        "background_opacity" => "이미지 불투명도",
         _ => "???",
     }
 }

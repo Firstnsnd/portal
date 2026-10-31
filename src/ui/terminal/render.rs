@@ -13,6 +13,7 @@ use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, split_rect};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
 use crate::ui::input::{key_to_ctrl_byte, key_to_char, ShortcutResolver};
+use super::background::{cover_uv, TerminalBackground};
 
 
 // ---------------------------------------------------------------------------
@@ -114,6 +115,7 @@ pub(crate) fn selected_text_of(session: &TerminalSession) -> Option<String> {
 /// * `theme` - Color theme for rendering
 /// * `font_size` - Monospace font size in points
 /// * `language` - Language for UI text (EN/ZH/JA/KO)
+/// * `background` - Optional background-image layer (texture + opacity)
 ///
 /// # Returns
 ///
@@ -138,6 +140,7 @@ pub fn render_terminal_session(
     font_size: f32,
     language: &Language,
     shortcut_resolver: &ShortcutResolver,
+    background: TerminalBackground,
 ) -> (Option<PaneAction>, Vec<u8>) {
     let font_id = egui::FontId::monospace(font_size);
     let pad_x = 8.0_f32;
@@ -866,6 +869,19 @@ pub fn render_terminal_session(
     let mut pending_2fa: Option<crate::ssh::AuthPrompt> = None;
     if let Ok(grid) = session.grid.lock() {
         painter.rect_filled(pane_rect, 0.0, theme.bg_primary);
+        // Background image sits between the solid fill and the cell painting:
+        // default-bg cells stay transparent (the image shows through) while
+        // ANSI-colored runs paint opaque on top of it. `gamma_multiply` gives
+        // premultiplied-alpha white, matching egui's vertex-color convention.
+        if let Some(tex) = &background.texture {
+            let uv = cover_uv(tex.size_vec2(), pane_rect.size());
+            painter.image(
+                tex.id(),
+                pane_rect,
+                uv,
+                egui::Color32::WHITE.gamma_multiply(background.opacity),
+            );
+        }
         let scrollback_len = grid.scrollback_len();
 
         // ── FIX 4: auto-follow PTY output ────────────────────────────────────
@@ -1830,6 +1846,7 @@ pub fn render_terminal_pane(
     font_size: f32,
     language: &Language,
     shortcut_resolver: &ShortcutResolver,
+    background: TerminalBackground,
 ) -> (Option<PaneAction>, Vec<u8>) {
     if session_idx >= sessions.len() {
         return (None, Vec::new());
@@ -1849,6 +1866,7 @@ pub fn render_terminal_pane(
         can_close_pane,
         theme, font_size, language,
         shortcut_resolver,
+        background,
     )
 }
 
@@ -1871,6 +1889,7 @@ pub fn render_pane_tree(
     font_size: f32,
     language: &Language,
     shortcut_resolver: &ShortcutResolver,
+    background: TerminalBackground,
 ) -> Option<(usize, PaneAction, Vec<u8>)> {
     match node {
         PaneNode::Terminal(idx) => {
@@ -1881,6 +1900,7 @@ pub fn render_pane_tree(
                 can_close_pane,
                 theme, font_size, language,
                 shortcut_resolver,
+                background,
             );
             match action {
                 Some(a) => Some((*idx, a, input_bytes)),
@@ -1929,8 +1949,8 @@ pub fn render_pane_tree(
                 ctx.set_cursor_icon(icon);
             }
 
-            let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, ai_composer_holds_focus, broadcast_state, ime_composing, ime_preedit, key_char_suppress, can_close_pane, theme, font_size, language, shortcut_resolver);
-            let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, ai_composer_holds_focus, broadcast_state, ime_composing, ime_preedit, key_char_suppress, can_close_pane, theme, font_size, language, shortcut_resolver);
+            let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, ai_composer_holds_focus, broadcast_state, ime_composing, ime_preedit, key_char_suppress, can_close_pane, theme, font_size, language, shortcut_resolver, background.clone());
+            let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, ai_composer_holds_focus, broadcast_state, ime_composing, ime_preedit, key_char_suppress, can_close_pane, theme, font_size, language, shortcut_resolver, background);
 
             let result = match (f1, f2) {
                 (Some((_, PaneAction::Focus, _)), Some(other)) => Some(other),

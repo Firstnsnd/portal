@@ -48,6 +48,10 @@ font-kit = "0.14"
 # Colors and styling
 syntect = "5.2"
 
+# Terminal background image decoding (image already in the tree via
+# arboard/eframe; keep default features off to skip rayon/ravif/exr)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+
 # Unicode width detection (CJK double-width characters)
 unicode-width = "0.2"
 

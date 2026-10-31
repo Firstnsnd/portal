@@ -20,13 +20,16 @@
 //!
 //! - **render**: Main terminal rendering functions
 //! - **selection**: Text selection and word boundary detection
+//! - **background**: User-configurable background image layer
 
 pub mod render;
 pub mod selection;
 pub mod auth_prompt_ui;
+pub mod background;
 
 // Re-export commonly used functions
 pub use render::render_pane_tree;
+pub use background::TerminalBackground;
 
 #[cfg(test)]
 #[path = "tests.rs"]

@@ -99,6 +99,12 @@ impl PortalApp {
             } else {
                 Some(self.zmodem_download_dir.trim().to_string())
             },
+            terminal_background_image: if self.terminal_background_image.is_empty() {
+                None
+            } else {
+                Some(self.terminal_background_image.clone())
+            },
+            terminal_background_opacity: self.terminal_background_opacity,
             llm: self.llm_config.clone(),
         };
         crate::config::save_settings(&settings);
@@ -260,6 +266,59 @@ impl PortalApp {
                 *changed = true;
             }
         }
+
+        ui.add_space(SPACE_LG);
+        ui.separator();
+        ui.add_space(SPACE_SM);
+
+        // ── Background image ──
+        // The texture itself loads lazily in render_terminal_content when the
+        // user returns to a terminal view; here we only edit the settings.
+        ui.label(egui::RichText::new(lang.t("terminal_background")).color(theme.fg_primary).size(14.0).strong());
+        ui.add_space(SPACE_XS);
+        ui.label(egui::RichText::new(lang.t("terminal_background_desc")).color(theme.fg_dim).size(FONT_SM));
+
+        ui.horizontal(|ui| {
+            ui.label(widgets::field_label(lang.t("terminal_background_image"), theme));
+            ui.add_space(SPACE_SM);
+            if ui.button(lang.t("choose_image")).clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("images", &["png", "jpg", "jpeg", "gif", "webp", "bmp"])
+                    .pick_file()
+                {
+                    self.terminal_background_image = path.to_string_lossy().to_string();
+                    *changed = true;
+                }
+            }
+            if !self.terminal_background_image.is_empty()
+                && ui.button(lang.t("clear_image")).clicked()
+            {
+                self.terminal_background_image.clear();
+                *changed = true;
+            }
+        });
+        if !self.terminal_background_image.is_empty() {
+            ui.label(
+                egui::RichText::new(&self.terminal_background_image)
+                    .color(theme.hint_color())
+                    .size(FONT_SM),
+            );
+        }
+
+        ui.horizontal(|ui| {
+            ui.label(widgets::field_label(lang.t("background_opacity"), theme));
+            ui.add_space(SPACE_SM);
+            let slider = ui.add(
+                egui::Slider::new(&mut self.terminal_background_opacity, 0.0..=1.0)
+                    .custom_formatter(|v, _| format!("{}%", (v * 100.0).round() as i32))
+                    .custom_parser(|s| {
+                        s.trim().trim_end_matches('%').parse::<f64>().ok().map(|v| v / 100.0)
+                    }),
+            );
+            if slider.changed() {
+                *changed = true;
+            }
+        });
     }
 
     /// Terminal section: scrollback and SSH keepalive.
