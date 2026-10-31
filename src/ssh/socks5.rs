@@ -15,7 +15,6 @@ pub const METHOD_NO_AUTH: u8 = 0x00;
 /// Username/password method (sub-negotiation per RFC 1929). The -D server
 /// only offers no-auth; this is used by the connect-via-SOCKS5-proxy client
 /// (see `proxy.rs`).
-#[allow(dead_code)]
 pub const METHOD_USER_PASS: u8 = 0x02;
 /// No acceptable methods
 pub const METHOD_NONE_ACCEPTABLE: u8 = 0xFF;

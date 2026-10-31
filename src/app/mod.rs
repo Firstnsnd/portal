@@ -10,6 +10,7 @@ mod window_content;
 
 use crate::config::{HostEntry, Credential, ConnectionRecord, ShortcutAction, Snippet};
 use crate::ui::types::session::TerminalSession;
+use crate::ui::types::dialogs::AppView;
 use crate::ui::pane::{Tab, AppWindow};
 use crate::ui::input::ShortcutResolver;
 use crate::ui::terminal::TerminalBackground;
@@ -103,6 +104,26 @@ pub enum SettingsSection {
 const SESSION_SAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_secs(20);
 
 impl PortalApp {
+    /// Native title for a window, derived from its current view + active tab.
+    /// Single source of truth — the per-frame title match used to be
+    /// copy-pasted at every viewport site (and the root window's title was
+    /// sent to the OS twice per frame).
+    pub fn window_title_for(&self, window: &AppWindow) -> String {
+        match window.current_view {
+            AppView::Terminal => window
+                .tabs
+                .get(window.active_tab)
+                .map(|t| t.title.clone())
+                .unwrap_or_else(|| "Terminal".to_string()),
+            AppView::Hosts => self.language.t("hosts").to_string(),
+            AppView::Sftp => self.language.t("sftp").to_string(),
+            AppView::Keychain => self.language.t("keychain").to_string(),
+            AppView::Settings => self.language.t("settings").to_string(),
+            AppView::Snippets => "Snippets".to_string(),
+            AppView::Replay => "Replay".to_string(),
+        }
+    }
+
     /// Create a new PortalApp instance
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // On macOS, ensure windows appear in Dock menu
@@ -219,7 +240,7 @@ impl PortalApp {
         let mut first_tab_iter = first_tabs.into_iter();
         let first_window_tab = first_tab_iter.next().expect("at least one tab");
         let mut first_window =
-            AppWindow::new_window(egui::ViewportId::ROOT, "Portal", first_window_tab, restored_next_id);
+            AppWindow::new_window(egui::ViewportId::ROOT, first_window_tab, restored_next_id);
         first_window.tabs.extend(first_tab_iter);
         if let Some(active) = restored_active_tab {
             first_window.active_tab = active.min(first_window.tabs.len() - 1);

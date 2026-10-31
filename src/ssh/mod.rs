@@ -13,7 +13,7 @@ pub use session::{SshSession, SshConnectionState, SshClient, JumpHostInfo, conne
 #[allow(unused_imports)]
 pub use auth::{HostKeyPolicy, open_ssh_connection, authenticate, connect_and_authenticate};
 #[allow(unused_imports)]
-pub use auth_prompt::{AuthPrompt, AuthPromptBridge, AuthPromptField, PromptMode, PromptError};
+pub use auth_prompt::{AuthPrompt, AuthPromptBridge, AuthPromptField, PromptMode};
 pub use port_forward::{AppNotification, NotificationLevel};
 
 #[cfg(test)]

@@ -406,6 +406,73 @@ mod tests {
     }
 
     #[test]
+    fn test_write_private_file_sets_owner_only_mode() {
+        let dir = std::env::temp_dir().join(format!("portal_priv_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("out.json");
+
+        // Seed a world-readable file first: the helper must tighten it too,
+        // since File::create alone would preserve the existing mode.
+        std::fs::write(&path, "old").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+
+        write_private_file(&path, "{}");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "config files must be owner-only");
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_save_hosts_scrubs_imported_key_content() {
+        // A key already imported into the keychain must never reappear in
+        // hosts.json — including when a later save re-serializes a stale
+        // in-memory entry that still carries the PEM body.
+        let (_tmp, path) = create_temp_file();
+        let mut host = HostEntry::new_ssh(
+            "keyed".to_string(),
+            "example.com".to_string(),
+            22,
+            "ops".to_string(),
+            String::new(),
+            None,
+            Vec::new(),
+        );
+        host.auth = AuthMethod::Key {
+            key_path: String::new(),
+            key_content: "-----BEGIN OPENSSH PRIVATE KEY-----SECRET".to_string(),
+            passphrase: String::new(),
+            key_in_keychain: true, // import already done → no keychain call
+        };
+
+        save_hosts(&path, &[host]);
+        let json = std::fs::read_to_string(&path).unwrap();
+        assert!(!json.contains("SECRET"), "key material leaked into hosts.json: {json}");
+
+        // Roundtrip: the host still loads (with an empty JSON-side key).
+        // load_hosts appends the implicit LOCAL entry, so look ours up by name.
+        let loaded = crate::config::load_hosts(&path);
+        let keyed = loaded.iter().find(|h| h.name == "keyed").expect("saved host missing");
+        match &keyed.auth {
+            AuthMethod::Key { key_content, key_in_keychain, .. } => {
+                assert!(key_content.is_empty());
+                assert!(*key_in_keychain);
+            }
+            other => panic!("expected Key auth, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_resolve_proxy_guards_incomplete_config() {
         // Missing endpoint fields → not resolvable, not a connect error.
         let mut host = HostEntry::new_local();

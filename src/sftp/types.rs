@@ -94,18 +94,27 @@ impl TransferProgress {
         None
     }
 
-    /// Estimated time remaining in seconds, or None if unknown.
-    #[allow(dead_code)]
-    pub fn eta_secs(&self) -> Option<f64> {
-        let elapsed = self.started_at.elapsed().as_secs_f64();
-        if elapsed > 0.0 && self.bytes_transferred > 0 {
-            let bps = (self.bytes_transferred as f64) / elapsed;
-            if bps > 0.0 {
-                let remaining_bytes = self.total_bytes.saturating_sub(self.bytes_transferred);
-                return Some((remaining_bytes as f64) / bps);
-            }
-        }
+}
+
+/// Validate a server-supplied entry name before it is joined onto a local
+/// destination path. Returns `None` for anything that could escape the
+/// destination directory: empty, `.`/`..`, or containing a path separator
+/// (`/`, `\`) or NUL.
+///
+/// A hostile (or compromised) SFTP server fully controls these names.
+/// `Path::join` replaces the base entirely when handed an absolute path, so
+/// an unsanitized name turns a download into an arbitrary-file overwrite.
+/// Every download path — drag-drop planning and recursive directory
+/// traversal alike — must pass names through this before touching disk.
+pub fn safe_download_name(name: &str) -> Option<&str> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains(['/', '\\', '\0'])
+    {
         None
+    } else {
+        Some(name)
     }
 }
 
@@ -145,14 +154,38 @@ pub enum SftpResponse {
         entries: Vec<SftpEntry>,
     },
     Progress(TransferProgress),
-    #[allow(dead_code)]
-    TransferComplete {
-        filename: String,
-        is_upload: bool,
-    },
+    TransferComplete,
     OperationComplete,
     FileContent { path: String, data: Vec<u8> },
     FileTooLarge { path: String, size: u64 },
     Error(String),
     Disconnected,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_download_name;
+
+    #[test]
+    fn plain_names_pass_through() {
+        assert_eq!(safe_download_name("notes.txt"), Some("notes.txt"));
+        assert_eq!(safe_download_name(".zshenv"), Some(".zshenv"));
+        assert_eq!(safe_download_name("archive.tar.gz"), Some("archive.tar.gz"));
+        // Unicode and spaces are fine; only traversal shapes are rejected.
+        assert_eq!(safe_download_name("报告 最终.pdf"), Some("报告 最终.pdf"));
+    }
+
+    #[test]
+    fn traversal_and_separator_names_rejected() {
+        assert_eq!(safe_download_name(".."), None);
+        assert_eq!(safe_download_name("."), None);
+        assert_eq!(safe_download_name(""), None);
+        assert_eq!(safe_download_name("../../.zshenv"), None);
+        assert_eq!(safe_download_name("a/b"), None);
+        // Absolute paths would make Path::join discard the destination dir.
+        assert_eq!(safe_download_name("/etc/passwd"), None);
+        // Backslash is a separator on Windows; NUL truncates C strings.
+        assert_eq!(safe_download_name("a\\b"), None);
+        assert_eq!(safe_download_name("a\0b"), None);
+    }
 }

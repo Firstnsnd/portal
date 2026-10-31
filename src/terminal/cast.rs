@@ -89,6 +89,13 @@ impl CastRecorder {
             std::fs::create_dir_all(parent)?;
         }
         let file = File::create(path)?;
+        // Recordings persist every echoed output byte (potentially secrets);
+        // keep them owner-only.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
         let mut writer = BufWriter::new(file);
         let mut header = serde_json::json!({
             "version": 2,

@@ -24,7 +24,6 @@ pub enum ForwardState {
 
 /// Notification severity level
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 pub enum NotificationLevel {
     Info,
     Warning,

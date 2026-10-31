@@ -50,6 +50,10 @@ impl PtySize {
 }
 
 /// PTY error types
+///
+/// The allow covers the bin build, where `Pty::write` is never dispatched
+/// (sessions write through `write_all_pty` directly), so `WriteFailed` has no
+/// reachable construction site there; the lib's integration tests do.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum Error {
@@ -128,6 +132,9 @@ pub trait Pty {
 // Export platform-specific PTY implementation
 #[cfg(unix)]
 pub use unix_pty::UnixPty;
+/// Signal-time cleanup: SIGKILL exactly the PTY children we spawned.
+#[cfg(unix)]
+pub use unix_pty::kill_registered_children;
 
 #[cfg(windows)]
 pub use windows_pty::WindowsPty;

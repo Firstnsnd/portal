@@ -449,10 +449,29 @@ impl TerminalSession {
         let settings = crate::config::load_settings();
         let scrollback_bytes = (settings.scrollback_limit_mb as usize) * 1024 * 1024;
 
-        let pty = RealPtySession::with_scrollback_limit(
-            id, 80, 24, shell, scrollback_bytes, cwd, settings.auto_record_sessions,
-        )
-        .expect("failed to spawn local PTY");
+        // Never panic in the render path: a failed PTY spawn (missing shell
+        // path, resource exhaustion) falls back to the user's $SHELL and then
+        // to a dead placeholder session the UI shows as "session ended".
+        let spawn = |sh: &str| {
+            RealPtySession::with_scrollback_limit(
+                id, 80, 24, sh, scrollback_bytes, cwd, settings.auto_record_sessions,
+            )
+        };
+        let pty = match spawn(shell) {
+            Ok(p) => p,
+            Err(e) => {
+                log::error!("Failed to spawn local PTY {:?}: {} — trying $SHELL", shell, e);
+                let fallback = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+                if fallback == shell {
+                    RealPtySession::dead_placeholder(80, 24)
+                } else {
+                    spawn(&fallback).unwrap_or_else(|e2| {
+                        log::error!("Fallback PTY {:?} also failed: {} — dead session", fallback, e2);
+                        RealPtySession::dead_placeholder(80, 24)
+                    })
+                }
+            }
+        };
         let grid = pty.get_grid();
 
         // Get initial cwd
@@ -502,7 +521,7 @@ impl TerminalSession {
             username: username.clone(),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs(),
             success: true,
         });

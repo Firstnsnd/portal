@@ -192,7 +192,7 @@ extern "C" fn write_promise_to_url(
                     let error: id = match result {
                         Ok(Ok(())) => nil,
                         Ok(Err(msg)) => {
-                            eprintln!("drag-out: promise delivery failed: {msg}");
+                            log::error!("drag-out: promise delivery failed: {msg}");
                             let domain: id = NSString::alloc(nil).init_str("PortalSftpDrag");
                             msg_send![
                                 class!(NSError),

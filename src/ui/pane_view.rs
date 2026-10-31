@@ -52,10 +52,7 @@ pub struct WindowContext<'a> {
     >,
 
     // File paths
-    #[allow(dead_code)]
     pub hosts_file: &'a PathBuf,
-    #[allow(dead_code)]
-    pub credentials_file: &'a PathBuf,
 
     // Settings and theme
     pub theme: &'a ThemeColors,
@@ -80,7 +77,6 @@ impl<'a> WindowContext<'a> {
         snippets: &'a mut Vec<Snippet>,
         connection_history: &'a mut Vec<ConnectionRecord>,
         hosts_file: &'a PathBuf,
-        credentials_file: &'a PathBuf,
         theme: &'a ThemeColors,
         language: Language,
         runtime: &'a tokio::runtime::Runtime,
@@ -98,7 +94,6 @@ impl<'a> WindowContext<'a> {
             connection_history,
             host_sftp_support,
             hosts_file,
-            credentials_file,
             theme,
             language,
             runtime,

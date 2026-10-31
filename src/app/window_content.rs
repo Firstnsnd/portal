@@ -16,7 +16,6 @@ use crate::ui::views::tab_view::{TabBarAction, render_tab_bar};
 use crate::ui::types::dialogs::AppView;
 use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, Tab};
 use crate::ui::types::session::{TerminalSession, SessionKind};
-use crate::ui::types::BroadcastState;
 use crate::ui::pane_view::{WindowContext, ViewActions};
 
 use super::PortalApp;
@@ -52,13 +51,14 @@ impl PortalApp {
         // ── Keyboard shortcuts (terminal view only) ─────────────────────
         let current_view = self.windows[window_idx].current_view;
 
-        // ── Remote metrics polling gate ─────────────────────────────────
-        // SSH sessions poll remote /proc stats only while the Metrics tab
-        // of the active tab's tools drawer is visible (and only for the
-        // focused pane — the one actually displayed). Synced every frame
-        // so closing the drawer or leaving the Terminal view stops the
-        // remote traffic immediately. On slow links a standing 5 s exec
-        // loop competes with interactive I/O and makes vim etc. feel stuck.
+        // ── Metrics polling gate ────────────────────────────────────────
+        // SSH sessions poll remote /proc stats — and local sessions refresh
+        // sysinfo — only while the Metrics tab of the active tab's tools
+        // drawer is visible (and only for the focused pane — the one actually
+        // displayed). Synced every frame so closing the drawer or leaving the
+        // Terminal view stops the polling immediately. On slow links a
+        // standing 5 s exec loop competes with interactive I/O and makes vim
+        // etc. feel stuck.
         {
             let window = &self.windows[window_idx];
             for (ti, tab) in window.tabs.iter().enumerate() {
@@ -67,8 +67,10 @@ impl PortalApp {
                     && tab.tools_drawer_open
                     && tab.tools_tab == 0;
                 for (si, session) in tab.sessions.iter().enumerate() {
-                    if let SessionKind::Ssh(ssh, _, _) = &session.kind {
-                        ssh.set_metrics_enabled(want && si == tab.focused_session);
+                    let focused = want && si == tab.focused_session;
+                    match &session.kind {
+                        SessionKind::Ssh(ssh, _, _) => ssh.set_metrics_enabled(focused),
+                        SessionKind::Local(local, _) => local.set_metrics_enabled(focused),
                     }
                 }
             }
@@ -391,7 +393,6 @@ impl PortalApp {
                 &mut self.snippets,
                 &mut self.connection_history,
                 &self.hosts_file,
-                &self.credentials_file,
                 &self.theme,
                 self.language,
                 &self.runtime,
@@ -425,7 +426,6 @@ impl PortalApp {
                                 &mut self.snippets,
                                 &mut self.connection_history,
                                 &self.hosts_file,
-                                &self.credentials_file,
                                 &self.theme,
                                 self.language,
                                 &self.runtime,
@@ -446,7 +446,6 @@ impl PortalApp {
                                 &mut self.snippets,
                                 &mut self.connection_history,
                                 &self.hosts_file,
-                                &self.credentials_file,
                                 &self.theme,
                                 self.language,
                                 &self.runtime,
@@ -466,7 +465,6 @@ impl PortalApp {
                                 &mut self.snippets,
                                 &mut self.connection_history,
                                 &self.hosts_file,
-                                &self.credentials_file,
                                 &self.theme,
                                 self.language,
                                 &self.runtime,
@@ -489,7 +487,6 @@ impl PortalApp {
                                 &mut self.snippets,
                                 &mut self.connection_history,
                                 &self.hosts_file,
-                                &self.credentials_file,
                                 &self.theme,
                                 self.language,
                                 &self.runtime,
@@ -1115,9 +1112,6 @@ impl PortalApp {
             let window = &mut self.windows[window_idx];
             let ai_composer_id = window.ai_composer_id();
             let tab = &mut window.tabs[active];
-            let temp_broadcast = BroadcastState {
-                enabled: tab.broadcast_enabled,
-            };
             // The AI composer's TextEdit must be able to hold keyboard
             // focus; while it does, the terminal panes stand down from
             // re-claiming focus every frame (see render_terminal_session).
@@ -1136,7 +1130,7 @@ impl PortalApp {
                 &mut tab.sessions,
                 focused,
                 ai_composer_holds_focus,
-                &temp_broadcast,
+                tab.broadcast_enabled,
                 &mut window.ime_composing,
                 &mut window.ime_preedit,
                 &mut window.key_char_suppress,

@@ -345,7 +345,6 @@ mod tests {
         };
         let mut window = AppWindow::new_window(
             egui::ViewportId(egui::Id::new("test-window")),
-            "Portal",
             make_tab("in-tmp", Some(tmp.path().to_string_lossy().to_string()), 0),
             1,
         );

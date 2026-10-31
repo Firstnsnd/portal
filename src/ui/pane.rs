@@ -76,7 +76,7 @@ use eframe::egui;
 use crate::sftp::{LocalBrowser, SftpBrowser};
 use crate::ui::types::{
     session::TerminalSession,
-    dialogs::{AppView, BroadcastState, AddHostDialog, CredentialDialog, SnippetViewState, HostFilter},
+    dialogs::{AppView, AddHostDialog, CredentialDialog, SnippetViewState, HostFilter},
     sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEmbeddedEditor, SftpErrorDialog, SftpPanel, SftpSide},
 };
 
@@ -333,8 +333,6 @@ pub struct AppWindow {
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
     pub current_view: AppView,
-    #[allow(dead_code)]
-    pub title: String,
     pub close_requested: bool,
     pub ime_composing: bool,
     pub ime_preedit: String,
@@ -345,8 +343,6 @@ pub struct AppWindow {
     pub key_char_suppress: Vec<(char, std::time::Instant)>,
     pub next_id: usize,
     pub tab_drag: TabDragState,
-    #[allow(dead_code)]
-    pub broadcast_state: BroadcastState,
 
     // Asciicast recording / replay state
     /// Replay page state; `None` until a recording is opened.
@@ -459,13 +455,11 @@ impl AppWindow {
     /// "New Portal Window Here".
     pub fn new_window(
         viewport_id: egui::ViewportId,
-        title: impl Into<String>,
         tab: Tab,
         next_id: usize,
     ) -> Self {
         Self {
             viewport_id,
-            title: title.into(),
             tabs: vec![tab],
             active_tab: 0,
             current_view: AppView::Terminal,
@@ -475,7 +469,6 @@ impl AppWindow {
             key_char_suppress: Vec::new(),
             next_id,
             tab_drag: TabDragState::default(),
-            broadcast_state: BroadcastState::default(),
             replay: None,
             recording_error: None,
             replay_pending_delete: None,
@@ -891,7 +884,6 @@ mod tests {
     fn test_sftp_editor_delivery_routes_by_side() {
         let mut window = AppWindow::new_window(
             egui::ViewportId(egui::Id::new("test-editor-win")),
-            "Portal",
             create_test_tab("Tab 1"),
             1,
         );
@@ -927,7 +919,6 @@ mod tests {
     fn test_sftp_editor_too_large_delivery() {
         let mut window = AppWindow::new_window(
             egui::ViewportId(egui::Id::new("test-editor-win2")),
-            "Portal",
             create_test_tab("Tab 1"),
             1,
         );

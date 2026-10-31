@@ -19,7 +19,6 @@ pub enum SftpSide {
 }
 
 impl SftpPanel {
-    #[allow(dead_code)]
     pub fn is_local(self) -> bool {
         matches!(self, SftpPanel::LeftLocal | SftpPanel::RightLocal)
     }

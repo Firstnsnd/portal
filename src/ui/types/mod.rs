@@ -6,12 +6,8 @@
 pub mod session;
 pub use session::TerminalSession;
 
-// Layout and window types
-pub mod layout;
-
 // Dialog types
 pub mod dialogs;
-pub use dialogs::{AppView, BroadcastState};
 
 // SFTP types
 pub mod sftp_types;

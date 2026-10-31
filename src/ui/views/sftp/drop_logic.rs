@@ -90,7 +90,7 @@ pub(crate) fn plan_in_app_drop(
             Some(dir) => payload
                 .entries
                 .iter()
-                .map(|e| planned_download(e, dir, DropSide::Left))
+                .filter_map(|e| planned_download(e, dir, DropSide::Left))
                 .collect(),
             None => vec![],
         },
@@ -98,7 +98,7 @@ pub(crate) fn plan_in_app_drop(
             Some(dir) => payload
                 .entries
                 .iter()
-                .map(|e| planned_download(e, dir, DropSide::Right))
+                .filter_map(|e| planned_download(e, dir, DropSide::Right))
                 .collect(),
             None => vec![],
         },
@@ -119,19 +119,28 @@ fn planned_upload(entry: &DragEntry, remote_dir: &str, via: DropSide) -> Planned
     }
 }
 
-fn planned_download(entry: &DragEntry, local_dir: &std::path::Path, via: DropSide) -> PlannedTransfer {
-    let local = local_dir.join(&entry.entry_name);
+fn planned_download(entry: &DragEntry, local_dir: &std::path::Path, via: DropSide) -> Option<PlannedTransfer> {
+    // The name comes straight from the remote listing; without this check a
+    // hostile server could plant `../…` or absolute names and turn a download
+    // into an arbitrary-file overwrite outside the destination directory.
+    let Some(name) = crate::sftp::safe_download_name(&entry.entry_name) else {
+        log::warn!("download: skipping entry with unsafe name {:?}", entry.entry_name);
+        return None;
+    };
+    let local = local_dir.join(name);
     let remote = entry.full_path.clone();
-    if entry.is_dir {
+    Some(if entry.is_dir {
         PlannedTransfer::DownloadDir { remote, local, via }
     } else {
         PlannedTransfer::DownloadFile { remote, local, via }
-    }
+    })
 }
 
 /// True when `pos` lies at least `margin` points outside `rect` on any side.
-/// Used to decide that the pointer has left the app's windows even while the
-/// OS drag keeps reporting stale hover positions.
+/// Production decides "pointer left the windows" via
+/// `drag_out::pointer_outside_app_windows`; this helper documents (and tests)
+/// the underlying boundary math.
+#[cfg(test)]
 pub(crate) fn pointer_beyond_margin(pos: egui::Pos2, rect: egui::Rect, margin: f32) -> bool {
     pos.x < rect.min.x - margin
         || pos.x > rect.max.x + margin

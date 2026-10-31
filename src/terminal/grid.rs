@@ -80,6 +80,13 @@ pub struct TerminalGrid {
     pub cwd: Option<String>,
     /// Row index of the last known prompt (for protecting reflowed content)
     last_prompt_row: Option<usize>,
+    /// Monotonic content version: bumped once per parsed PTY chunk (the single
+    /// mutation path for cell/scrollback data) and by the direct mutation
+    /// entry points that bypass parsing (`resize`, `clear`, …). Lets the
+    /// renderer skip re-snapshotting visible rows when nothing changed —
+    /// idle/blink frames then cost zero row clones and hold the grid lock
+    /// only for the scalar reads.
+    pub version: u64,
 }
 
 impl TerminalGrid {
@@ -87,7 +94,6 @@ impl TerminalGrid {
     pub const DEFAULT_MAX_SCROLLBACK_BYTES: usize = 100 * 1024 * 1024;
 
     /// Create a new grid with default scrollback limit.
-    #[allow(dead_code)]
     pub fn new(cols: usize, rows: usize) -> Self {
         Self::with_scrollback_limit(cols, rows, Self::DEFAULT_MAX_SCROLLBACK_BYTES)
     }
@@ -122,20 +128,7 @@ impl TerminalGrid {
             blank_row_pool: Vec::new(),
             cwd,
             last_prompt_row: None,
-        }
-    }
-
-    /// Update the scrollback memory limit (e.g., from settings change).
-    #[allow(dead_code)]
-    pub fn set_scrollback_limit(&mut self, max_bytes: usize) {
-        self.max_scrollback_bytes = max_bytes;
-        // Trim if currently over the new limit
-        while self.current_scrollback_bytes > self.max_scrollback_bytes {
-            if let Some(oldest) = self.scrollback.pop_front() {
-                let oldest_bytes = Self::row_memory_usage(&oldest);
-                self.current_scrollback_bytes -= oldest_bytes;
-            }
-            self.scrollback_wrapped.pop_front();
+            version: 0,
         }
     }
 
@@ -158,6 +151,7 @@ impl TerminalGrid {
     /// the regression test that documents the invariant.
     #[allow(dead_code)]
     pub fn normalize_row_widths(&mut self) {
+        self.version = self.version.wrapping_add(1);
         for row in self.cells.iter_mut() {
             row.resize(self.cols, TerminalCell::default());
         }
@@ -170,6 +164,7 @@ impl TerminalGrid {
         if cols == self.cols && rows == self.rows {
             return;
         }
+        self.version = self.version.wrapping_add(1);
         if cols != self.cols {
             // Column change. Two modes:
             //  - Reflow (main buffer + sequential writes, i.e. shell output):
@@ -312,6 +307,7 @@ impl TerminalGrid {
 
     /// Clear the entire grid and reset cursor to home position.
     pub fn clear(&mut self) {
+        self.version = self.version.wrapping_add(1);
         self.cells = vec![vec![TerminalCell::default(); self.cols]; self.rows];
         self.line_wrapped = vec![false; self.rows];
         self.cursor_col = 0;
@@ -909,14 +905,13 @@ impl TerminalGrid {
     /// `resize_screen` early-return and leaves every row at the old width while
     /// `cols` reports the new width — a corrupted grid. (That bug lived in the
     /// alt-screen resize path in 0.14.4; in-place resizes now use
-    /// `resize_screen` alone.) Kept around for the scrollback-only reflow logic
-    /// should it ever be needed safely.
-    #[allow(dead_code)]
+    /// `resize_screen` alone, with this helper handling the scrollback side.)
     fn resize_reflow_scrollback_only(&mut self, new_cols: usize) {
         let old_cols = self.cols;
         if old_cols == new_cols {
             return;
         }
+        self.version = self.version.wrapping_add(1);
 
         // Collect logical lines from scrollback
         let mut scrollback_logical_lines: Vec<Vec<TerminalCell>> = Vec::new();

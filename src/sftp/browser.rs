@@ -98,7 +98,7 @@ impl SftpBrowser {
                 SftpResponse::Progress(p) => {
                     self.transfer = Some(p);
                 }
-                SftpResponse::TransferComplete { .. } => {
+                SftpResponse::TransferComplete => {
                     self.transfer = None;
                     // Refresh current directory after transfer
                     let _ = self.cmd_tx.send(SftpCommand::ListDir(self.current_path.clone()));

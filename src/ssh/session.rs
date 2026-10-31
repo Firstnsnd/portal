@@ -32,9 +32,7 @@ enum SshCommand {
     Write(Vec<u8>),
     Resize { cols: u32, rows: u32 },
     Disconnect,
-    #[allow(dead_code)]
     StartPortForward(PortForwardConfig),
-    #[allow(dead_code)]
     StopPortForward(PortForwardConfig),
 }
 
@@ -94,29 +92,64 @@ impl russh::client::Handler for SshClient {
                 Ok(true)
             }
             Ok(false) => {
-                // Host not in known_hosts — auto-learn the key
-                log::info!(
-                    "New host key for {}:{}, adding to known_hosts",
-                    self.host, self.port
-                );
-                if let Err(e) =
-                    russh::keys::known_hosts::learn_known_hosts(&self.host, self.port, server_public_key)
-                {
-                    log::warn!("Failed to save host key: {}", e);
+                // russh's checker raises KeyChanged only when a recorded entry
+                // has the SAME algorithm with differing bytes; a key under a
+                // different algorithm (possible MITM downgrade/rotation) comes
+                // back as a plain `Ok(false)`. Only auto-learn (TOFU) when the
+                // host has no recorded entries at all — otherwise refuse.
+                match russh::keys::known_hosts::known_host_keys(&self.host, self.port) {
+                    Ok(existing) if !existing.is_empty() => {
+                        log::error!(
+                            "HOST KEY MISMATCH for {}:{} — known_hosts has {} entry(ies) for this host (first at line {}) and none matches the offered key",
+                            self.host,
+                            self.port,
+                            existing.len(),
+                            existing[0].0
+                        );
+                        Err(russh::Error::Keys(russh::keys::Error::KeyChanged { line: existing[0].0 }))
+                    }
+                    Ok(_) => {
+                        // Host not in known_hosts — auto-learn the key
+                        log::info!(
+                            "New host key for {}:{}, adding to known_hosts",
+                            self.host, self.port
+                        );
+                        if let Err(e) = russh::keys::known_hosts::learn_known_hosts(
+                            &self.host,
+                            self.port,
+                            server_public_key,
+                        ) {
+                            log::warn!("Failed to save host key: {}", e);
+                        }
+                        Ok(true)
+                    }
+                    Err(e) => {
+                        // Cannot enumerate recorded keys → cannot verify → refuse.
+                        log::error!(
+                            "Refusing {}:{} — known_hosts could not be read: {}",
+                            self.host, self.port, e
+                        );
+                        Err(russh::Error::Keys(e))
+                    }
                 }
-                Ok(true)
             }
             Err(e) => {
-                // Key changed (possible MITM) or file error
+                // Key changed (possible MITM), or the known_hosts file is
+                // unreadable/malformed. Fail closed either way: previously any
+                // non-KeyChanged error was logged and the key accepted, which
+                // let a tampered or corrupt known_hosts disable verification.
                 if let russh::keys::Error::KeyChanged { line } = &e {
                     log::error!(
                         "HOST KEY CHANGED for {}:{} at known_hosts line {}!",
                         self.host, self.port, line
                     );
-                    return Err(russh::Error::Keys(e));
+                } else {
+                    log::error!(
+                        "Refusing {}:{} — known_hosts verification failed: {}",
+                        self.host, self.port, e
+                    );
                 }
-                log::warn!("known_hosts check error: {}", e);
-                Ok(true)
+                Err(russh::Error::Keys(e))
             }
         }
     }
@@ -263,7 +296,6 @@ pub struct SshSession {
     /// Remote architecture detected via `uname -m` (e.g. "x86_64", "aarch64").
     pub arch_hint: Arc<Mutex<Option<String>>>,
     /// Active port forwards managed by this session
-    #[allow(dead_code)]
     pub port_forwards: Arc<Mutex<Vec<PortForward>>>,
     /// Notifications queue (drained by UI layer)
     pub notifications: Arc<Mutex<Vec<AppNotification>>>,
@@ -1202,7 +1234,7 @@ impl SshSession {
     }
 
     /// Get the current list of port forward states
-    #[allow(dead_code)]
+    #[allow(dead_code)] // integration tests (tests/ssh_2fa_tests.rs); bin reads port_forwards directly
     pub fn get_port_forward_states(&self) -> Vec<(PortForwardConfig, ForwardState)> {
         self.port_forwards.lock().ok().map(|fwds| {
             fwds.iter().map(|pf| (pf.config.clone(), pf.current_state())).collect()

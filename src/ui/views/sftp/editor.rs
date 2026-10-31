@@ -459,7 +459,6 @@ mod tests {
     fn test_window(tag: &str) -> AppWindow {
         AppWindow::new_window(
             egui::ViewportId(egui::Id::new(format!("editor-test-{}", tag))),
-            "Portal",
             test_tab("Tab 1"),
             1,
         )
@@ -587,7 +586,6 @@ mod tests {
         let mut snippets = Vec::<Snippet>::new();
         let mut history = Vec::<ConnectionRecord>::new();
         let hosts_file = std::path::PathBuf::from("/tmp/portal-test-hosts.json");
-        let credentials_file = std::path::PathBuf::from("/tmp/portal-test-credentials.json");
         let theme = ThemePreset::TokyoNight.colors();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let llm_config = LlmConfig::default();
@@ -598,7 +596,6 @@ mod tests {
             &mut snippets,
             &mut history,
             &hosts_file,
-            &credentials_file,
             &theme,
             Language::English,
             &runtime,

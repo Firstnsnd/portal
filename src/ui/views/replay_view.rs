@@ -236,16 +236,9 @@ pub fn list_recordings() -> Vec<RecordingEntry> {
     out
 }
 
-/// `u64` bytes → human size ("1.5 KB").
-pub(crate) fn fmt_size(bytes: u64) -> String {
-    if bytes >= 1024 * 1024 {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else if bytes >= 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{} B", bytes)
-    }
-}
+/// `u64` bytes → human size ("1.5 KB"). Thin alias of the SFTP formatter so
+/// replay keeps one size vocabulary (and gains its GB tier).
+use crate::ui::views::sftp::format::format_file_size as fmt_size;
 
 /// Render the replay page for `window`. Mirrors the hosts page chrome: a
 /// `bg_secondary` top nav bar (page title + usage + actions on one line), a

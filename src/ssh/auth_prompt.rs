@@ -95,7 +95,7 @@ impl AuthPromptBridge {
 
     /// The bridge's mode. Exercised by the inline tests (T2.1/T2.5); no
     /// production code calls it yet.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // used in this file's cfg(test) assertions; production reads self.mode directly
     pub fn mode(&self) -> PromptMode {
         self.mode
     }

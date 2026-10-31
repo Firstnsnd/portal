@@ -826,7 +826,7 @@ pub fn save_credentials(path: &Path, credentials: &[Credential]) {
         let _ = std::fs::create_dir_all(parent);
     }
     if let Ok(json) = serde_json::to_string_pretty(credentials) {
-        let _ = std::fs::write(path, json);
+        write_private_file(path, &json);
     }
 }
 
@@ -943,7 +943,7 @@ pub fn save_snippets(path: &Path, snippets: &[Snippet]) {
         let _ = std::fs::create_dir_all(parent);
     }
     if let Ok(json) = serde_json::to_string_pretty(snippets) {
-        let _ = std::fs::write(path, json);
+        write_private_file(path, &json);
     }
 }
 
@@ -978,7 +978,7 @@ pub fn save_history(records: &[ConnectionRecord]) {
         let _ = std::fs::create_dir_all(parent);
     }
     if let Ok(json) = serde_json::to_string_pretty(records) {
-        let _ = std::fs::write(path, json);
+        write_private_file(&path, &json);
     }
 }
 
@@ -1109,14 +1109,6 @@ fn default_terminal_background_opacity() -> f32 {
     0.35
 }
 
-impl PortalSettings {
-    /// Get scrollback limit in bytes
-    #[allow(dead_code)]
-    pub fn scrollback_limit_bytes(&self) -> usize {
-        (self.scrollback_limit_mb as usize) * 1024 * 1024
-    }
-}
-
 impl Default for PortalSettings {
     fn default() -> Self {
         Self {
@@ -1169,7 +1161,7 @@ pub fn save_settings(settings: &PortalSettings) {
         let _ = std::fs::create_dir_all(parent);
     }
     if let Ok(json) = serde_json::to_string_pretty(settings) {
-        let _ = std::fs::write(path, json);
+        write_private_file(&path, &json);
     }
 }
 
@@ -1244,6 +1236,32 @@ pub fn load_hosts(path: &Path) -> Vec<HostEntry> {
     hosts
 }
 
+/// Serialize-agnostic write for every on-disk config file, restricted to
+/// owner-only permissions (0600). Config JSON can carry secrets when a
+/// keychain store fails (e.g. no `security` CLI on Linux keeps passwords as
+/// a documented fallback), and session recordings may contain echoed output —
+/// neither must be world-readable. Write errors are logged once instead of
+/// being silently swallowed.
+pub(crate) fn write_private_file(path: &Path, contents: &str) {
+    use std::io::Write;
+    match std::fs::File::create(path) {
+        Ok(file) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                // File::create preserves the mode of an existing file, so an
+                // old world-readable copy is tightened here too.
+                let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+            }
+            let mut file = file;
+            if let Err(e) = file.write_all(contents.as_bytes()) {
+                log::warn!("Failed to write {}: {}", path.display(), e);
+            }
+        }
+        Err(e) => log::warn!("Failed to create {}: {}", path.display(), e),
+    }
+}
+
 /// Save hosts to JSON file. Creates parent directories if needed.
 ///
 /// Passwords are stored in the system keychain; the JSON file only
@@ -1299,6 +1317,13 @@ pub fn save_hosts(path: &Path, hosts: &[HostEntry]) {
                                 log::info!("Imported private key into keychain for {}@{}:{}", h.username, h.host, h.port);
                             }
                     }
+                    if *key_in_keychain && !key_content.is_empty() {
+                        // The PEM body now lives in the keychain — the JSON
+                        // copy must go. This also scrubs stale in-memory key
+                        // content on re-saves after the initial import (the
+                        // import branch above is skipped once the flag is set).
+                        key_content.clear();
+                    }
                     if !passphrase.is_empty()
                         && store_host_credential(&h.host, h.port, &h.username, "passphrase", passphrase, &h.name) {
                             passphrase.clear();
@@ -1314,7 +1339,7 @@ pub fn save_hosts(path: &Path, hosts: &[HostEntry]) {
         let _ = std::fs::create_dir_all(parent);
     }
     if let Ok(json) = serde_json::to_string_pretty(&cleaned) {
-        let _ = std::fs::write(path, json);
+        write_private_file(path, &json);
     }
 }
 

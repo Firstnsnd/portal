@@ -22,26 +22,6 @@ use ui::*;
 
 impl eframe::App for PortalApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Update main window title based on current view and active tab
-        if let Some(window) = self.windows.first() {
-            let title = match window.current_view {
-                AppView::Terminal => {
-                    if let Some(tab) = window.tabs.get(window.active_tab) {
-                        tab.title.clone()
-                    } else {
-                        "Terminal".to_string()
-                    }
-                }
-                AppView::Hosts => self.language.t("hosts").to_string(),
-                AppView::Sftp => self.language.t("sftp").to_string(),
-                AppView::Keychain => self.language.t("keychain").to_string(),
-                AppView::Settings => self.language.t("settings").to_string(),
-                AppView::Snippets => "Snippets".to_string(),
-                AppView::Replay => "Replay".to_string(),
-            };
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
-        }
-
         // Apply visuals/fonts if dirty
         if self.visuals_dirty {
             self.apply_visuals(ctx);
@@ -125,19 +105,7 @@ impl eframe::App for PortalApp {
         // Render first window content if visible
         if !first_window_hidden {
             if let Some(w) = self.windows.first() {
-                // Update title
-                let title = match w.current_view {
-                    AppView::Terminal => {
-                        w.tabs.get(w.active_tab).map(|t| t.title.clone()).unwrap_or_else(|| "Terminal".to_string())
-                    }
-                    AppView::Hosts => self.language.t("hosts").to_string(),
-                    AppView::Sftp => self.language.t("sftp").to_string(),
-                    AppView::Keychain => self.language.t("keychain").to_string(),
-                    AppView::Settings => self.language.t("settings").to_string(),
-                    AppView::Snippets => "Snippets".to_string(),
-                    AppView::Replay => "Replay".to_string(),
-                };
-                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title_for(w)));
             }
             let result = self.render_window_content(ctx, 0, false);
             pending_detach.extend(result.pending_detach);
@@ -152,16 +120,7 @@ impl eframe::App for PortalApp {
                 .with_min_inner_size([600.0, 400.0]);
             ctx.show_viewport_immediate(viewport_id, builder, |ctx, _class| {
                 // Update window title
-                let dw = &self.windows[i];
-                let title = match dw.current_view {
-                    AppView::Terminal => dw.tabs.get(dw.active_tab).map(|t| t.title.clone()).unwrap_or_else(|| "Terminal".to_string()),
-                    AppView::Hosts => self.language.t("hosts").to_string(),
-                    AppView::Sftp => self.language.t("sftp").to_string(),
-                    AppView::Keychain => self.language.t("keychain").to_string(),
-                    AppView::Settings => self.language.t("settings").to_string(),
-                    AppView::Snippets => "Snippets".to_string(),
-                    AppView::Replay => "Replay".to_string(),
-                };
+                let title = self.window_title_for(&self.windows[i]);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
                 if ctx.input(|i| i.viewport().close_requested()) {
@@ -212,7 +171,6 @@ impl eframe::App for PortalApp {
                     dw.next_id += 100;
                     self.windows.push(AppWindow::new_window(
                         viewport_id,
-                        tab.title.clone(),
                         tab,
                         next_id,
                     ));
@@ -372,14 +330,12 @@ fn main() -> eframe::Result<()> {
             if let Some(mut sig) = signals {
                 if sig.forever().next().is_some() {
                     if !CLEANUP_DONE.swap(true, Ordering::SeqCst) {
-                        // Kill all zsh -l processes spawned by portal
-                        unsafe {
-                            let cmd = std::ffi::CString::new("pkill").unwrap();
-                            let arg1 = std::ffi::CString::new("-9").unwrap();
-                            let arg2 = std::ffi::CString::new("-f").unwrap();
-                            let arg3 = std::ffi::CString::new("/bin/zsh -l").unwrap();
-                            libc::execvp(cmd.as_ptr(), [cmd.as_ptr(), arg1.as_ptr(), arg2.as_ptr(), arg3.as_ptr(), std::ptr::null()].as_ptr());
-                        }
+                        // SIGKILL exactly the PTY children we spawned. The
+                        // previous handler replaced the process with
+                        // `pkill -9 -f "/bin/zsh -l"`, which matches every
+                        // login shell on the machine by command line and took
+                        // the user's own Terminal / VS Code shells with it.
+                        crate::terminal::kill_registered_children();
                     }
                     // Exit after cleanup
                     std::process::exit(0);

@@ -8,7 +8,7 @@ use eframe::egui;
 use crate::config::ShortcutAction;
 use crate::ssh::SshConnectionState;
 use crate::terminal;
-use crate::ui::types::{session::{TerminalSession, SearchMatch, SessionKind}, dialogs::BroadcastState};
+use crate::ui::types::session::{TerminalSession, SearchMatch, SessionKind};
 use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, split_rect};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
@@ -103,7 +103,7 @@ pub(crate) fn selected_text_of(session: &TerminalSession) -> Option<String> {
 /// * `focused_session_id` - Currently focused session ID
 /// * `ai_composer_holds_focus` - True while the AI composer's TextEdit holds
 ///   egui keyboard focus; the pane stands down from re-claiming it
-/// * `broadcast_state` - Broadcast mode state (typing to multiple terminals)
+/// * `broadcast_active` - Broadcast mode active (typing to multiple terminals)
 /// * `ime_composing` - IME composition state flag
 /// * `ime_preedit` - IME preedit text buffer
 /// * `key_char_suppress` - Cross-frame echo suppression queue (chars already
@@ -128,7 +128,7 @@ pub fn render_terminal_session(
     session_id: usize,
     focused_session_id: usize,
     ai_composer_holds_focus: bool,
-    broadcast_state: &BroadcastState,
+    broadcast_active: bool,
     ime_composing: &mut bool,
     ime_preedit: &mut String,
     key_char_suppress: &mut Vec<(char, std::time::Instant)>,
@@ -420,7 +420,7 @@ pub fn render_terminal_session(
         // Broadcast toggle lives in the terminal context menu (not the tools
         // drawer) — the label reflects the current mode so right-clicking any
         // pane reveals a clear enable/disable state.
-        let broadcast_label = if broadcast_state.is_active() {
+        let broadcast_label = if broadcast_active {
             language.t("broadcast_off")
         } else {
             language.t("broadcast_on")
@@ -920,28 +920,71 @@ pub fn render_terminal_session(
         // release the lock. Everything below paints from this snapshot, so the
         // reader thread can parse the next PTY chunk concurrently with the
         // (comparatively slow) galley/painter work instead of blocking on the
-        // grid lock for the whole frame. `TerminalCell` is Clone and visible
-        // rows number at most `new_rows` (tens to hundreds), so the clone is
-        // microseconds.
+        // grid lock for the whole frame.
+        //
+        // Rows only change when a PTY chunk was parsed (`grid.version`, bumped
+        // once per chunk), the user scrolled (`offset`), or scrollback was
+        // trimmed (`scrollback_len`). Between those — most notably the 250 ms
+        // cursor-blink repaints — the previous snapshot is reused from egui's
+        // per-pane temp storage instead of re-cloning cols×rows cells while
+        // holding the grid lock.
         let cols = grid.cols;
         let rows = grid.rows;
         let cursor = (grid.cursor_col, grid.cursor_row, grid.cursor_visible);
         let visible_len = rows.min(new_rows);
-        let mut visible_rows: Vec<Vec<terminal::TerminalCell>> =
-            Vec::with_capacity(visible_len);
-        for screen_row in 0..visible_len {
-            let row = if offset > 0 && screen_row < offset {
-                grid.get_scrollback_row(scrollback_len.saturating_sub(offset) + screen_row)
-                    .cloned()
-                    .unwrap_or_default()
-            } else {
-                grid.cells
-                    .get(screen_row.saturating_sub(offset))
-                    .cloned()
-                    .unwrap_or_default()
-            };
-            visible_rows.push(row);
+        let grid_version = grid.version;
+
+        #[derive(Clone)]
+        struct VisibleRowsCache {
+            version: u64,
+            offset: usize,
+            scrollback_len: usize,
+            data: std::sync::Arc<Vec<Vec<terminal::TerminalCell>>>,
         }
+        let rows_cache_key = pane_id.with("visible_rows_cache");
+        let cached = ctx
+            .data_mut(|d| d.get_temp::<VisibleRowsCache>(rows_cache_key))
+            .filter(|c| {
+                c.version == grid_version
+                    && c.offset == offset
+                    && c.scrollback_len == scrollback_len
+                    && c.data.len() == visible_len
+            });
+        let visible_rows: std::sync::Arc<Vec<Vec<terminal::TerminalCell>>> = match cached {
+            Some(c) => c.data,
+            None => {
+                let mut rows_out: Vec<Vec<terminal::TerminalCell>> =
+                    Vec::with_capacity(visible_len);
+                for screen_row in 0..visible_len {
+                    let row = if offset > 0 && screen_row < offset {
+                        grid.get_scrollback_row(
+                            scrollback_len.saturating_sub(offset) + screen_row,
+                        )
+                        .cloned()
+                        .unwrap_or_default()
+                    } else {
+                        grid.cells
+                            .get(screen_row.saturating_sub(offset))
+                            .cloned()
+                            .unwrap_or_default()
+                    };
+                    rows_out.push(row);
+                }
+                let data = std::sync::Arc::new(rows_out);
+                ctx.data_mut(|d| {
+                    d.insert_temp(
+                        rows_cache_key,
+                        VisibleRowsCache {
+                            version: grid_version,
+                            offset,
+                            scrollback_len,
+                            data: std::sync::Arc::clone(&data),
+                        },
+                    )
+                });
+                data
+            }
+        };
         drop(grid);
 
         // Convert pixel position to global grid index.
@@ -1030,6 +1073,12 @@ pub fn render_terminal_session(
         }
 
         // ── Text rendering ───────────────────────────────────────────────────
+        //
+        // One scratch buffer is reused for every run of the frame: clearing a
+        // String keeps its allocation, so only the galley's internal copy (the
+        // `to_string()` inside `Painter::text`) allocates per run instead of
+        // that copy plus a growing accumulator.
+        let mut run_text = String::with_capacity(64);
         for screen_row in 0..visible_rows.len() {
             let row_y = rect.min.y + screen_row as f32 * line_height;
 
@@ -1057,7 +1106,7 @@ pub fn render_terminal_session(
                 let run_strikethrough = cell.strikethrough;
                 let run_dim = cell.dim;
                 let run_inverse = cell.inverse;
-                let mut run_text = String::new();
+                run_text.clear();
                 let mut run_end_col = col;
 
                 // Determine if the first cell of this run is a wide (CJK) character.
@@ -1772,7 +1821,7 @@ pub fn render_terminal_session(
     }
 
     // ── Broadcast mode border ─────────────────────────────────────────────────
-    if broadcast_state.is_active() && !is_focused {
+    if broadcast_active && !is_focused {
         let painter = ui.painter_at(pane_rect);
         painter.rect_stroke(pane_rect, 0.0, egui::Stroke::new(2.0, theme.accent));
     }
@@ -1835,7 +1884,7 @@ pub fn render_terminal_pane(
     sessions: &mut [TerminalSession],
     focused_session: usize,
     ai_composer_holds_focus: bool,
-    broadcast_state: &BroadcastState,
+    broadcast_active: bool,
     ime_composing: &mut bool,
     ime_preedit: &mut String,
     key_char_suppress: &mut Vec<(char, std::time::Instant)>,
@@ -1858,7 +1907,7 @@ pub fn render_terminal_pane(
         session_idx,
         focused_session,
         ai_composer_holds_focus,
-        broadcast_state,
+        broadcast_active,
         ime_composing, ime_preedit,
         key_char_suppress,
         pane_rect, pane_id,
@@ -1880,7 +1929,7 @@ pub fn render_pane_tree(
     sessions: &mut [TerminalSession],
     focused_session: usize,
     ai_composer_holds_focus: bool,
-    broadcast_state: &BroadcastState,
+    broadcast_active: bool,
     ime_composing: &mut bool,
     ime_preedit: &mut String,
     key_char_suppress: &mut Vec<(char, std::time::Instant)>,
@@ -1894,7 +1943,7 @@ pub fn render_pane_tree(
     match node {
         PaneNode::Terminal(idx) => {
             let (action, input_bytes) = render_terminal_pane(
-                ui, ctx, *idx, sessions, focused_session, ai_composer_holds_focus, broadcast_state,
+                ui, ctx, *idx, sessions, focused_session, ai_composer_holds_focus, broadcast_active,
                 ime_composing, ime_preedit, key_char_suppress, rect,
                 sessions.len() > 1,
                 can_close_pane,
@@ -1949,8 +1998,8 @@ pub fn render_pane_tree(
                 ctx.set_cursor_icon(icon);
             }
 
-            let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, ai_composer_holds_focus, broadcast_state, ime_composing, ime_preedit, key_char_suppress, can_close_pane, theme, font_size, language, shortcut_resolver, background.clone());
-            let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, ai_composer_holds_focus, broadcast_state, ime_composing, ime_preedit, key_char_suppress, can_close_pane, theme, font_size, language, shortcut_resolver, background);
+            let f1 = render_pane_tree(ui, ctx, first,  rect1, sessions, focused_session, ai_composer_holds_focus, broadcast_active, ime_composing, ime_preedit, key_char_suppress, can_close_pane, theme, font_size, language, shortcut_resolver, background.clone());
+            let f2 = render_pane_tree(ui, ctx, second, rect2, sessions, focused_session, ai_composer_holds_focus, broadcast_active, ime_composing, ime_preedit, key_char_suppress, can_close_pane, theme, font_size, language, shortcut_resolver, background);
 
             let result = match (f1, f2) {
                 (Some((_, PaneAction::Focus, _)), Some(other)) => Some(other),

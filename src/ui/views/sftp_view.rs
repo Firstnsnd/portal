@@ -2193,7 +2193,6 @@ mod editor_resolve_tests {
     fn test_window(tag: &str) -> AppWindow {
         AppWindow::new_window(
             egui::ViewportId(egui::Id::new(format!("resolve-test-{}", tag))),
-            "Portal",
             test_tab("Tab 1"),
             1,
         )

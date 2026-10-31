@@ -60,8 +60,7 @@ pub fn render_hosts_view(
                 ui.label(egui::RichText::new(cx.language.t("hosts")).color(cx.theme.fg_dim).size(FONT_BASE).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(widgets::text_button(cx.language.t("new_host"), cx.theme.accent)).clicked() {
-                        let current_time = ctx.input(|i| i.time);
-                        window.add_host_dialog.open_new(current_time);
+                        window.add_host_dialog.open_new();
                     }
                 });
             });
@@ -614,8 +613,7 @@ pub fn render_hosts_view(
     if let Some(idx) = edit_host_index {
         if idx < cx.hosts.len() {
             let host = cx.hosts[idx].clone();
-            let current_time = ctx.input(|i| i.time);
-            window.add_host_dialog.open_edit(idx, &host, current_time);
+            window.add_host_dialog.open_edit(idx, &host);
         }
     }
     if let Some(host) = connect_history_host {

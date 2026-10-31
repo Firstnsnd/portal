@@ -80,7 +80,7 @@ impl PortalApp {
         let viewport_id =
             egui::ViewportId::from_hash_of(format!("window_{}", self.next_viewport_id));
         self.next_viewport_id += 1;
-        let window = crate::ui::pane::AppWindow::new_window(viewport_id, "Portal", tab, id + 1);
+        let window = crate::ui::pane::AppWindow::new_window(viewport_id, tab, id + 1);
         self.windows.push(window);
         self.mark_sessions_dirty();
     }
@@ -193,11 +193,5 @@ impl PortalApp {
     /// Save hosts to disk
     pub fn save_hosts(&self) {
         crate::config::save_hosts(&self.hosts_file, &self.hosts);
-    }
-
-    /// Save credentials to disk
-    #[allow(dead_code)]
-    pub fn save_credentials(&self) {
-        crate::config::save_credentials(&self.credentials_file, &self.credentials);
     }
 }

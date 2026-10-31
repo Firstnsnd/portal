@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 use crate::config::{ResolvedAuth, ResolvedProxy};
 use crate::ssh::AuthPromptBridge;
-use crate::sftp::types::{SftpEntry, SftpEntryKind, SftpCommand, SftpResponse, TransferProgress};
+use crate::sftp::types::{safe_download_name, SftpEntry, SftpEntryKind, SftpCommand, SftpResponse, TransferProgress};
 
 /// Variant of sftp_task that navigates to a specific path after connecting (used for auto-reconnect).
 #[allow(clippy::too_many_arguments)]
@@ -217,10 +217,7 @@ async fn sftp_task_inner(
                         let _ = resp_tx.send(SftpResponse::Error(e));
                     }
                 }
-                let _ = resp_tx.send(SftpResponse::TransferComplete {
-                    filename: remote.rsplit('/').next().unwrap_or(&remote).to_string(),
-                    is_upload: false,
-                });
+                let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
             Some(SftpCommand::Upload { local, remote }) => {
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -233,10 +230,7 @@ async fn sftp_task_inner(
                         let _ = resp_tx.send(SftpResponse::Error(e));
                     }
                 }
-                let _ = resp_tx.send(SftpResponse::TransferComplete {
-                    filename: local.rsplit('/').next().unwrap_or(&local).to_string(),
-                    is_upload: true,
-                });
+                let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
             Some(SftpCommand::UploadDir { local_dir, remote_dir }) => {
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -249,10 +243,7 @@ async fn sftp_task_inner(
                         let _ = resp_tx.send(SftpResponse::Error(e));
                     }
                 }
-                let _ = resp_tx.send(SftpResponse::TransferComplete {
-                    filename: local_dir.rsplit('/').next().unwrap_or(&local_dir).to_string(),
-                    is_upload: true,
-                });
+                let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
             Some(SftpCommand::DownloadDir { remote_dir, local_dir }) => {
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -265,10 +256,7 @@ async fn sftp_task_inner(
                         let _ = resp_tx.send(SftpResponse::Error(e));
                     }
                 }
-                let _ = resp_tx.send(SftpResponse::TransferComplete {
-                    filename: remote_dir.rsplit('/').next().unwrap_or(&remote_dir).to_string(),
-                    is_upload: false,
-                });
+                let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
             Some(SftpCommand::DownloadSync { remote, local, done }) => {
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -292,10 +280,7 @@ async fn sftp_task_inner(
                     let _ = resp_tx.send(SftpResponse::Disconnected);
                     break;
                 }
-                let _ = resp_tx.send(SftpResponse::TransferComplete {
-                    filename: remote.rsplit('/').next().unwrap_or(&remote).to_string(),
-                    is_upload: false,
-                });
+                let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
             Some(SftpCommand::DownloadDirSync { remote_dir, local_dir, done }) => {
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -318,10 +303,7 @@ async fn sftp_task_inner(
                     let _ = resp_tx.send(SftpResponse::Disconnected);
                     break;
                 }
-                let _ = resp_tx.send(SftpResponse::TransferComplete {
-                    filename: remote_dir.rsplit('/').next().unwrap_or(&remote_dir).to_string(),
-                    is_upload: false,
-                });
+                let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
             Some(SftpCommand::Rename { from, to }) => {
                 match sftp.rename(&from, &to).await {
@@ -858,12 +840,15 @@ async fn download_dir_inner(
 
     for entry in entries {
         let name = entry.file_name();
-        if name == "." || name == ".." {
+        // Server-controlled name: refuse anything that could escape the local
+        // destination directory before it reaches the filesystem.
+        let Some(name) = safe_download_name(&name) else {
+            log::warn!("download_dir: skipping entry with unsafe name");
             continue;
-        }
+        };
 
-        let remote_path = format!("{}/{}", remote_dir.trim_end_matches('/'), &name);
-        let local_path = format!("{}/{}", local_dir.trim_end_matches('/'), &name);
+        let remote_path = format!("{}/{}", remote_dir.trim_end_matches('/'), name);
+        let local_path = format!("{}/{}", local_dir.trim_end_matches('/'), name);
 
         let ft = entry.file_type();
         if ft == russh_sftp::protocol::FileType::Dir {

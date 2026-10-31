@@ -85,28 +85,3 @@ impl Default for CellAttrs {
         }
     }
 }
-
-impl CellAttrs {
-    /// Create a new TerminalCell with these attributes applied to the given character.
-    #[allow(dead_code)]
-    pub fn apply_to_cell(&self, c: char) -> TerminalCell {
-        let (fg, bg) = if self.inverse {
-            (self.bg_color, self.fg_color)
-        } else {
-            (self.fg_color, self.bg_color)
-        };
-
-        TerminalCell {
-            c,
-            fg_color: fg,
-            bg_color: bg,
-            bold: self.bold,
-            italic: self.italic,
-            underline: self.underline,
-            inverse: self.inverse,
-            dim: self.dim,
-            strikethrough: self.strikethrough,
-            wide_continuation: false,
-        }
-    }
-}

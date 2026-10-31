@@ -46,10 +46,6 @@ pub enum TestConnState {
 /// Add Host dialog state
 pub struct AddHostDialog {
     pub open: bool,
-    /// Animation state: 0.0 = fully closed, 1.0 = fully open
-    pub anim_state: f32,
-    /// Animation start time
-    pub anim_start_time: Option<f64>,
     pub edit_index: Option<usize>,
     pub name: String,
     pub host: String,
@@ -105,8 +101,6 @@ impl Default for AddHostDialog {
     fn default() -> Self {
         Self {
             open: false,
-            anim_state: 0.0,
-            anim_start_time: None,
             edit_index: None,
             name: String::new(),
             host: String::new(),
@@ -206,17 +200,14 @@ impl AddHostDialog {
         self.new_forward_local_port.clear();
         self.new_forward_remote_host = "127.0.0.1".to_owned();
         self.new_forward_remote_port.clear();
-        // Note: don't reset anim_state - let it animate out
     }
 
-    pub fn open_new(&mut self, current_time: f64) {
+    pub fn open_new(&mut self) {
         self.reset();
         self.open = true;
-        self.anim_start_time = Some(current_time);
-        self.anim_state = 0.0;
     }
 
-    pub fn open_edit(&mut self, index: usize, host: &HostEntry, current_time: f64) {
+    pub fn open_edit(&mut self, index: usize, host: &HostEntry) {
         self.open = true;
         self.edit_index = Some(index);
         self.name = host.name.clone();
@@ -277,54 +268,6 @@ impl AddHostDialog {
         } else {
             self.credential_mode = CredentialMode::None;
             self.selected_credential_id = None;
-        }
-        self.anim_start_time = Some(current_time);
-        self.anim_state = 0.0;
-    }
-
-    /// Update animation state, return true if drawer should be visible
-    #[allow(dead_code)]
-    pub fn update_animation(&mut self, current_time: f64) -> bool {
-        const ANIM_DURATION: f64 = 0.3; // 300ms for smooth slide
-
-        if self.open {
-            // Opening animation
-            if let Some(start) = self.anim_start_time {
-                let elapsed = current_time - start;
-                let progress = (elapsed / ANIM_DURATION).min(1.0);
-
-                // Ease-out cubic: fast start, smooth end
-                let t = progress as f32;
-                let eased = 1.0 - (1.0 - t).powi(3);
-
-                self.anim_state = eased;
-
-                if progress >= 1.0 {
-                    self.anim_start_time = None; // Animation complete
-                }
-            } else {
-                self.anim_state = 1.0;
-            }
-            true
-        } else {
-            // Closing animation
-            if let Some(start) = self.anim_start_time {
-                let elapsed = current_time - start;
-                let progress = (elapsed / ANIM_DURATION).min(1.0);
-
-                // Ease-in cubic: smooth start, fast end
-                let eased = (progress as f32).powi(3);
-
-                self.anim_state = 1.0 - eased;
-
-                if progress >= 1.0 {
-                    self.anim_start_time = None;
-                    return false; // Fully closed, stop rendering
-                }
-            } else {
-                return false; // Not animating, fully closed
-            }
-            true
         }
     }
 }
@@ -423,31 +366,14 @@ impl CredentialDialog {
 /// Snippet view state for Command Snippets feature
 #[derive(Default)]
 pub struct SnippetViewState {
-    #[allow(dead_code)]
-    pub search_query: String,
     pub group_filter: String,  // Filter by group (empty = show all)
     pub editing: Option<String>,  // id of snippet being edited
-    #[allow(dead_code)]
-    pub edit_name: String,
-    #[allow(dead_code)]
-    pub edit_command: String,
-    #[allow(dead_code)]
-    pub edit_group: String,
     // Drawer state for add/edit snippet
     pub open: bool,
     pub new_name: String,
     pub new_command: String,
     pub new_group: String,
     pub confirm_delete: Option<String>,  // id of snippet pending delete confirmation
-    // Session selector state for running snippets (deprecated, kept for compatibility)
-    #[allow(dead_code)]
-    pub pending_run_command: Option<String>,  // Command waiting to be executed
-    #[allow(dead_code)]
-    pub selector_open: bool,  // Whether session selector dialog is open
-    #[allow(dead_code)]
-    pub selected_tab: Option<usize>,  // Currently selected tab index in selector
-    #[allow(dead_code)]
-    pub selected_session: Option<usize>,  // Currently selected session index in selector
 }
 
 impl SnippetViewState {
@@ -469,11 +395,6 @@ impl SnippetViewState {
         self.new_group = group.to_string();
     }
 
-    /// Close the drawer
-    #[allow(dead_code)]
-    pub fn close(&mut self) {
-        self.open = false;
-    }
 }
 
 
@@ -529,34 +450,6 @@ pub enum AppView {
     Snippets,
     Settings,
     Replay,
-}
-
-/// Broadcast state - for Tab-internal continuous interactive operations
-/// When enabled, input is automatically synced to all panes in current tab
-#[derive(Default, Clone)]
-pub struct BroadcastState {
-    pub enabled: bool,
-}
-
-impl BroadcastState {
-    #[allow(dead_code)]
-    pub fn toggle(&mut self) {
-        self.enabled = !self.enabled;
-    }
-
-    #[allow(dead_code)]
-    pub fn enable(&mut self) {
-        self.enabled = true;
-    }
-
-    #[allow(dead_code)]
-    pub fn disable(&mut self) {
-        self.enabled = false;
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.enabled
-    }
 }
 
 use std::sync::Mutex;

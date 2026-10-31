@@ -26,7 +26,7 @@ pub(crate) mod drag_out;
 // `crate::sftp::types`/`crate::sftp::task` directly, so the re-exports are
 // legitimately unused there.
 #[allow(unused_imports)]
-pub use types::{SftpEntry, SftpEntryKind, SftpConnectionState, TransferProgress, SftpCommand, SftpResponse};
+pub use types::{safe_download_name, SftpEntry, SftpEntryKind, SftpConnectionState, TransferProgress, SftpCommand, SftpResponse};
 pub use selection::FileSelection;
 pub use local::LocalBrowser;
 pub use browser::SftpBrowser;

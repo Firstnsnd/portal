@@ -12,7 +12,6 @@
 //! - **terminal**: Terminal content rendering and text selection
 //! - **views**: View-specific UI implementations (SFTP, Hosts, Settings, etc.)
 //! - **widgets**: Reusable UI widgets
-//! - **formatting**: Formatting utilities for display
 //!
 //! ## Key Concepts
 //!
@@ -49,13 +48,11 @@ pub mod pane_view;
 pub mod terminal;
 pub mod views;
 pub mod widgets;
-pub mod formatting;
 pub mod state;
 
 // Re-export all public types for convenient access via `use ui::*`
 pub use theme::{ThemeColors, ThemePreset};
 pub use i18n::Language;
-pub use types::AppView;
 pub use pane::AppWindow;
 #[allow(unused_imports)]
 pub use pane_view::{WindowContext, ViewActions};

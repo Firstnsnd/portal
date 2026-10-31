@@ -417,7 +417,7 @@ impl PortalApp {
                 egui::RichText::new(format!(
                     "{} · {}",
                     lang.tf("recordings_files", &count.to_string()),
-                    crate::ui::views::replay_view::fmt_size(total)
+                    crate::ui::views::sftp::format::format_file_size(total)
                 ))
                 .color(theme.fg_dim)
                 .size(FONT_SM),

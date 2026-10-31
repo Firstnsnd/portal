@@ -7,7 +7,53 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+/// PIDs of every PTY child we spawned and that has not been confirmed reaped.
+/// Signal-time cleanup kills exactly these — the previous handler
+/// (`execvp pkill -9 -f "/bin/zsh -l"`) matched every login shell on the
+/// machine by command line and killed the user's own Terminal / VS Code
+/// shells along with ours.
+static CHILD_PIDS: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+
+/// Called in the parent right after a successful forkpty.
+fn register_child_pid(pid: i32) {
+    if let Ok(mut pids) = CHILD_PIDS.lock() {
+        if !pids.contains(&pid) {
+            pids.push(pid);
+        }
+    }
+}
+
+/// Called once the child's death has been confirmed (reaped or ECHILD) so a
+/// recycled pid can never be mistaken for ours at signal time.
+fn unregister_child_pid(pid: i32) {
+    if let Ok(mut pids) = CHILD_PIDS.lock() {
+        pids.retain(|&p| p != pid);
+    }
+}
+
+/// SIGKILL every still-registered PTY child. Runs on the signal_hook
+/// iterator thread — a normal thread, so taking the lock is fine (this is
+/// NOT an async-signal-handler context).
+pub fn kill_registered_children() {
+    if let Ok(mut pids) = CHILD_PIDS.lock() {
+        for &pid in pids.iter() {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+        pids.clear();
+    }
+}
+
+/// Single choke point for "this child is confirmed dead": latches the alive
+/// flag and drops the pid from the signal-time kill registry, so a recycled
+/// pid can never be mistaken for one of ours.
+fn mark_dead(pty: &UnixPty) {
+    pty.alive.store(false, Ordering::Relaxed);
+    unregister_child_pid(pty.child_pid);
+}
 
 /// Get the process name for a given PID via `ps -p PID -o comm=`.
 fn ps_comm(pid: u32) -> Option<String> {
@@ -168,6 +214,7 @@ impl Pty for UnixPty {
         }
 
         // ── Parent process ────────────────────────────────────────────────
+        register_child_pid(pid);
         // forkpty handed us the master fd directly. dup it so the File we
         // store owns an independent descriptor (and closing our copy won't
         // tear down the kernel's master while PtyWriter/session hold dupes).
@@ -286,7 +333,7 @@ impl Pty for UnixPty {
                             libc::WIFEXITED(status),
                             libc::WIFSIGNALED(status),
                         );
-                        self.alive.store(false, Ordering::Relaxed);
+                        mark_dead(self);
                         false
                     } else {
                         log::debug!(
@@ -306,7 +353,7 @@ impl Pty for UnixPty {
                     let gone = std::io::Error::last_os_error().raw_os_error()
                         == Some(libc::ECHILD);
                     if gone {
-                        self.alive.store(false, Ordering::Relaxed);
+                        mark_dead(self);
                     }
                     !gone
                 }
@@ -327,7 +374,7 @@ impl Pty for UnixPty {
                 // Error - check if ECHILD (no child processes)
                 let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
                 if errno == libc::ECHILD {
-                    self.alive.store(false, Ordering::Relaxed);
+                    mark_dead(self);
                     return Ok(None);
                 }
                 Err(Error::ReadFailed(format!("waitpid failed: {}", errno)))
@@ -336,7 +383,7 @@ impl Pty for UnixPty {
                 Ok(None)
             } else {
                 // Child exited
-                self.alive.store(false, Ordering::Relaxed);
+                mark_dead(self);
                 Ok(Some(ExitStatus::from_raw(status)))
             }
         }
@@ -353,7 +400,7 @@ impl Pty for UnixPty {
                 let err = std::io::Error::last_os_error();
                 // ESRCH = no such process, already dead
                 if err.raw_os_error() == Some(libc::ESRCH) {
-                    self.alive.store(false, Ordering::Relaxed);
+                    mark_dead(self);
                     return Ok(());
                 }
                 return Err(Error::SpawnFailed(format!("Failed to kill process: {}", err)));
@@ -364,13 +411,13 @@ impl Pty for UnixPty {
             for _ in 0..5 {
                 let result = libc::waitpid(self.child_pid, &mut status, libc::WNOHANG);
                 if result == self.child_pid {
-                    self.alive.store(false, Ordering::Relaxed);
+                    mark_dead(self);
                     return Ok(());
                 }
                 if result < 0 {
                     // ECHILD = no child to wait for, already dead
                     if std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD) {
-                        self.alive.store(false, Ordering::Relaxed);
+                        mark_dead(self);
                         return Ok(());
                     }
                 }
@@ -379,7 +426,7 @@ impl Pty for UnixPty {
 
             // Force kill with SIGKILL
             libc::kill(self.child_pid, libc::SIGKILL);
-            self.alive.store(false, Ordering::Relaxed);
+            mark_dead(self);
         }
         Ok(())
     }
@@ -388,75 +435,95 @@ impl Pty for UnixPty {
         if !self.alive.load(Ordering::Relaxed) {
             return None;
         }
+        detect_shell_name(self.child_pid)
+    }
+}
 
-        // 1. Direct PTY child process name (ps first, then platform fallback).
-        let direct_name =
-            if let Some(name) = ps_comm(self.child_pid as u32) {
-                Some(name)
-            } else {
-                // macOS: fall back to proc_pidpath if ps failed.
-                #[cfg(target_os = "macos")]
-                {
-                    use std::path::PathBuf;
-                    (|| {
-                        unsafe {
-                            let mut path: Vec<u8> = vec![0; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
-                            if libc::proc_pidpath(
-                                self.child_pid,
-                                path.as_mut_ptr() as *mut libc::c_void,
-                                path.len() as u32,
-                            ) > 0 {
-                                let null_pos = path.iter().position(|&b| b == 0).unwrap_or(path.len());
-                                let path_str = std::str::from_utf8(&path[..null_pos]).ok()?;
-                                PathBuf::from(path_str)
-                                    .file_name()
-                                    .and_then(|name| name.to_str())
-                                    .map(|s| s.to_string())
-                            } else {
-                                None
-                            }
-                        }
-                    })()
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    None
-                }
-            }?;
+impl UnixPty {
+    /// The forked child's pid. Cheap accessor so callers can run the
+    /// subprocess-based shell detection ([`detect_shell_name`]) WITHOUT
+    /// holding the PTY mutex — the scan spawns `ps`/`pgrep` and takes
+    /// 5–30 ms, which must not block PTY writes.
+    pub fn child_pid(&self) -> i32 {
+        self.child_pid
+    }
+}
 
-        // 2. Scan direct children for a nested known interactive shell.
-        //    Handles "zsh → user ran `bash`" — the visible shell is the
-        //    child, not the PTY's login shell.
-        {
-            use std::process::Command;
-            const KNOWN: &[&str] = &["bash", "zsh", "fish", "ksh", "csh", "tcsh", "dash"];
-            if let Ok(out) = Command::new("pgrep")
-                .args(["-P", &self.child_pid.to_string()])
-                .output()
+/// Detect the interactive shell name for a PTY child pid: the direct child's
+/// comm, preferring a nested known shell if one was exec'd on top (e.g. the
+/// user ran `bash` inside the login `zsh`).
+///
+/// Free function on purpose: it spawns `ps` + `pgrep` (5–30 ms) and must be
+/// callable without holding the PTY mutex. Callers on the UI path run this on
+/// a background thread (see `RealPtySession::get_shell_name`).
+pub fn detect_shell_name(child_pid: i32) -> Option<String> {
+    // 1. Direct PTY child process name (ps first, then platform fallback).
+    let direct_name =
+        if let Some(name) = ps_comm(child_pid as u32) {
+            Some(name)
+        } else {
+            // macOS: fall back to proc_pidpath if ps failed.
+            #[cfg(target_os = "macos")]
             {
-                if out.status.success() {
-                    let mut best: Option<(u32, String)> = None;
-                    for line in String::from_utf8_lossy(&out.stdout).lines() {
-                        let cpid: u32 = match line.trim().parse() {
-                            Ok(p) => p,
-                            Err(_) => continue,
-                        };
-                        if let Some(comm) = ps_comm(cpid) {
-                            if KNOWN.contains(&comm.as_str()) && comm != direct_name
-                                && best.as_ref().is_none_or(|(pid, _)| cpid > *pid) {
-                                    best = Some((cpid, comm));
-                                }
+                use std::path::PathBuf;
+                (|| {
+                    unsafe {
+                        let mut path: Vec<u8> = vec![0; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+                        if libc::proc_pidpath(
+                            child_pid,
+                            path.as_mut_ptr() as *mut libc::c_void,
+                            path.len() as u32,
+                        ) > 0 {
+                            let null_pos = path.iter().position(|&b| b == 0).unwrap_or(path.len());
+                            let path_str = std::str::from_utf8(&path[..null_pos]).ok()?;
+                            PathBuf::from(path_str)
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .map(|s| s.to_string())
+                        } else {
+                            None
                         }
                     }
-                    if let Some((_, name)) = best {
-                        return Some(name);
+                })()
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                None
+            }
+        }?;
+
+    // 2. Scan direct children for a nested known interactive shell.
+    //    Handles "zsh → user ran `bash`" — the visible shell is the
+    //    child, not the PTY's login shell.
+    {
+        use std::process::Command;
+        const KNOWN: &[&str] = &["bash", "zsh", "fish", "ksh", "csh", "tcsh", "dash"];
+        if let Ok(out) = Command::new("pgrep")
+            .args(["-P", &child_pid.to_string()])
+            .output()
+        {
+            if out.status.success() {
+                let mut best: Option<(u32, String)> = None;
+                for line in String::from_utf8_lossy(&out.stdout).lines() {
+                    let cpid: u32 = match line.trim().parse() {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
+                    if let Some(comm) = ps_comm(cpid) {
+                        if KNOWN.contains(&comm.as_str()) && comm != direct_name
+                            && best.as_ref().is_none_or(|(pid, _)| cpid > *pid) {
+                                best = Some((cpid, comm));
+                            }
                     }
+                }
+                if let Some((_, name)) = best {
+                    return Some(name);
                 }
             }
         }
-
-        Some(direct_name)
     }
+
+    Some(direct_name)
 }
 
 impl Drop for UnixPty {
@@ -472,7 +539,7 @@ impl Drop for UnixPty {
                 let start = std::time::Instant::now();
                 while start.elapsed() < std::time::Duration::from_millis(50) {
                     if libc::waitpid(self.child_pid, &mut status, libc::WNOHANG) == self.child_pid {
-                        self.alive.store(false, Ordering::Relaxed);
+                        mark_dead(self);
                         return;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(5));
@@ -481,7 +548,7 @@ impl Drop for UnixPty {
 
             // Force kill if still alive
             libc::kill(self.child_pid, libc::SIGKILL);
-            self.alive.store(false, Ordering::Relaxed);
+            mark_dead(self);
 
             // Reap zombie (non-blocking, may fail if already reaped)
             let mut status: i32 = 0;

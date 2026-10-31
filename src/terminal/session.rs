@@ -71,6 +71,11 @@ pub struct RealPtySession {
     last_shell_check: Arc<Mutex<Instant>>,
     /// Live system metrics collected from the local machine
     pub metrics: Arc<Mutex<MetricsSnapshot>>,
+    /// Gate for the metrics collector: the UI raises it only while the
+    /// Metrics drawer is visible for the focused pane (mirrors SSH sessions).
+    /// The collector thread also exits once `alive` latches false, so closed
+    /// sessions stop costing a thread + a sysinfo refresh every 5 s.
+    metrics_enabled: Arc<AtomicBool>,
     /// Asciicast recorder slot: `Some` while the session is being recorded.
     /// Cloned into the reader thread at spawn, so the tap sees it.
     pub recorder: Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>>,
@@ -96,9 +101,44 @@ pub struct RealPtySession {
 
 impl RealPtySession {
     #[cfg(unix)]
-    #[allow(dead_code)]
+    #[allow(dead_code)] // integration tests (tests/e2e_tests.rs); bin tree spawns via with_scrollback_limit
     pub fn new(id: usize, cols: u16, rows: u16, shell: &str) -> Result<Self> {
         Self::with_scrollback_limit(id, cols, rows, shell, TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES, None, false)
+    }
+
+    /// A session-shaped placeholder with no PTY, used when spawning fails so
+    /// the UI can show its standard "session ended" state instead of the whole
+    /// app panicking mid-frame. Writes fail, `is_connected()` is false.
+    pub fn dead_placeholder(cols: usize, rows: usize) -> Self {
+        Self {
+            #[cfg(unix)]
+            pty: None,
+            #[cfg(windows)]
+            pty: None,
+            #[cfg(unix)]
+            writer: None,
+            grid: Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
+                cols,
+                rows,
+                TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES,
+            ))),
+            alive: Arc::new(AtomicBool::new(false)),
+            _reader_thread: None,
+            cached_shell_name: Arc::new(Mutex::new(None)),
+            last_shell_check: Arc::new(Mutex::new(Instant::now())),
+            metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
+            metrics_enabled: Arc::new(AtomicBool::new(false)),
+            recorder: Arc::new(Mutex::new(None)),
+            ai_capture: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_tap: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_bridge: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_transfer: Arc::new(Mutex::new(None)),
+            #[cfg(unix)]
+            zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
+        }
     }
 
     #[cfg(unix)]
@@ -269,6 +309,11 @@ impl RealPtySession {
                                         for byte in bytes {
                                             parser.advance(&mut handler, *byte);
                                         }
+                                        // One bump per chunk (not per byte): the
+                                        // renderer's visible-rows cache keys on
+                                        // this version to skip re-snapshotting
+                                        // when nothing changed.
+                                        grid.version = grid.version.wrapping_add(1);
                                         // Asciicast tap: capture the raw chunk
                                         // with a timestamp (outside the grid
                                         // lock, in the reader thread).
@@ -340,9 +385,17 @@ impl RealPtySession {
         let cached_shell_name = Arc::new(Mutex::new(None));
         let last_shell_check = Arc::new(Mutex::new(Instant::now()));
         let metrics = Arc::new(Mutex::new(MetricsSnapshot::new()));
+        let metrics_enabled = Arc::new(AtomicBool::new(false));
 
-        // Spawn a background thread for local metrics collection
+        // Spawn a background thread for local metrics collection.
+        // Gated by `metrics_enabled` (raised by the UI only while the Metrics
+        // drawer is visible for the focused pane) and bounded by `alive`: the
+        // thread exits within a tick of the child dying, so closed sessions
+        // don't leak a thread that refreshes sysinfo and forces repaints
+        // forever.
         let metrics_clone: Arc<Mutex<MetricsSnapshot>> = Arc::clone(&metrics);
+        let metrics_gate = Arc::clone(&metrics_enabled);
+        let alive_for_metrics = Arc::clone(&alive);
         thread::Builder::new()
             .name("metrics-collector".to_string())
             .spawn(move || {
@@ -350,8 +403,19 @@ impl RealPtySession {
                 let mut nets = sysinfo::Networks::new_with_refreshed_list();
                 let mut prev_rx: Option<u64> = None;
                 let mut prev_tx: Option<u64> = None;
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(5));
+                let mut last_poll: Option<Instant> = None;
+                while alive_for_metrics.load(std::sync::atomic::Ordering::Relaxed) {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    // 1 s tick keeps enable→first-sample latency low at zero
+                    // cost while the gate is off; collection itself stays on
+                    // the 5 s cadence.
+                    if !metrics_gate.load(std::sync::atomic::Ordering::Relaxed) {
+                        continue;
+                    }
+                    if last_poll.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(5)) {
+                        continue;
+                    }
+                    last_poll = Some(Instant::now());
                     sys.refresh_memory();
                     sys.refresh_cpu_usage();
                     nets.refresh();
@@ -376,10 +440,11 @@ impl RealPtySession {
                     metrics_clone.lock().unwrap().push(m);
                     // Metrics snapshots change independently of terminal output;
                     // wake the UI so the drawer's sparklines keep animating.
+                    // Only while the drawer is actually watching this session.
                     crate::repaint::notify_repaint();
                 }
             })
-            .ok(); // fire-and-forget; thread outlives the loop, cleaned on drop
+            .ok();
 
         Ok(Self {
             pty: Some(pty),
@@ -390,6 +455,7 @@ impl RealPtySession {
             cached_shell_name,
             last_shell_check,
             metrics,
+            metrics_enabled,
             recorder,
             ai_capture,
             zmodem_tap,
@@ -441,7 +507,7 @@ impl RealPtySession {
     }
 
     /// Check if the PTY session is still alive
-    #[allow(dead_code)]
+    #[allow(dead_code)] // integration tests (tests/e2e_tests.rs); production reads has_exited()
     pub fn is_alive(&self) -> bool {
         #[cfg(unix)]
         if let Some(ref pty) = self.pty {
@@ -454,6 +520,14 @@ impl RealPtySession {
             return pty_ref.is_alive();
         }
         false
+    }
+
+    /// Raise/lower the metrics collector gate. The UI calls this every frame
+    /// while the Metrics drawer is visible for the focused pane — mirroring
+    /// `SshSession::set_metrics_enabled` — so a hidden drawer costs nothing.
+    pub fn set_metrics_enabled(&self, enabled: bool) {
+        self.metrics_enabled
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Whether the session is still usable.
@@ -482,40 +556,62 @@ impl RealPtySession {
         !self.alive.load(Ordering::Relaxed)
     }
 
-    /// Get the shell name (cached for 1 second)
+    /// Get the shell name. Served from a 1 s cache; refreshes happen on a
+    /// background thread — the `ps` + `pgrep` pair behind detection costs
+    /// 5–30 ms and this runs on the UI thread every frame (status line), so
+    /// a synchronous refresh was a recurring frame hitch. Callers see the
+    /// stale value (or `None`, which the UI maps to the shell-path fallback)
+    /// until the fresh one lands.
     pub fn get_shell_name(&self) -> Option<String> {
-        // Check cache first (5 second TTL)
-        {
-            let mut last_check = self.last_shell_check.lock().unwrap();
-            if let Some(ref name) = *self.cached_shell_name.lock().unwrap() {
-                if last_check.elapsed() < std::time::Duration::from_secs(1) {
-                    return Some(name.clone());
-                }
-            }
-            *last_check = Instant::now();
+        const TTL: std::time::Duration = std::time::Duration::from_secs(1);
+
+        let cached = self.cached_shell_name.lock().unwrap().clone();
+        let last = *self.last_shell_check.lock().unwrap();
+        if cached.is_some() && last.elapsed() < TTL {
+            return cached;
         }
 
-        // Cache miss or expired, fetch fresh
+        // Dead session: freeze the last known name, stop spawning refreshes.
+        if !self.is_connected() {
+            return cached;
+        }
+
+        // Expired (or first call). The 1 s `last_shell_check` stamp doubles
+        // as the in-flight guard — it is set at refresh START, so while the
+        // background detection runs (≪1 s) no extra threads spawn.
+        {
+            let mut last = self.last_shell_check.lock().unwrap();
+            if last.elapsed() < TTL {
+                return self.cached_shell_name.lock().unwrap().clone();
+            }
+            *last = Instant::now();
+        }
+
         #[cfg(unix)]
         if let Some(ref pty) = self.pty {
-            let pty_ref = pty.lock().unwrap();
-            let name = pty_ref.get_shell_name();
-            if let Some(ref name) = name {
-                *self.cached_shell_name.lock().unwrap() = Some(name.clone());
-                return Some(name.clone());
-            }
+            let pty = Arc::clone(pty);
+            let cache = Arc::clone(&self.cached_shell_name);
+            let _ = thread::Builder::new()
+                .name("shell-name-detect".to_string())
+                .spawn(move || {
+                    // Brief lock only to read the pid; the subprocess scan
+                    // runs unlocked so it can never stall PTY writes.
+                    let pid = pty.lock().unwrap().child_pid();
+                    if let Some(name) = super::unix_pty::detect_shell_name(pid) {
+                        *cache.lock().unwrap() = Some(name);
+                    }
+                });
         }
         #[cfg(windows)]
         if let Some(ref pty) = self.pty {
             let pty_ref = pty.lock().unwrap();
-            let name = pty_ref.get_shell_name();
-            if let Some(ref name) = name {
+            if let Some(name) = pty_ref.get_shell_name() {
                 *self.cached_shell_name.lock().unwrap() = Some(name.clone());
-                return Some(name.clone());
+                return Some(name);
             }
         }
 
-        None
+        cached
     }
 
     /// Get the terminal grid
@@ -929,6 +1025,7 @@ mod tests {
             cached_shell_name: Arc::new(Mutex::new(None)),
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
+            metrics_enabled: Arc::new(AtomicBool::new(false)),
             recorder: Arc::new(Mutex::new(None)),
             ai_capture: Arc::new(Mutex::new(None)),
             #[cfg(unix)]
@@ -967,6 +1064,7 @@ mod tests {
             cached_shell_name: Arc::new(Mutex::new(None)),
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
+            metrics_enabled: Arc::new(AtomicBool::new(false)),
             recorder: Arc::new(Mutex::new(None)),
             ai_capture: Arc::new(Mutex::new(None)),
             #[cfg(unix)]
@@ -1004,6 +1102,7 @@ mod tests {
             cached_shell_name: Arc::new(Mutex::new(None)),
             last_shell_check: Arc::new(Mutex::new(Instant::now())),
             metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
+            metrics_enabled: Arc::new(AtomicBool::new(false)),
             recorder: Arc::new(Mutex::new(None)),
             ai_capture: Arc::new(Mutex::new(None)),
             #[cfg(unix)]
@@ -1042,6 +1141,7 @@ mod tests {
                 cached_shell_name: Arc::new(Mutex::new(None)),
                 last_shell_check: Arc::new(Mutex::new(Instant::now())),
                 metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
+                metrics_enabled: Arc::new(AtomicBool::new(false)),
                 recorder: Arc::new(Mutex::new(None)),
             ai_capture: Arc::new(Mutex::new(None)),
                 #[cfg(unix)]
