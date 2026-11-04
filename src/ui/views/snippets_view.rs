@@ -370,6 +370,16 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                                 &mut window.snippet_view_state.new_command,
                                 cx.language.t("command_hint"), 80.0, cx.theme);
 
+                            // Error message (missing required fields)
+                            if !window.snippet_view_state.error.is_empty() {
+                                ui.add_space(widgets::SPACING_FIELD);
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new("\u{26A0}").size(14.0).color(cx.theme.red));
+                                    ui.add_space(4.0);
+                                    ui.label(egui::RichText::new(&window.snippet_view_state.error).color(cx.theme.red).size(12.0));
+                                });
+                            }
+
                         });
                 });
 
@@ -379,9 +389,25 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                 ui.add_space(widgets::FORM_LEFT_MARGIN);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(16.0);
-                    let can_save = !window.snippet_view_state.new_name.trim().is_empty();
-
-                    if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() && can_save {
+                    // Always route a Save click into the handler so a submit
+                    // with missing required fields can be surfaced as a toast —
+                    // a `can_save`-guarded click silently swallowed the feedback.
+                    if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() {
+                        // Required-field validation (name + command are both
+                        // marked required in the form).
+                        let mut missing: Vec<&'static str> = Vec::new();
+                        if window.snippet_view_state.new_name.trim().is_empty() {
+                            missing.push(cx.language.t("name"));
+                        }
+                        if window.snippet_view_state.new_command.trim().is_empty() {
+                            missing.push(cx.language.t("command"));
+                        }
+                        if !missing.is_empty() {
+                            let msg = cx.language.tf("required_fields_error", &missing.join(", "));
+                            window.snippet_view_state.error = msg.clone();
+                            window.notifications.push(crate::ssh::AppNotification::warning(msg));
+                            // Skip the save below.
+                        } else {
                         let group = if window.snippet_view_state.new_group.trim().is_empty() {
                             cx.language.t("snippet_default_group").to_string()
                         } else {
@@ -413,6 +439,7 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                         );
                         window.snippet_view_state.open = false;
                         window.snippet_view_state.editing = None;
+                        }
                     }
                     ui.add_space(8.0);
                     if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {

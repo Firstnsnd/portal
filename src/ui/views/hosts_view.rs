@@ -1140,17 +1140,15 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                 ui.add_space(widgets::FORM_LEFT_MARGIN);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(16.0);
-                    let can_save = !window.add_host_dialog.name.trim().is_empty()
-                        && !window.add_host_dialog.host.trim().is_empty()
-                        && !window.add_host_dialog.port.trim().is_empty()
-                        && !window.add_host_dialog.username.trim().is_empty();
-
                     let is_testing = matches!(window.add_host_dialog.test_conn_state, TestConnState::Testing);
                     if ui.add_enabled(!is_testing, widgets::primary_button(cx.language.t("test"), cx.theme)).clicked() {
                         test_clicked = true;
                     }
                     ui.add_space(8.0);
-                    if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() && can_save {
+                    // Always route a Save click into the save handler, so that
+                    // missing required fields can be surfaced as a toast (a
+                    // disabled/guarded click would swallow the feedback).
+                    if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() {
                         save_clicked = true;
                     }
                     ui.add_space(8.0);
@@ -1249,8 +1247,27 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
         let host = window.add_host_dialog.host.trim().to_owned();
         let port: u16 = window.add_host_dialog.port.trim().parse().unwrap_or(22);
 
-        if name.is_empty() || host.is_empty() {
-            window.add_host_dialog.error = cx.language.t("label_required").to_string();
+        // Required-field validation: surface any missing field as a toast so a
+        // submitted-but-incomplete form is never silently ignored.
+        let mut missing: Vec<&'static str> = Vec::new();
+        if name.is_empty() {
+            missing.push(cx.language.t("label"));
+        }
+        if host.is_empty() {
+            missing.push(cx.language.t("host_ip"));
+        }
+        if window.add_host_dialog.port.trim().is_empty() {
+            missing.push(cx.language.t("port"));
+        }
+        if window.add_host_dialog.username.trim().is_empty() {
+            missing.push(cx.language.t("username"));
+        }
+        if !missing.is_empty() {
+            window.add_host_dialog.error =
+                cx.language.tf("required_fields_error", &missing.join(", "));
+            window.notifications.push(crate::ssh::AppNotification::warning(
+                window.add_host_dialog.error.clone(),
+            ));
             return;
         }
 

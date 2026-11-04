@@ -324,6 +324,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "recording_saved" => format!("録画を保存しました: {arg} — クリックで再生"),
         "replay_none_for_host" => format!("{arg} の録画はまだありません。"),
         "zmodem_failed" => format!("転送に失敗しました: {}", arg),
+        "required_fields_error" => format!("必須項目が未入力です：{arg}"),
         _ => format!("{}: {}", key, arg),
     }
 }

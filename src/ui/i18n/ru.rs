@@ -324,6 +324,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "recording_saved" => format!("Запись сохранена: {arg} — нажмите для воспроизведения"),
         "replay_none_for_host" => format!("Записей для {arg} пока нет."),
         "zmodem_failed" => format!("Ошибка передачи: {}", arg),
+        "required_fields_error" => format!("Обязательные поля: {arg}"),
         _ => format!("{}: {}", key, arg),
     }
 }

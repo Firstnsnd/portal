@@ -342,6 +342,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "recording_saved" => format!("录制已保存：{arg}，点击回放"),
         "replay_none_for_host" => format!("主机 {arg} 暂无录制。"),
         "zmodem_failed" => format!("传输失败：{}", arg),
+        "required_fields_error" => format!("必填项未填写：{arg}"),
         _ => format!("{}: {}", key, arg),
     }
 }

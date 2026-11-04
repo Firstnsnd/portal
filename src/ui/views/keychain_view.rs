@@ -469,24 +469,44 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                 ui.add_space(widgets::FORM_LEFT_MARGIN);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(16.0);
-                    let can_save = !window.credential_dialog.name.trim().is_empty();
-                    let has_auth = match window.credential_dialog.cred_type {
-                        crate::ui::types::dialogs::CredentialTypeChoice::Password => {
-                            !window.credential_dialog.username.trim().is_empty()
-                                && !window.credential_dialog.password.is_empty()
+                    // Always route a Save click into the handler so a submit
+                    // with missing required fields can be surfaced as a toast —
+                    // a `can_save && has_auth`-guarded click silently swallowed
+                    // the feedback.
+                    if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() {
+                        // Required-field validation.
+                        let mut missing: Vec<&'static str> = Vec::new();
+                        if window.credential_dialog.name.trim().is_empty() {
+                            missing.push(cx.language.t("name"));
                         }
-                        crate::ui::types::dialogs::CredentialTypeChoice::SshKey => {
-                            if window.credential_dialog.key_source == crate::ui::types::dialogs::KeySourceChoice::LocalFile {
-                                !window.credential_dialog.key_path.trim().is_empty()
-                            } else {
-                                !window.credential_dialog.key_content.trim().is_empty()
+                        match window.credential_dialog.cred_type {
+                            crate::ui::types::dialogs::CredentialTypeChoice::Password => {
+                                if window.credential_dialog.username.trim().is_empty() {
+                                    missing.push(cx.language.t("username"));
+                                }
+                                if window.credential_dialog.password.is_empty() {
+                                    missing.push(cx.language.t("password"));
+                                }
                             }
+                            crate::ui::types::dialogs::CredentialTypeChoice::SshKey => {
+                                if window.credential_dialog.key_source == crate::ui::types::dialogs::KeySourceChoice::LocalFile {
+                                    if window.credential_dialog.key_path.trim().is_empty() {
+                                        missing.push(cx.language.t("key_path"));
+                                    }
+                                } else if window.credential_dialog.key_content.trim().is_empty() {
+                                    missing.push(cx.language.t("key_content"));
+                                }
+                            }
+                            // No secret required — the agent holds the keys.
+                            crate::ui::types::dialogs::CredentialTypeChoice::Agent => {}
                         }
-                        // No secret required — the agent holds the keys.
-                        crate::ui::types::dialogs::CredentialTypeChoice::Agent => true,
-                    };
+                        if !missing.is_empty() {
+                            let msg = cx.language.tf("required_fields_error", &missing.join(", "));
+                            window.credential_dialog.error = msg.clone();
+                            window.notifications.push(crate::ssh::AppNotification::warning(msg));
+                        } else {
+                        window.credential_dialog.error.clear();
 
-                    if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() && can_save && has_auth {
                         use crate::config::{Credential, store_credential_secret};
                         use uuid::Uuid;
 
@@ -588,6 +608,7 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                         }
                         window.credential_dialog.open = false;
                         window.credential_dialog.edit_id = None;
+                        }
                     }
                     ui.add_space(8.0);
                     if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {

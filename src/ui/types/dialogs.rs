@@ -373,6 +373,7 @@ pub struct SnippetViewState {
     pub new_name: String,
     pub new_command: String,
     pub new_group: String,
+    pub error: String,
     pub confirm_delete: Option<String>,  // id of snippet pending delete confirmation
 }
 
@@ -384,6 +385,7 @@ impl SnippetViewState {
         self.new_name.clear();
         self.new_command.clear();
         self.new_group = default_group.to_string();
+        self.error.clear();
     }
 
     /// Open the drawer for editing an existing snippet
@@ -393,6 +395,7 @@ impl SnippetViewState {
         self.new_name = name.to_string();
         self.new_command = command.to_string();
         self.new_group = group.to_string();
+        self.error.clear();
     }
 
 }
