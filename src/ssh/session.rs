@@ -887,6 +887,9 @@ impl SshSession {
                                             for byte in bytes {
                                                 parser.advance(&mut handler, *byte);
                                             }
+                                            // One bump per chunk — the renderer's
+                                            // visible-rows cache keys on this version.
+                                            g.version = g.version.wrapping_add(1);
                                         }
                                         // Asciicast tap (outside the grid lock).
                                         if let Ok(mut slot) = recorder.lock() {
@@ -923,6 +926,9 @@ impl SshSession {
                                     for byte in &*data {
                                         parser.advance(&mut handler, *byte);
                                     }
+                                    // One bump per chunk — the renderer's
+                                    // visible-rows cache keys on this version.
+                                    g.version = g.version.wrapping_add(1);
                                 }
                                 if let Ok(mut slot) = recorder.lock() {
                                     if let Some(rec) = slot.as_mut() {
@@ -957,6 +963,9 @@ impl SshSession {
                                             for byte in bytes {
                                                 parser.advance(&mut handler, *byte);
                                             }
+                                            // One bump per chunk — the renderer's
+                                            // visible-rows cache keys on this version.
+                                            g.version = g.version.wrapping_add(1);
                                         }
                                         // Asciicast tap (stderr merged into the
                                         // same stream).
@@ -993,6 +1002,9 @@ impl SshSession {
                                     for byte in &*data {
                                         parser.advance(&mut handler, *byte);
                                     }
+                                    // One bump per chunk — the renderer's
+                                    // visible-rows cache keys on this version.
+                                    g.version = g.version.wrapping_add(1);
                                 }
                                 if let Ok(mut slot) = recorder.lock() {
                                     if let Some(rec) = slot.as_mut() {
