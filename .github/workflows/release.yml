@@ -34,15 +34,13 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cargo-bundle
-        run: cargo install cargo-bundle
-
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Build DMG
         run: |
           export VERSION="${GITHUB_REF#refs/tags/v}"
+          export TARGET="${{ matrix.target }}"
           ./scripts/build-dmg.sh
           DMG_FILE=$(ls target/release/Portal-*.dmg | head -1)
           cp "$DMG_FILE" "Portal-macos-${{ matrix.name }}.dmg"

@@ -163,9 +163,6 @@ The build script automatically completes three steps: build, sign, and package D
 #### 1. Personal Use (No Apple Developer Account Required)
 
 ```bash
-# Install cargo-bundle (first time only)
-cargo install cargo-bundle
-
 # Build package (ad-hoc signing)
 ./scripts/build-dmg.sh
 ```

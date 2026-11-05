@@ -34,7 +34,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Remove 'v' prefix if present (e.g., "v0.10.0" -> "0.10.0")
 VERSION="${VERSION:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')}"
 VERSION="${VERSION:-0.0.0}"
-ARCH="$(uname -m)"
+# Cross-compile target triple (set by CI), e.g. x86_64-apple-darwin.
+# Unset = native build on this machine.
+TARGET="${TARGET:-}"
+
+# ARCH for the artifact filename: derive from TARGET when cross-compiling,
+# otherwise fall back to the host architecture.
+case "${TARGET}" in
+  aarch64*) ARCH="arm64" ;;
+  x86_64*)  ARCH="x86_64" ;;
+  *)        ARCH="$(uname -m)" ;;
+esac
+
 APP_NAME="Portal"
 DMG_NAME="${APP_NAME}-${VERSION}-${ARCH}.dmg"
 PKG_NAME="${APP_NAME}-${VERSION}-${ARCH}.pkg"
@@ -52,11 +63,56 @@ APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
 APPLE_PASSWORD="${APPLE_PASSWORD:-}"
 
 # ── 1. Build ──
-echo "==> Building ${APP_NAME}.app (release)..."
-cargo bundle --format osx --release
+if [ -z "${TARGET}" ]; then
+    echo "==> Building release binary (native)..."
+    cargo build --release
+    BINARY="target/release/portal"
+else
+    echo "==> Using release binary built for ${TARGET}..."
+    BINARY="target/${TARGET}/release/portal"
+fi
+
+if [ ! -f "${BINARY}" ]; then
+    echo "ERROR: ${BINARY} not found. Run \`cargo build --release${TARGET:+ --target ${TARGET}}\` first."
+    exit 1
+fi
+
+# ── 1b. Assemble Portal.app bundle ──
+# (cargo-bundle was dropped: it's abandoned and its `sigstore` dependency no
+# longer compiles on current Rust. A macOS .app is just a directory layout,
+# so we build it by hand instead.)
+echo "==> Assembling ${APP_PATH}..."
+rm -rf "${APP_PATH}"
+mkdir -p "${APP_PATH}/Contents/MacOS" "${APP_PATH}/Contents/Resources"
+
+cp "${BINARY}" "${APP_PATH}/Contents/MacOS/portal"
+cp assets/portal.icns "${APP_PATH}/Contents/Resources/portal.icns"
+printf 'APPL????' > "${APP_PATH}/Contents/PkgInfo"
+
+cat > "${APP_PATH}/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key><string>English</string>
+    <key>CFBundleDisplayName</key><string>${APP_NAME}</string>
+    <key>CFBundleExecutable</key><string>portal</string>
+    <key>CFBundleIconFile</key><string>portal.icns</string>
+    <key>CFBundleIdentifier</key><string>com.portal.app</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>${APP_NAME}</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+    <key>CFBundleVersion</key><string>${VERSION}</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+    <key>LSMinimumSystemVersion</key><string>12.0</string>
+    <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+EOF
 
 if [ ! -d "${APP_PATH}" ]; then
-    echo "ERROR: ${APP_PATH} not found. cargo bundle may have failed."
+    echo "ERROR: ${APP_PATH} not found. Bundle assembly may have failed."
     exit 1
 fi
 
