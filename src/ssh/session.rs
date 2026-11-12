@@ -879,13 +879,21 @@ impl SshSession {
                                     &zmodem_bridge,
                                     &data,
                                     |bytes| {
+                                        // Display path goes through the AI
+                                        // capture's echo rewrite when armed;
+                                        // the taps below see the raw bytes.
+                                        let display =
+                                            crate::terminal::ai_capture::display_bytes(
+                                                &ai_capture,
+                                                bytes,
+                                            );
                                         if let Ok(mut g) = grid.lock() {
                                             let mut handler = VteHandler {
                                                 grid: &mut g,
                                                 attrs: &mut attrs,
                                             };
-                                            for byte in bytes {
-                                                parser.advance(&mut handler, *byte);
+                                            for &byte in &display {
+                                                parser.advance(&mut handler, byte);
                                             }
                                             // One bump per chunk — the renderer's
                                             // visible-rows cache keys on this version.
@@ -917,14 +925,18 @@ impl SshSession {
                             }
                             #[cfg(not(unix))]
                             {
-                                // No ZMODEM routing on this platform.
+                                // No ZMODEM routing on this platform. The
+                                // display still goes through the AI capture's
+                                // echo rewrite when armed; taps see raw bytes.
+                                let display =
+                                    crate::terminal::ai_capture::display_bytes(&ai_capture, &data);
                                 if let Ok(mut g) = grid.lock() {
                                     let mut handler = VteHandler {
                                         grid: &mut g,
                                         attrs: &mut attrs,
                                     };
-                                    for byte in &*data {
-                                        parser.advance(&mut handler, *byte);
+                                    for &byte in &display {
+                                        parser.advance(&mut handler, byte);
                                     }
                                     // One bump per chunk — the renderer's
                                     // visible-rows cache keys on this version.
@@ -955,13 +967,21 @@ impl SshSession {
                                     &zmodem_bridge,
                                     &data,
                                     |bytes| {
+                                        // Display path goes through the AI
+                                        // capture's echo rewrite when armed;
+                                        // the taps below see the raw bytes.
+                                        let display =
+                                            crate::terminal::ai_capture::display_bytes(
+                                                &ai_capture,
+                                                bytes,
+                                            );
                                         if let Ok(mut g) = grid.lock() {
                                             let mut handler = VteHandler {
                                                 grid: &mut g,
                                                 attrs: &mut attrs,
                                             };
-                                            for byte in bytes {
-                                                parser.advance(&mut handler, *byte);
+                                            for &byte in &display {
+                                                parser.advance(&mut handler, byte);
                                             }
                                             // One bump per chunk — the renderer's
                                             // visible-rows cache keys on this version.
@@ -993,14 +1013,18 @@ impl SshSession {
                             }
                             #[cfg(not(unix))]
                             {
-                                // No ZMODEM routing on this platform.
+                                // No ZMODEM routing on this platform. The
+                                // display still goes through the AI capture's
+                                // echo rewrite when armed; taps see raw bytes.
+                                let display =
+                                    crate::terminal::ai_capture::display_bytes(&ai_capture, &data);
                                 if let Ok(mut g) = grid.lock() {
                                     let mut handler = VteHandler {
                                         grid: &mut g,
                                         attrs: &mut attrs,
                                     };
-                                    for byte in &*data {
-                                        parser.advance(&mut handler, *byte);
+                                    for &byte in &display {
+                                        parser.advance(&mut handler, byte);
                                     }
                                     // One bump per chunk — the renderer's
                                     // visible-rows cache keys on this version.

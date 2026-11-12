@@ -1476,18 +1476,21 @@ impl PortalApp {
                 // markers (shell echo can't match them — they go through
                 // printf templates), tap the session's output stream, and let
                 // a watcher thread collect the output. The command still runs
-                // interactively exactly as before, visible in the terminal.
-                // The manual path (Copy button) never taps anything.
+                // interactively exactly as before; on screen only the bare
+                // command shows — the wrapper echo and the executed markers
+                // are filtered out of the display (the capture itself still
+                // sees raw bytes). The manual path (Copy button) never taps
+                // anything.
                 let mut env = session.kind.environment_summary();
                 if let Some(cwd) = &session.cwd {
                     env.cwd = cwd.clone();
                 }
+                let wrapped = crate::terminal::ai_capture::wrap_command(&cmd);
                 let capture = std::sync::Arc::new(std::sync::Mutex::new(
-                    crate::terminal::ai_capture::AiCapture::new(),
+                    crate::terminal::ai_capture::AiCapture::for_wrapped(&cmd, &wrapped),
                 ));
                 let slot = session.kind.ai_capture_slot();
                 session.kind.set_ai_capture(Some(std::sync::Arc::clone(&capture)));
-                let wrapped = crate::terminal::ai_capture::wrap_command(&cmd);
                 session.write(&wrapped);
                 session.write("\r");
 

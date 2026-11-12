@@ -301,13 +301,23 @@ impl RealPtySession {
                                     &zmodem_bridge_clone,
                                     &data,
                                     |bytes| {
+                                        // Display path goes through the AI
+                                        // capture's echo rewrite when armed
+                                        // (bare command instead of the
+                                        // sentinel wrapper); the taps below
+                                        // still see the raw bytes.
+                                        let display =
+                                            crate::terminal::ai_capture::display_bytes(
+                                                &ai_capture_clone,
+                                                bytes,
+                                            );
                                         let mut grid = grid_clone.lock().unwrap();
                                         let mut handler = VteHandler {
                                             grid: &mut grid,
                                             attrs: &mut attrs,
                                         };
-                                        for byte in bytes {
-                                            parser.advance(&mut handler, *byte);
+                                        for &byte in &display {
+                                            parser.advance(&mut handler, byte);
                                         }
                                         // One bump per chunk (not per byte): the
                                         // renderer's visible-rows cache keys on
