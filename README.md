@@ -45,12 +45,19 @@ A modern GUI terminal emulator built with Rust and egui, inspired by Termius.
 - **Drag & Drop** - Transfer files by dragging between panels
 - **Built-in Editor** - Double-click files to open in embedded editor
 - **File Management** - Right-click context menu with Rename, Delete, New Folder
+- **Copy & Paste** - Copy files/folders and paste them into either panel (remote-to-remote included); pasting into the same folder auto-renames ("name copy")
+- **Open Terminal Here** - Right-click the local panel to open a new terminal tab at that directory
 - **Breadcrumb Navigation** - Clickable path segments, parent directory button
 - **Hidden Files** - Toggle visibility with Cmd+Shift+H
 - **File Permissions** - Unix permission display (rwxrwxrwx)
 - **File Details** - Size, modification time display with aligned columns
 - **Error Display** - Operation errors shown in status bar
 - **Delete Confirmation** - Interactive dialog with progress feedback
+
+### File Manager Integration
+- **Finder Quick Actions** - Right-click a folder in Finder → Quick Actions → *New Portal Tab Here* / *New Portal Window Here*; one-click install/uninstall in Settings → General
+- **Single-instance IPC** - With Portal running, actions open a tab/window in the existing instance; without, they launch one first
+- **Linux file managers** - Nautilus scripts and a Dolphin service menu provide the same actions
 
 ### Host Management
 - **Host List** - Grouped SSH hosts with search

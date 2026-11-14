@@ -745,5 +745,47 @@ impl PortalApp {
             }
         });
         ui.label(egui::RichText::new(lang.t("zmodem_download_dir_desc")).color(theme.fg_dim).size(FONT_SM));
+
+        ui.add_space(SPACE_LG);
+        ui.separator();
+        ui.add_space(SPACE_SM);
+
+        // File-manager integration: the OS right-click "Open new Portal
+        // tab/window here" actions (Finder Quick Actions / Nautilus / Dolphin)
+        // that feed the single-instance IPC.
+        ui.label(egui::RichText::new(lang.t("integration_section")).color(theme.fg_primary).size(14.0).strong());
+        ui.add_space(SPACE_XS);
+        ui.label(egui::RichText::new(lang.t("integration_desc")).color(theme.fg_dim).size(FONT_SM));
+        ui.add_space(SPACE_XS);
+        #[cfg(unix)]
+        {
+            use crate::integration::{self, IntegrationStatus};
+            ui.horizontal(|ui| {
+                let (status_key, status_color) = match integration::status() {
+                    IntegrationStatus::Installed => ("integration_installed", theme.green),
+                    IntegrationStatus::Stale => ("integration_stale", theme.accent),
+                    IntegrationStatus::NotInstalled => ("integration_not_installed", theme.fg_dim),
+                };
+                ui.label(
+                    egui::RichText::new(lang.t(status_key)).color(status_color).size(FONT_SM),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if integration::status() != IntegrationStatus::Installed
+                        && ui.button(lang.t("integration_install")).clicked()
+                    {
+                        if let Err(e) = integration::install() {
+                            log::error!("integration install failed: {}", e);
+                        }
+                    }
+                    if integration::status() != IntegrationStatus::NotInstalled
+                        && ui.button(lang.t("integration_uninstall")).clicked()
+                    {
+                        if let Err(e) = integration::uninstall() {
+                            log::error!("integration uninstall failed: {}", e);
+                        }
+                    }
+                });
+            });
+        }
     }
 }

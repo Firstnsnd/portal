@@ -20,6 +20,9 @@ use crate::ui::views::{hosts_view, keychain_view, snippets_view, sftp_view};
 pub struct ViewActions {
     /// Request to create a new local terminal tab
     pub add_local_tab: bool,
+    /// Request to open a local terminal tab AT the given directory
+    /// (SFTP local panel right-click "Open Terminal Here")
+    pub open_terminal_at: Option<String>,
     /// Request to connect to an SSH host
     pub connect_ssh: Option<HostEntry>,
     /// Request to clear connection history

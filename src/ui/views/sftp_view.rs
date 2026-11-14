@@ -89,6 +89,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     let mut remote_refresh_request = false;
     let mut left_cancel_connect_request = false;
     let mut right_cancel_connect_request = false;
+    let mut open_terminal_at: Option<String> = None;
 
     // Detect panel focus from mouse clicks
     if ui.ctx().input(|i| i.pointer.any_pressed()) {
@@ -1703,6 +1704,23 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                         close_menu = true;
                     }
 
+                    // Local panel: open a terminal tab at this directory
+                    let local_cwd = match panel {
+                        SftpPanel::LeftLocal => Some(window.local_browser_left.current_path.clone()),
+                        SftpPanel::RightLocal => Some(window.local_browser_right.current_path.clone()),
+                        _ => None,
+                    };
+                    if let Some(cwd) = local_cwd {
+                        if ui.add(
+                            egui::Button::new(
+                                egui::RichText::new(cx.language.t("open_terminal_here")).size(12.0).color(cx.theme.fg_primary)
+                            ).frame(false)
+                        ).clicked() {
+                            open_terminal_at = Some(cwd);
+                            close_menu = true;
+                        }
+                    }
+
                     if ui.add(
                         egui::Button::new(
                             egui::RichText::new(cx.language.t("new_folder")).size(12.0).color(cx.theme.fg_primary)
@@ -1790,7 +1808,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         }
     }
 
-    ViewActions::default()
+    ViewActions { open_terminal_at, ..Default::default() }
 }
 
 /// Apply one embedded editor's output to its half: close on demand, or

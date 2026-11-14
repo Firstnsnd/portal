@@ -515,6 +515,7 @@ impl PortalApp {
         // window so detached windows never duplicate it.
         if window_idx == 0 {
             self.render_update_dialog(ctx);
+            self.render_cwd_permission_dialog(ctx);
         }
 
         result
@@ -522,6 +523,80 @@ impl PortalApp {
 
     /// Render the update-check prompt/download progress dialog, dispatching on
     /// the shared `update_state`. Non-modal: it does not block input elsewhere.
+    /// "Open here" hit a folder Portal can't enter: offer the macOS
+    /// authorization settings, a retry (re-probes before acting), or cancel.
+    fn render_cwd_permission_dialog(&mut self, ctx: &egui::Context) {
+        use crate::ui::widgets;
+
+        let Some(dialog) = self.cwd_permission_dialog.clone() else {
+            return;
+        };
+        // Live probe: the error line doubles as retry feedback — clicking
+        // 重试 while access is still denied just refreshes this text.
+        let access_error = super::tab_management::cwd_access_error(&dialog.path);
+        let mut action: Option<bool> = None; // Some(true) = retry, Some(false) = dismiss
+        egui::Window::new("cwd_permission")
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .frame(widgets::dialog_frame(&self.theme))
+            .show(ctx, |ui| {
+                ui.label(egui::RichText::new(self.language.t("cwd_permission_title"))
+                    .size(16.0).strong().color(self.theme.fg_primary));
+                ui.add_space(12.0);
+                ui.label(egui::RichText::new(self.language.t("cwd_permission_desc"))
+                    .size(13.0).color(self.theme.fg_dim));
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(&dialog.path)
+                    .size(12.0).color(self.theme.fg_dim).monospace());
+                if let Some(err) = &access_error {
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new(err)
+                        .size(12.0).color(self.theme.red).monospace());
+                }
+                ui.add_space(16.0);
+                ui.horizontal(|ui| {
+                    if ui.add(widgets::primary_button(
+                        self.language.t("open_auth_settings"), &self.theme,
+                    )).clicked() {
+                        #[cfg(target_os = "macos")]
+                        {
+                            let _ = std::process::Command::new("open")
+                                .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+                                .spawn();
+                        }
+                    }
+                    if ui.add(widgets::secondary_button(
+                        self.language.t("retry"), &self.theme,
+                    )).clicked() {
+                        action = Some(true);
+                    }
+                    if ui.add(widgets::secondary_button(
+                        self.language.t("cancel"), &self.theme,
+                    )).clicked() {
+                        action = Some(false);
+                    }
+                });
+            });
+        match action {
+            Some(false) => self.cwd_permission_dialog = None,
+            Some(true) => {
+                // Only act (and close) once access really works; otherwise
+                // the dialog stays up with the refreshed error line.
+                if access_error.is_none() {
+                    self.cwd_permission_dialog = None;
+                    if dialog.open_window {
+                        self.open_local_window_here(&dialog.path);
+                    } else {
+                        self.add_local_tab_to_window_in(dialog.window_idx, Some(&dialog.path));
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
     fn render_update_dialog(&mut self, ctx: &egui::Context) {
         use crate::update::UpdateState;
         use crate::ui::widgets;
@@ -1548,6 +1623,13 @@ impl PortalApp {
     fn handle_view_actions(&mut self, actions: ViewActions, _window_idx: usize, _ctx: &egui::Context) {
         if actions.add_local_tab {
             self.add_tab_local();
+        }
+        if let Some(cwd) = actions.open_terminal_at {
+            // Open in the window the request came from, then raise it.
+            self.add_local_tab_to_window_in(_window_idx, Some(&cwd));
+            if let Some(w) = self.windows.get(_window_idx) {
+                _ctx.send_viewport_cmd_to(w.viewport_id, egui::ViewportCommand::Focus);
+            }
         }
         if let Some(host) = actions.connect_ssh {
             self.add_tab_ssh(&host);

@@ -2,6 +2,21 @@
 
 All notable changes to Portal will be documented in this file.
 
+## [0.18.8] - 2026-11-14
+
+### Added
+- **File-manager "Open here" actions (finally working)** - Right-click a folder in Finder → Quick Actions → *New Portal Tab Here* / *New Portal Window Here* opens a tab or window at that folder. The original v0.15.2 implementation never registered with macOS: the `.workflow` bundles shipped without a `Contents/Info.plist` (without its `NSServices` entry the Services daemon ignores them entirely) and carried wrong `workflowMetaData`. Install logic now lives in `src/integration.rs` with a one-click **Install/Uninstall** button in Settings → General (also available as `portal --install-integration`); status detection flags old broken installs as "Needs Reinstall".
+- **SFTP "Open Terminal Here"** - Right-click a local panel in the dual-panel file browser to open a new terminal tab at that directory (focused, in the window you invoked from).
+
+### Fixed
+- **"Open here" actions died after closing the last window** - Closing the final visible window unlinked the single-instance IPC socket while the process was still alive (the root window only hides), so every later action launched a duplicate instance. The socket is now removed only on true exit.
+- **Broken shell instead of an authorization prompt on protected folders** - Right-clicking a TCC-protected folder (Desktop/Documents/Downloads) spawned a shell stuck in an unresolvable working directory (prompt showed `.`, tools died with "operation not permitted"). Portal now probes the folder before spawning: inaccessible folders open a dialog offering to open the macOS authorization settings and retry (Full Disk Access for the app that launched Portal); the terminal falls back to ~ meanwhile.
+
+## [0.18.7] - 2026-11-08
+
+### Added
+- **SFTP copy & paste** - Copy files/folders with ⌘C or the right-click menu and paste into either panel (remote → remote included); pasting into the source folder auto-renames ("name copy" / "副本"). Transfer runs through the existing SFTP task pipeline with progress, cancel, and error reporting.
+
 ## [0.17.0] - 2026-10-25
 
 ### Added

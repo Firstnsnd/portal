@@ -56,14 +56,14 @@ clean: ## Remove build artifacts
 # Defaults to the local debug build; PORTAL_BIN= uses the installed app bundle.
 ifeq ($(UNAME_S),Darwin)
 integrate: ## Install Finder Quick Actions (uses the debug build)
-	PORTAL_BIN="$(CURDIR)/target/debug/portal" ./scripts/install_finder_actions.sh
+	PORTAL_BIN="$(CURDIR)/target/debug/portal" $(CURDIR)/target/debug/portal --install-integration
 
 integrate-remove: ## Uninstall Finder Quick Actions
-	./scripts/install_finder_actions.sh --uninstall
+	$(CURDIR)/target/debug/portal --uninstall-integration
 else
 integrate: ## Install file-manager actions (Nautilus/Dolphin)
-	./scripts/install_filemanager_actions.sh
+	$(CURDIR)/target/debug/portal --install-integration
 
 integrate-remove: ## Uninstall file-manager actions
-	./scripts/install_filemanager_actions.sh --uninstall
+	$(CURDIR)/target/debug/portal --uninstall-integration
 endif

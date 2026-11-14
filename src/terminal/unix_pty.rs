@@ -182,12 +182,25 @@ impl Pty for UnixPty {
                 // to the user's home directory so new terminals open at ~
                 // instead of the app's working directory. getenv/chdir are
                 // async-signal-safe (allowed between fork and exec).
+                let home = libc::getenv(c"HOME".as_ptr());
                 let dir = cwd_c
                     .as_ref()
                     .map(|c| c.as_ptr())
-                    .unwrap_or_else(|| libc::getenv(c"HOME".as_ptr()));
-                if !dir.is_null() {
-                    libc::chdir(dir);
+                    .unwrap_or(home);
+                if !dir.is_null() && libc::chdir(dir) == 0 {
+                    // An explicit cwd can still be TCC/permission-gated: chdir
+                    // succeeds but resolving the path (which reads the parent
+                    // directory) fails, leaving the shell with an unresolvable
+                    // cwd — prompt shows ".", tools like go die with
+                    // "open ..: operation not permitted". Probe the parent;
+                    // on denial fall back to HOME with a banner line (fd 2 is
+                    // already the PTY slave, so write() lands in the grid).
+                    if cwd_c.is_some() && libc::open(c"..".as_ptr(), libc::O_RDONLY) < 0 {
+                        if !home.is_null() && libc::chdir(home) == 0 {
+                            let msg = b"\r\n[portal] cannot enter the requested folder (permission denied); opened ~ instead\r\n\r";
+                            libc::write(2, msg.as_ptr().cast(), msg.len());
+                        }
+                    }
                 }
             }
 

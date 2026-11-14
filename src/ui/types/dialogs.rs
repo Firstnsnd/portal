@@ -455,4 +455,17 @@ pub enum AppView {
     Replay,
 }
 
+/// "Open Portal Tab/Window Here" hit a folder Portal cannot enter (macOS TCC
+/// / permission denial). Offers to open the authorization settings, retry,
+/// or give up; the shell meanwhile starts at ~.
+#[derive(Clone)]
+pub struct CwdPermissionDialog {
+    /// The folder Portal could not enter.
+    pub path: String,
+    /// Which window receives the retried tab (tab case only).
+    pub window_idx: usize,
+    /// Retry opens a new WINDOW instead of a tab in `window_idx`.
+    pub open_window: bool,
+}
+
 use std::sync::Mutex;

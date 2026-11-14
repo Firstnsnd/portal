@@ -46,6 +46,10 @@ pub struct PortalApp {
     pub connection_history: Vec<ConnectionRecord>,
     pub shortcut_resolver: ShortcutResolver,
     pub recording_shortcut: Option<ShortcutAction>,
+    /// "Open here" landed on a folder Portal can't enter — offers to open
+    /// the macOS authorization settings and retry (app-global, one at a time).
+    pub cwd_permission_dialog:
+        Option<crate::ui::types::dialogs::CwdPermissionDialog>,
     // Update checking
     pub update_state: std::sync::Arc<std::sync::Mutex<crate::update::UpdateState>>,
     pub next_update_check: std::time::Instant,
@@ -266,6 +270,7 @@ impl PortalApp {
             connection_history,
             shortcut_resolver,
             recording_shortcut: None,
+            cwd_permission_dialog: None,
             snippets,
             update_state: std::sync::Arc::new(std::sync::Mutex::new(crate::update::UpdateState::Idle)),
             next_update_check: std::time::Instant::now(),
@@ -478,11 +483,10 @@ impl PortalApp {
                 tab.sessions.clear();
             }
         }
-        // Remove the single-instance IPC socket so "open here" forwards fail
-        // fast (and the next launch rebinds cleanly) instead of hanging on a
-        // dead socket.
-        #[cfg(unix)]
-        crate::ipc::cleanup();
+        // NOTE: deliberately does NOT unlink the IPC socket. This can run
+        // while the process stays alive (e.g. closing the last visible
+        // window only hides the root viewport), and a removed socket would
+        // silently break every later "open here" forward.
     }
 }
 
@@ -490,5 +494,10 @@ impl Drop for PortalApp {
     fn drop(&mut self) {
         // Ensure all PTY sessions are properly cleaned up
         self.cleanup_sessions();
+        // The socket is unlinked ONLY here (and in the signal handler):
+        // cleanup_sessions also runs on last-visible-window close, where the
+        // process — and the IPC endpoint — must stay alive.
+        #[cfg(unix)]
+        crate::ipc::cleanup();
     }
 }

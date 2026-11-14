@@ -6,6 +6,29 @@ use crate::ui::pane::{SplitDirection, PaneNode, Tab};
 use crate::ui::types::{session::{TerminalSession, SessionKind}, dialogs::AppView};
 use super::PortalApp;
 
+/// Why a shell could not run in `cwd` — `None` when it could. Two gates,
+/// mirroring what the PTY child does: the path must resolve (canonicalize),
+/// AND its parent directory must be readable — the child's first act in the
+/// new cwd is `open("..")`, and macOS TCC denies the READ on a protected
+/// parent (e.g. ~/Documents) while path resolution alone still succeeds,
+/// which is what left shells stuck with an unresolvable working directory.
+pub fn cwd_access_error(cwd: &str) -> Option<String> {
+    let canon = match std::fs::canonicalize(cwd) {
+        Ok(c) => c,
+        Err(e) => return Some(format!("{cwd}: {e}")),
+    };
+    let parent = canon.parent().unwrap_or(&canon);
+    if let Err(e) = std::fs::File::open(parent) {
+        return Some(format!("{}: {}", parent.display(), e));
+    }
+    None
+}
+
+/// Whether a shell could actually run in `cwd`.
+pub fn cwd_accessible(cwd: &str) -> bool {
+    cwd_access_error(cwd).is_none()
+}
+
 impl PortalApp {
     /// Add a new local terminal tab to the main window (index 0)
     pub fn add_tab_local(&mut self) {
@@ -18,8 +41,18 @@ impl PortalApp {
     }
 
     /// Add a local terminal tab to a specific window, optionally starting the
-    /// shell in `cwd` ("New Portal Tab Here").
+    /// shell in `cwd` ("New Portal Tab Here"). An inaccessible `cwd` opens the
+    /// tab at ~ and raises the authorization dialog instead.
     pub fn add_local_tab_to_window_in(&mut self, window_idx: usize, cwd: Option<&str>) {
+        // A permission-denied folder produces a broken shell; surface the
+        // authorization dialog and fall back to ~ rather than spawning it.
+        // (Probed before the window borrow so the dialog can go on `self`.)
+        let mut cwd = cwd;
+        let denied = cwd.filter(|c| !cwd_accessible(c)).map(|c| c.to_string());
+        if denied.is_some() {
+            cwd = None;
+        }
+
         let window = if let Some(w) = self.windows.get_mut(window_idx) {
             w
         } else {
@@ -47,25 +80,35 @@ impl PortalApp {
         window.tabs.push(tab);
         window.active_tab = window.tabs.len() - 1;
         window.current_view = AppView::Terminal;
+        if let Some(path) = denied {
+            self.cwd_permission_dialog = Some(crate::ui::types::dialogs::CwdPermissionDialog {
+                path,
+                window_idx,
+                open_window: false,
+            });
+        }
         self.mark_sessions_dirty();
     }
 
     /// Open a new native window with a single local terminal tab running in
     /// `cwd` ("New Portal Window Here"). The window renders via
-    /// show_viewport_immediate on the next frame.
+    /// show_viewport_immediate on the next frame. An inaccessible `cwd`
+    /// opens the window at ~ and raises the authorization dialog there.
     pub fn open_local_window_here(&mut self, cwd: &str) {
         let default_shell = std::env::var("SHELL")
             .unwrap_or_else(|_| "/bin/zsh".to_string());
+        let denied = !cwd_accessible(cwd);
+        let session_cwd = if denied { None } else { Some(cwd) };
         // Session/tab ids must not collide with any existing window's ids.
         let id = self.windows.iter().map(|w| w.next_id).max().unwrap_or(0);
-        let title = std::path::Path::new(cwd)
-            .file_name()
+        let title = session_cwd
+            .and_then(|c| std::path::Path::new(c).file_name())
             .map(|n| n.to_string_lossy().to_string())
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| format!("Terminal {}", id));
         let tab = Tab {
             title: title.clone(),
-            sessions: vec![TerminalSession::new_local_in(id, &default_shell, Some(cwd))],
+            sessions: vec![TerminalSession::new_local_in(id, &default_shell, session_cwd)],
             layout: PaneNode::Terminal(0),
             focused_session: 0,
             broadcast_enabled: false,
@@ -82,6 +125,13 @@ impl PortalApp {
         self.next_viewport_id += 1;
         let window = crate::ui::pane::AppWindow::new_window(viewport_id, tab, id + 1);
         self.windows.push(window);
+        if denied {
+            self.cwd_permission_dialog = Some(crate::ui::types::dialogs::CwdPermissionDialog {
+                path: cwd.to_string(),
+                window_idx: self.windows.len() - 1,
+                open_window: true,
+            });
+        }
         self.mark_sessions_dirty();
     }
 
@@ -193,5 +243,20 @@ impl PortalApp {
     /// Save hosts to disk
     pub fn save_hosts(&self) {
         crate::config::save_hosts(&self.hosts_file, &self.hosts);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cwd_accessible;
+
+    #[test]
+    fn cwd_accessible_rejects_missing_paths() {
+        let dir = std::env::temp_dir().join("portal-cwd-probe-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(cwd_accessible(&dir.to_string_lossy()));
+        // Nonexistent: canonicalize fails → shell would start at ~ + dialog.
+        assert!(!cwd_accessible(&dir.join("nope").to_string_lossy()));
+        std::fs::remove_dir(&dir).unwrap();
     }
 }

@@ -6,6 +6,8 @@
 mod app;
 mod config;
 #[cfg(unix)]
+mod integration;
+#[cfg(unix)]
 mod ipc;
 mod llm;
 mod repaint;
@@ -293,6 +295,38 @@ fn load_app_icon() -> Option<egui::IconData> {
 fn main() -> eframe::Result<()> {
     env_logger::init();
 
+    // File-manager integration management (Settings UI / `make integrate`):
+    // local file writes plus a services-cache refresh, then exit — handled
+    // before the IPC block since these are not "open here" requests.
+    #[cfg(unix)]
+    match std::env::args().nth(1).as_deref() {
+        Some("--install-integration") => {
+            return match integration::install() {
+                Ok(()) => {
+                    println!("Installed file-manager actions.");
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                }
+            };
+        }
+        Some("--uninstall-integration") => {
+            return match integration::uninstall() {
+                Ok(()) => {
+                    println!("Removed file-manager actions.");
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                }
+            };
+        }
+        _ => {}
+    }
+
     // Single-instance "open here" requests (Finder Quick Actions / Nautilus
     // scripts / Dolphin service menus): if a Portal instance is already
     // running, hand the requests over and exit before creating any window;
@@ -337,6 +371,11 @@ fn main() -> eframe::Result<()> {
                         // the user's own Terminal / VS Code shells with it.
                         crate::terminal::kill_registered_children();
                     }
+                    // process::exit skips Drop — unlink the IPC socket here
+                    // (a stale file is also tolerated: the next launch
+                    // removes it before rebinding).
+                    #[cfg(unix)]
+                    crate::ipc::cleanup();
                     // Exit after cleanup
                     std::process::exit(0);
                 }
