@@ -48,6 +48,7 @@ pub fn t(key: &str) -> &'static str {
         "testing" => "Probando…",
         "copy" => "Copiar",
         "paste" => "Pegar",
+        "duplicate_suffix" => "copia",
         "select_all" => "Seleccionar Todo",
         "split_h" => "Dividir Horizontalmente",
         "split_v" => "Dividir Verticalmente",

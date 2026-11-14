@@ -48,6 +48,7 @@ pub fn t(key: &str) -> &'static str {
         "testing" => "테스트 중…",
         "copy" => "복사",
         "paste" => "붙여넣기",
+        "duplicate_suffix" => "복사본",
         "select_all" => "모두 선택",
         "split_h" => "가로 분할",
         "split_v" => "세로 분할",

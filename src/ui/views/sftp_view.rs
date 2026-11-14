@@ -5,7 +5,8 @@
 use eframe::egui;
 
 // Import SFTP view components from subdirectory
-use crate::ui::views::sftp::{DragPayload, SelectionAction, MoveToDirRequest};
+use crate::ui::views::sftp::{DragPayload, SelectionAction, MoveToDirRequest, ClipboardRequest};
+use crate::ui::views::sftp::paste::{capture_clipboard, execute_paste, handle_clipboard_request, paste_target_ready};
 use crate::ui::views::sftp::{render_breadcrumbs, render_file_panel, apply_selection_action};
 use crate::ui::views::sftp::render_transfer_progress;
 use crate::ui::views::sftp::drop_logic::{
@@ -81,6 +82,10 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     let mut local_right_move_to_dir: Option<MoveToDirRequest> = None;
     let mut remote_move_to_dir: Option<MoveToDirRequest> = None;
     let mut left_remote_move_to_dir: Option<MoveToDirRequest> = None;
+    let mut local_left_clipboard_req: Option<ClipboardRequest> = None;
+    let mut local_right_clipboard_req: Option<ClipboardRequest> = None;
+    let mut remote_clipboard_req: Option<ClipboardRequest> = None;
+    let mut left_remote_clipboard_req: Option<ClipboardRequest> = None;
     let mut remote_refresh_request = false;
     let mut left_cancel_connect_request = false;
     let mut right_cancel_connect_request = false;
@@ -250,6 +255,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                 "local_left_scroll",
                 left_editor_open,
                 &mut local_left_move_to_dir,
+                &mut local_left_clipboard_req,
             );
         } else {
             // ── LEFT PANEL: Remote (independent connection) ──
@@ -546,6 +552,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                                 "left_remote_scroll",
                                 left_editor_open,
                                 &mut left_remote_move_to_dir,
+                                &mut left_remote_clipboard_req,
                             );
                         }
                         SftpConnectionState::Disconnected => {
@@ -711,6 +718,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                 "local_right_scroll",
                 right_editor_open,
                 &mut local_right_move_to_dir,
+                &mut local_right_clipboard_req,
             );
         } else {
             // ── RIGHT PANEL: Remote (host list or remote browser) ──
@@ -999,6 +1007,7 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                                 "right_remote_scroll",
                                 right_editor_open,
                                 &mut remote_move_to_dir,
+                                &mut remote_clipboard_req,
                             );
                         }
                         SftpConnectionState::Disconnected => {
@@ -1403,6 +1412,22 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         }
     }
 
+    // ── Handle clipboard (copy/paste) requests raised by the active panel ──
+    let clipboard_requests = [
+        (SftpPanel::LeftLocal, local_left_clipboard_req),
+        (SftpPanel::RightLocal, local_right_clipboard_req),
+        (SftpPanel::RightRemote, remote_clipboard_req),
+        (SftpPanel::LeftRemote, left_remote_clipboard_req),
+    ];
+    for (panel, request) in clipboard_requests.into_iter().filter_map(|(p, r)| r.map(|r| (p, r))) {
+        if let Some(detail) = handle_clipboard_request(window, cx.language.t("duplicate_suffix"), panel, request) {
+            window.sftp_error_dialog = Some(SftpErrorDialog {
+                title: cx.language.t("paste").to_string(),
+                message: detail,
+            });
+        }
+    }
+
     // ── Handle drag-to-folder move requests ──
     if let Some(req) = local_left_move_to_dir {
         let current_path = window.local_browser_left.current_path.clone();
@@ -1631,6 +1656,16 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                                 close_menu = true;
                             }
 
+                        // Copy the selection into the app clipboard (Finder-style snapshot)
+                        if ui.add(
+                            egui::Button::new(
+                                egui::RichText::new(cx.language.t("copy")).size(12.0).color(cx.theme.fg_primary)
+                            ).frame(false)
+                        ).clicked() {
+                            window.sftp_clipboard = capture_clipboard(window, panel);
+                            close_menu = true;
+                        }
+
                         let delete_label = if entry_indices.len() > 1 {
                             format!("{} ({})", cx.language.t("delete_file"), entry_indices.len())
                         } else {
@@ -1649,6 +1684,23 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                         }
 
                         ui.separator();
+                    }
+
+                    // Paste the clipboard into this panel (remote targets must be connected)
+                    let paste_ready = window.sftp_clipboard.is_some() && paste_target_ready(window, panel);
+                    if ui.add_enabled(
+                        paste_ready,
+                        egui::Button::new(
+                            egui::RichText::new(cx.language.t("paste")).size(12.0)
+                        ).frame(false)
+                    ).clicked() {
+                        if let Some(detail) = execute_paste(window, panel, cx.language.t("duplicate_suffix")) {
+                            window.sftp_error_dialog = Some(SftpErrorDialog {
+                                title: cx.language.t("paste").to_string(),
+                                message: detail,
+                            });
+                        }
+                        close_menu = true;
                     }
 
                     if ui.add(

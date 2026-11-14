@@ -48,6 +48,7 @@ pub fn t(key: &str) -> &'static str {
         "testing" => "テスト中…",
         "copy" => "コピー",
         "paste" => "ペースト",
+        "duplicate_suffix" => "コピー",
         "select_all" => "すべて選択",
         "split_h" => "水平分割",
         "split_v" => "垂直分割",

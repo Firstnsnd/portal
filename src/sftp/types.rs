@@ -139,6 +139,26 @@ pub enum SftpCommand {
         local_dir: String,
         done: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
+    /// Like `Upload`, but the task acks the result through `done`. Used by
+    /// the cross-connection copy relay, which must stage→upload strictly in
+    /// sequence.
+    UploadSync {
+        local: String,
+        remote: String,
+        done: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    /// Like `UploadDir`, with a completion ack through `done`.
+    UploadDirSync {
+        local_dir: String,
+        remote_dir: String,
+        done: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    /// Server-to-server copy streamed through the client on THIS connection
+    /// (SFTPv3 has no server-side copy primitive). Used for paste onto the
+    /// same remote browser.
+    CopyRemoteFile { from: String, to: String },
+    /// Recursive `CopyRemoteFile` over a directory tree.
+    CopyRemoteDir { from: String, to: String },
     Rename { from: String, to: String },
     Delete(String),
     CreateDir(String),

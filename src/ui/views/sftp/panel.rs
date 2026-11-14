@@ -7,7 +7,7 @@ use eframe::egui;
 use crate::sftp::{FileSelection, SftpEntry, SftpEntryKind};
 use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
-use crate::ui::views::sftp::{DragEntry, DragPayload, SelectionAction, MoveToDirRequest};
+use crate::ui::views::sftp::{DragEntry, DragPayload, SelectionAction, MoveToDirRequest, ClipboardRequest};
 use crate::ui::views::sftp::format::{format_file_size, format_modified, format_permissions};
 use crate::ui::types::sftp_types::SftpPanel;
 
@@ -230,6 +230,7 @@ pub fn render_file_panel(
     panel_id: &str,
     editor_is_open: bool,
     move_to_dir_request: &mut Option<MoveToDirRequest>,
+    clipboard_request: &mut Option<ClipboardRequest>,
 ) {
     let row_height = 26.0;
     let status_bar_height = crate::ui::tokens::STATUS_BAR_HEIGHT;
@@ -295,6 +296,15 @@ pub fn render_file_panel(
             && !selection.is_empty() {
                 *delete_request = true;
             }
+
+        // Cmd/Ctrl+C → snapshot the selection into the app clipboard
+        if cmd && ui.ctx().input(|i| i.key_pressed(egui::Key::C)) && !selection.is_empty() {
+            *clipboard_request = Some(ClipboardRequest::Copy);
+        }
+        // Cmd/Ctrl+V → paste the clipboard into this panel
+        if cmd && ui.ctx().input(|i| i.key_pressed(egui::Key::V)) {
+            *clipboard_request = Some(ClipboardRequest::Paste);
+        }
     }
 
     // File listing scroll area

@@ -40,3 +40,20 @@ pub struct MoveToDirRequest {
     pub source_entries: Vec<DragEntry>,
     pub target_dir: String,
 }
+
+/// App-internal file clipboard: a snapshot taken at copy time. `origin` and
+/// the entry paths are frozen then, so navigating elsewhere or toggling a
+/// panel between local/remote afterwards doesn't change where a paste routes.
+#[derive(Clone)]
+pub struct SftpClipboard {
+    pub origin: SftpPanel,
+    pub entries: Vec<DragEntry>,
+}
+
+/// Keyboard shortcut request raised by `render_file_panel` (⌘C/⌘V on the
+/// active panel) for the caller to act on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ClipboardRequest {
+    Copy,
+    Paste,
+}

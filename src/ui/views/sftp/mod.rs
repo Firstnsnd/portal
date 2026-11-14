@@ -8,9 +8,10 @@ pub mod format;
 pub mod panel;
 pub mod progress;
 pub mod drop_logic;
+pub mod paste;
 pub mod editor;
 
 // Re-export commonly used types
-pub use types::{DragEntry, DragPayload, SelectionAction, MoveToDirRequest};
+pub use types::{DragEntry, DragPayload, SelectionAction, MoveToDirRequest, ClipboardRequest};
 pub use panel::{render_breadcrumbs, render_file_panel, apply_selection_action};
 pub use progress::render_transfer_progress;

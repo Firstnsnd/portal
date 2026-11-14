@@ -74,6 +74,7 @@
 use eframe::egui;
 
 use crate::sftp::{LocalBrowser, SftpBrowser};
+use crate::ui::views::sftp::types::SftpClipboard;
 use crate::ui::types::{
     session::TerminalSession,
     dialogs::{AppView, AddHostDialog, CredentialDialog, SnippetViewState, HostFilter},
@@ -391,6 +392,7 @@ pub struct AppWindow {
     pub sftp_active_panel_is_local: bool,
     pub sftp_active_side_left: bool,            // last-clicked SFTP panel side (drop fallback hint)
     pub sftp_os_drag_active: bool,              // native file-promise drag session in flight
+    pub sftp_clipboard: Option<SftpClipboard>,  // app-internal copy/paste snapshot
 
     // Page-related dialog states (per-window)
     pub add_host_dialog: AddHostDialog,
@@ -499,6 +501,7 @@ impl AppWindow {
             sftp_left_remote_refresh_start: None,
             sftp_active_panel_is_local: true,
             sftp_active_side_left: true,
+            sftp_clipboard: None,
             sftp_os_drag_active: false,
             add_host_dialog: AddHostDialog::default(),
             credential_dialog: CredentialDialog::default(),

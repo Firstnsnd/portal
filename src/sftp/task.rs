@@ -305,6 +305,79 @@ async fn sftp_task_inner(
                 }
                 let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
+            Some(SftpCommand::UploadSync { local, remote, done }) => {
+                cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
+                let mut fatal = false;
+                let result = match upload_file(&sftp, &local, &remote, &resp_tx, &cancel_flag).await {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                            if is_disconnect_error(&e) {
+                                fatal = true;
+                            } else {
+                                let _ = resp_tx.send(SftpResponse::Error(e.clone()));
+                            }
+                        }
+                        Err(e)
+                    }
+                };
+                // Ack before any loop break so the blocked relay thread wakes.
+                let _ = done.send(result);
+                if fatal {
+                    let _ = resp_tx.send(SftpResponse::Disconnected);
+                    break;
+                }
+                let _ = resp_tx.send(SftpResponse::TransferComplete);
+            }
+            Some(SftpCommand::UploadDirSync { local_dir, remote_dir, done }) => {
+                cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
+                let mut fatal = false;
+                let result = match upload_dir(&sftp, &local_dir, &remote_dir, &resp_tx, &cancel_flag).await {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                            if is_disconnect_error(&e) {
+                                fatal = true;
+                            } else {
+                                let _ = resp_tx.send(SftpResponse::Error(e.clone()));
+                            }
+                        }
+                        Err(e)
+                    }
+                };
+                let _ = done.send(result);
+                if fatal {
+                    let _ = resp_tx.send(SftpResponse::Disconnected);
+                    break;
+                }
+                let _ = resp_tx.send(SftpResponse::TransferComplete);
+            }
+            Some(SftpCommand::CopyRemoteFile { from, to }) => {
+                cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
+                if let Err(e) = copy_remote_file(&sftp, &from, &to, &resp_tx, &cancel_flag).await {
+                    if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        if is_disconnect_error(&e) {
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
+                        let _ = resp_tx.send(SftpResponse::Error(e));
+                    }
+                }
+                let _ = resp_tx.send(SftpResponse::TransferComplete);
+            }
+            Some(SftpCommand::CopyRemoteDir { from, to }) => {
+                cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
+                if let Err(e) = copy_remote_dir(&sftp, &from, &to, &resp_tx, &cancel_flag).await {
+                    if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        if is_disconnect_error(&e) {
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
+                        let _ = resp_tx.send(SftpResponse::Error(e));
+                    }
+                }
+                let _ = resp_tx.send(SftpResponse::TransferComplete);
+            }
             Some(SftpCommand::Rename { from, to }) => {
                 match sftp.rename(&from, &to).await {
                     Ok(_) => { let _ = resp_tx.send(SftpResponse::OperationComplete); }
@@ -937,6 +1010,136 @@ async fn download_file_for_dir(
             };
             let _ = resp_tx.send(SftpResponse::Progress(progress));
             last_progress_time = now;
+        }
+    }
+
+    Ok(())
+}
+
+/// Copy a remote file to another remote path on the SAME connection,
+/// streamed through the client in chunks (SFTPv3 has no server-side copy
+/// primitive). Progress is reported with `is_upload: true` — the destination
+/// side is the one being written.
+pub async fn copy_remote_file(
+    sftp: &russh_sftp::client::SftpSession,
+    from: &str,
+    to: &str,
+    resp_tx: &mpsc::UnboundedSender<SftpResponse>,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let meta = sftp
+        .metadata(from)
+        .await
+        .map_err(|e| format!("Cannot stat source file: {}", e))?;
+    let total_bytes = meta.size.unwrap_or(0);
+
+    let mut src = sftp
+        .open(from)
+        .await
+        .map_err(|e| format!("Cannot open source file: {}", e))?;
+
+    // Overwrite semantics match upload: drop an existing destination first.
+    sftp.remove_file(to).await.ok();
+    let mut dst = sftp
+        .create(to)
+        .await
+        .map_err(|e| format!("Cannot create destination file: {}", e))?;
+
+    let mut progress = TransferProgress {
+        filename: to.rsplit('/').next().unwrap_or(to).to_string(),
+        bytes_transferred: 0,
+        total_bytes,
+        is_upload: true,
+        started_at: std::time::Instant::now(),
+    };
+    // Immediate zero-byte progress so the bar appears before the first read.
+    let _ = resp_tx.send(SftpResponse::Progress(progress.clone()));
+
+    let mut buffer = vec![0u8; 65536];
+    let mut last_progress_time = std::time::Instant::now();
+
+    loop {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        let n = src
+            .read(&mut buffer)
+            .await
+            .map_err(|e| format!("Read error: {}", e))?;
+
+        if n == 0 {
+            break;
+        }
+
+        dst.write_all(&buffer[..n]).await
+            .map_err(|e| format!("Write error: {}", e))?;
+
+        progress.bytes_transferred += n as u64;
+
+        let now = std::time::Instant::now();
+        if now.duration_since(last_progress_time).as_millis() >= 100 {
+            let _ = resp_tx.send(SftpResponse::Progress(progress.clone()));
+            last_progress_time = now;
+        }
+    }
+
+    let _ = resp_tx.send(SftpResponse::Progress(progress));
+    Ok(())
+}
+
+/// Copy a remote directory tree to another remote path on the SAME
+/// connection, recursively streaming every file through the client.
+pub async fn copy_remote_dir(
+    sftp: &russh_sftp::client::SftpSession,
+    from_dir: &str,
+    to_dir: &str,
+    resp_tx: &mpsc::UnboundedSender<SftpResponse>,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    sftp.create_dir(to_dir)
+        .await
+        .map_err(|e| format!("Failed to create destination dir: {}", e))?;
+
+    Box::pin(copy_remote_dir_inner(sftp, from_dir, to_dir, resp_tx, cancel)).await
+}
+
+async fn copy_remote_dir_inner(
+    sftp: &russh_sftp::client::SftpSession,
+    from_dir: &str,
+    to_dir: &str,
+    resp_tx: &mpsc::UnboundedSender<SftpResponse>,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    let entries = sftp
+        .read_dir(from_dir)
+        .await
+        .map_err(|e| format!("Cannot read source dir: {}", e))?;
+
+    for entry in entries {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
+        }
+        // `.`/`..` and hostile names are rejected the same way downloads are.
+        let name = entry.file_name();
+        let Some(name) = safe_download_name(&name) else {
+            log::warn!("copy_remote_dir: skipping entry with unsafe name");
+            continue;
+        };
+
+        let from_path = format!("{}/{}", from_dir.trim_end_matches('/'), name);
+        let to_path = format!("{}/{}", to_dir.trim_end_matches('/'), name);
+
+        let ft = entry.file_type();
+        if ft == russh_sftp::protocol::FileType::Dir {
+            sftp.create_dir(&to_path)
+                .await
+                .map_err(|e| format!("Failed to create destination dir: {}", e))?;
+            Box::pin(copy_remote_dir_inner(sftp, &from_path, &to_path, resp_tx, cancel)).await?;
+        } else {
+            copy_remote_file(sftp, &from_path, &to_path, resp_tx, cancel).await?;
         }
     }
 

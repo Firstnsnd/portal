@@ -48,6 +48,7 @@ pub fn t(key: &str) -> &'static str {
         "testing" => "测试中…",
         "copy" => "复制",
         "paste" => "粘贴",
+        "duplicate_suffix" => "副本",
         "select_all" => "全选",
         "split_h" => "水平分割",
         "split_v" => "垂直分割",

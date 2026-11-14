@@ -263,6 +263,25 @@ impl SftpBrowser {
         });
     }
 
+    /// Copy a remote file to another remote path on this same connection
+    /// (streamed through the client; no server-side copy primitive).
+    pub fn copy_remote(&mut self, from: &str, to: &str) {
+        self.ensure_reconnected();
+        let _ = self.cmd_tx.send(SftpCommand::CopyRemoteFile {
+            from: from.to_string(),
+            to: to.to_string(),
+        });
+    }
+
+    /// Copy a remote directory tree on this same connection, recursively.
+    pub fn copy_remote_dir(&mut self, from: &str, to: &str) {
+        self.ensure_reconnected();
+        let _ = self.cmd_tx.send(SftpCommand::CopyRemoteDir {
+            from: from.to_string(),
+            to: to.to_string(),
+        });
+    }
+
     /// Seed an immediate "preparing" transfer state so the progress bar shows
     /// at once, before the first `Progress` message arrives from the task.
     /// `filename` is the display name; `is_upload` picks the label direction.
