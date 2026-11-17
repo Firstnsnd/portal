@@ -797,7 +797,9 @@ pub fn render_replay_view(
         let dir = crate::terminal::cast::recordings_dir();
         #[cfg(target_os = "macos")]
         let _ = std::process::Command::new("open").arg(&dir).spawn();
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
     }
     if enter_select {
@@ -871,13 +873,20 @@ pub fn render_replay_view(
 }
 
 /// Reveal a recording file in the OS file manager (Finder on macOS,
-/// xdg-open of the parent directory elsewhere).
+/// Explorer with the file selected on Windows, xdg-open of the parent
+/// directory elsewhere).
 fn reveal_in_file_manager(path: &std::path::Path) {
     #[cfg(target_os = "macos")]
     {
         let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .spawn();
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         if let Some(parent) = path.parent() {
             let _ = std::process::Command::new("xdg-open").arg(parent).spawn();

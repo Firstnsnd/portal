@@ -398,7 +398,9 @@ impl PortalApp {
             if ui.button(lang.t("replay_open_folder")).clicked() {
                 #[cfg(target_os = "macos")]
                 let _ = std::process::Command::new("open").arg(&dir).spawn();
-                #[cfg(not(target_os = "macos"))]
+                #[cfg(target_os = "windows")]
+                let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+                #[cfg(not(any(target_os = "macos", target_os = "windows")))]
                 let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
             }
             let mut count = 0usize;
