@@ -24,8 +24,8 @@ impl super::SecretStore for CredentialManager {
     }
 
     fn set(&self, service: &str, account: &str, secret: &str) -> Result<(), String> {
-        let name_w = wide(&target_name(service, account));
-        let account_w = wide(account);
+        let mut name_w = wide(&target_name(service, account));
+        let mut account_w = wide(account);
         let blob = secret.as_bytes();
 
         let mut cred = CREDENTIALW::default();
