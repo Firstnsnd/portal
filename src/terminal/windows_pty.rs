@@ -149,7 +149,7 @@ impl Pty for WindowsPty {
         let mut cmdline = to_wide(&cmdline_str);
         let cwd_wide = cwd.map(to_wide);
 
-        let spawn = || -> windows::core::Result<PROCESS_INFORMATION> {
+        let mut spawn = || -> windows::core::Result<PROCESS_INFORMATION> {
             unsafe {
                 InitializeProcThreadAttributeList(Some(attr_list), 1, None, &mut attr_size)?;
                 UpdateProcThreadAttribute(
