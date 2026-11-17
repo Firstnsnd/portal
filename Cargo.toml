@@ -76,6 +76,7 @@ windows = { version = "0.62", features = [
     "Win32_System_IO",          # OVERLAPPED — required for ReadFile/WriteFile to exist
     "Win32_Security",           # SECURITY_ATTRIBUTES (referenced by CreatePipe/CreateProcessW)
     "Win32_Security_Credentials", # CredRead/Write/DeleteW — Credential Manager keychain backend
+    "Win32_System_Registry",      # RegCreateKeyExW etc — Explorer context-menu integration
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

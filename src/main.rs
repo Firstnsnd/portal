@@ -5,9 +5,7 @@
 
 mod app;
 mod config;
-#[cfg(unix)]
 mod integration;
-#[cfg(unix)]
 mod ipc;
 mod llm;
 mod repaint;
@@ -56,8 +54,7 @@ impl eframe::App for PortalApp {
         self.harvest_host_capabilities();
 
         // Handle "open here" requests (from CLI at startup, or forwarded from
-        // a second instance over the IPC socket).
-        #[cfg(unix)]
+        // a second instance over the IPC channel).
         self.handle_open_here_requests(ctx);
 
         // ── Window close handling ─────────────────────────────────────────────────────────────
@@ -251,10 +248,9 @@ impl eframe::App for PortalApp {
 
 impl PortalApp {
     /// Apply pending "open here" requests — gathered from the CLI at startup,
-    /// or forwarded from a second instance over the IPC socket. A tab request
+    /// or forwarded from a second instance over the IPC channel. A tab request
     /// lands in the most recently used visible window; a window request opens
     /// a new native window. Either way the target window is focused.
-    #[cfg(unix)]
     fn handle_open_here_requests(&mut self, ctx: &egui::Context) {
         if self.windows.is_empty() {
             return;
@@ -297,9 +293,8 @@ fn main() -> eframe::Result<()> {
     env_logger::init();
 
     // File-manager integration management (Settings UI / `make integrate`):
-    // local file writes plus a services-cache refresh, then exit — handled
-    // before the IPC block since these are not "open here" requests.
-    #[cfg(unix)]
+    // local file/registry writes, then exit — handled before the IPC block
+    // since these are not "open here" requests.
     match std::env::args().nth(1).as_deref() {
         Some("--install-integration") => {
             return match integration::install() {
@@ -329,10 +324,10 @@ fn main() -> eframe::Result<()> {
     }
 
     // Single-instance "open here" requests (Finder Quick Actions / Nautilus
-    // scripts / Dolphin service menus): if a Portal instance is already
-    // running, hand the requests over and exit before creating any window;
-    // otherwise keep them for ourselves and become the IPC server.
-    #[cfg(unix)]
+    // scripts / Dolphin service menus / Explorer context menus): if a Portal
+    // instance is already running, hand the requests over and exit before
+    // creating any window; otherwise keep them for ourselves and become the
+    // IPC server.
     {
         let requests = ipc::parse_cli_requests(std::env::args().skip(1));
         if !requests.is_empty() && ipc::forward(&requests) {
@@ -372,10 +367,9 @@ fn main() -> eframe::Result<()> {
                         // the user's own Terminal / VS Code shells with it.
                         crate::terminal::kill_registered_children();
                     }
-                    // process::exit skips Drop — unlink the IPC socket here
-                    // (a stale file is also tolerated: the next launch
+                    // process::exit skips Drop — unlink the IPC channel here
+                    // (a stale socket file is also tolerated: the next launch
                     // removes it before rebinding).
-                    #[cfg(unix)]
                     crate::ipc::cleanup();
                     // Exit after cleanup
                     std::process::exit(0);

@@ -759,7 +759,6 @@ impl PortalApp {
         ui.add_space(SPACE_XS);
         ui.label(egui::RichText::new(lang.t("integration_desc")).color(theme.fg_dim).size(FONT_SM));
         ui.add_space(SPACE_XS);
-        #[cfg(unix)]
         {
             use crate::integration::{self, IntegrationStatus};
             ui.horizontal(|ui| {

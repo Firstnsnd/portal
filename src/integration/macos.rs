@@ -1,124 +1,53 @@
-//! # File-Manager Integration ("Open new Portal tab/window here")
-//!
-//! Installs the OS file-manager right-click actions that feed Portal's
-//! single-instance IPC ([`crate::ipc`]):
-//!
-//! - **macOS Finder**: Automator Quick Action bundles
-//!   (`New Portal {Tab,Window} Here.workflow`) in `~/Library/Services`. A
-//!   working install needs THREE pieces, and the original v0.15.2 scripts
-//!   produced none of them properly:
-//!   1. `Contents/document.wflow` (the Run Shell Script action) with correct
-//!      `workflowMetaData` (input source = Finder, fileSystemObject in/out),
-//!   2. `Contents/Info.plist` declaring the `NSServices` entry — without it
-//!      the Services daemon (`pbs`) never registers the bundle at all,
-//!   3. an enablement entry in the `pbs` defaults domain
-//!      (`NSServicesStatus`) — on modern macOS a registered-but-unlisted
-//!      service stays out of Finder's context menu.
-//! - **Linux**: Nautilus scripts (`~/.local/share/nautilus/scripts/`) and a
-//!   Dolphin/KDE service menu (`~/.local/share/kio/servicemenus/`).
-//!
-//! Every action ends in `--open-tab|--open-window <dir>`; a freshly
-//! launched instance forwards the request to the running one over the
-//! socket and exits (see ipc.rs).
+//! macOS backend: Finder Quick Actions (Automator workflow bundles in
+//! `~/Library/Services`), registered with the `pbs` Services daemon.
 
 use std::path::PathBuf;
 
+use super::{home_dir, ShellIntegration};
+
 const BUNDLE_ID: &str = "com.portal.app";
 
-/// Whether the file-manager actions are installed — `Stale` means files from
-/// an older layout exist that never register (e.g. pre-Info.plist bundles);
-/// reinstalling fixes them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum IntegrationStatus {
-    NotInstalled,
-    Installed,
-    Stale,
-}
+pub(crate) struct FinderIntegration;
 
-/// Install the file-manager actions for the current OS.
-pub fn install() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
+impl ShellIntegration for FinderIntegration {
+    fn name(&self) -> &'static str {
+        "Finder"
+    }
+
+    fn install(&self) -> Result<(), String> {
         install_macos()?;
         refresh_services_cache();
+        Ok(())
     }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        install_linux()?;
-    }
-    #[cfg(not(unix))]
-    {
-        return Err("file-manager integration is not supported on this OS".to_string());
-    }
-    Ok(())
-}
 
-/// Remove the file-manager actions.
-pub fn uninstall() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
+    fn uninstall(&self) -> Result<(), String> {
         let dir = services_dir()?;
         for name in ["New Portal Tab Here", "New Portal Window Here"] {
             let _ = std::fs::remove_dir_all(dir.join(format!("{name}.workflow")));
         }
         refresh_services_cache();
+        Ok(())
     }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let home = home_dir()?;
-        let _ = std::fs::remove_file(home.join(".local/share/nautilus/scripts/New Portal Tab Here"));
-        let _ = std::fs::remove_file(home.join(".local/share/nautilus/scripts/New Portal Window Here"));
-        let _ = std::fs::remove_file(home.join(".local/share/kio/servicemenus/portal_here.desktop"));
-        let _ = std::fs::remove_file(home.join(".local/share/kservices5/ServiceMenus/portal_here.desktop"));
-    }
-    Ok(())
-}
 
-/// Current install state, for the Settings UI.
-pub fn status() -> IntegrationStatus {
-    let Ok(home) = home_dir() else {
-        return IntegrationStatus::NotInstalled;
-    };
-    #[cfg(target_os = "macos")]
-    {
+    fn status(&self) -> super::IntegrationStatus {
+        let Ok(home) = home_dir() else {
+            return super::IntegrationStatus::NotInstalled;
+        };
         let contents = home
             .join("Library/Services/New Portal Tab Here.workflow")
             .join("Contents");
         match (contents.join("Info.plist").exists(), contents.join("document.wflow").exists()) {
             // Both files: a bundle the Services daemon can actually register.
-            (true, true) => IntegrationStatus::Installed,
+            (true, true) => super::IntegrationStatus::Installed,
             // Old layout (document.wflow only): silently ignored by pbs.
-            (false, true) => IntegrationStatus::Stale,
-            _ => IntegrationStatus::NotInstalled,
+            (false, true) => super::IntegrationStatus::Stale,
+            _ => super::IntegrationStatus::NotInstalled,
         }
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let nautilus = home.join(".local/share/nautilus/scripts/New Portal Tab Here");
-        let dolphin = home.join(".local/share/kio/servicemenus/portal_here.desktop");
-        if nautilus.exists() || dolphin.exists() {
-            IntegrationStatus::Installed
-        } else {
-            IntegrationStatus::NotInstalled
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = home;
-        IntegrationStatus::NotInstalled
     }
 }
 
-// ── macOS ────────────────────────────────────────────────────────────────────
-
-#[cfg(target_os = "macos")]
 fn services_dir() -> Result<PathBuf, String> {
     Ok(home_dir()?.join("Library/Services"))
-}
-
-#[cfg(target_os = "macos")]
-fn home_dir() -> Result<PathBuf, String> {
-    dirs::home_dir().ok_or_else(|| "cannot resolve home directory".to_string())
 }
 
 /// The Run Shell Script body for one action. `bin` (the `PORTAL_BIN` dev
@@ -143,7 +72,6 @@ fn workflow_command(flag: &str, bin: Option<&str>) -> String {
     )
 }
 
-#[cfg(target_os = "macos")]
 fn install_macos() -> Result<(), String> {
     let dir = services_dir()?;
     let bin = std::env::var("PORTAL_BIN").ok();
@@ -182,7 +110,6 @@ fn install_macos() -> Result<(), String> {
 /// bare — only parentheses (the `(null)` slot of identifier-less bundles)
 /// force plist-quoting. Best-effort: if the write fails, the user can still
 /// enable the action manually in System Settings.
-#[cfg(target_os = "macos")]
 fn enable_service(name: &str, bundle_id: &str) {
     let key = format!("{bundle_id} - {name} - runWorkflowAsService");
     let value = "{ enabled_context_menu = 1; enabled_services_menu = 1; \
@@ -193,7 +120,6 @@ fn enable_service(name: &str, bundle_id: &str) {
 }
 
 /// Kick the Services daemon so the new actions appear without re-login.
-#[cfg(target_os = "macos")]
 fn refresh_services_cache() {
     let _ = std::process::Command::new("/System/Library/CoreServices/pbs").arg("-update").output();
 }
@@ -358,110 +284,10 @@ fn info_plist(name: &str, bundle_id: &str) -> String {
     )
 }
 
-// ── Linux ────────────────────────────────────────────────────────────────────
-
-/// The portal binary to invoke. `current_exe` keeps dev builds working while
-/// installed packages resolve to /usr/bin/portal naturally.
-#[cfg(all(unix, not(target_os = "macos")))]
-fn portal_bin() -> String {
-    std::env::var("PORTAL_BIN")
-        .ok()
-        .filter(|b| !b.is_empty())
-        .or_else(|| std::env::current_exe().ok().map(|p| p.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| "portal".to_string())
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn home_dir() -> Result<PathBuf, String> {
-    dirs::home_dir().ok_or_else(|| "cannot resolve home directory".to_string())
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn install_linux() -> Result<(), String> {
-    use std::io::Write;
-    let home = home_dir()?;
-    let bin = portal_bin();
-
-    // ── Nautilus scripts ──
-    // Nautilus exposes the selection as absolute paths (one per line); a
-    // folder selection wins, else the current folder (a file:// URI that
-    // needs percent-decoding — python3 when present).
-    let nautilus_dir = home.join(".local/share/nautilus/scripts");
-    for (name, flag) in [
-        ("New Portal Tab Here", "--open-tab"),
-        ("New Portal Window Here", "--open-window"),
-    ] {
-        std::fs::create_dir_all(&nautilus_dir)
-            .map_err(|e| format!("{}: {}", nautilus_dir.display(), e))?;
-        let script = format!(
-            r#"#!/bin/sh
-# First selected path (one per line); a folder selection wins.
-sel=$(printf '%s\n' "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS" | head -n 1)
-if [ -n "$sel" ] && [ -d "$sel" ]; then
-    dir="$sel"
-else
-    uri="${{NAUTILUS_SCRIPT_CURRENT_URI#file://}}"
-    if command -v python3 >/dev/null 2>&1; then
-        dir="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' "$uri")"
-    else
-        dir="$uri"
-    fi
-fi
-if [ -d "$dir" ]; then
-    '{bin}' {flag} "$dir" &
-fi
-"#
-        );
-        let path = nautilus_dir.join(name);
-        let mut f = std::fs::File::create(&path).map_err(|e| format!("{}: {}", path.display(), e))?;
-        f.write_all(script.as_bytes()).map_err(|e| format!("{}: {}", path.display(), e))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                .map_err(|e| format!("{}: {}", path.display(), e))?;
-        }
-    }
-
-    // ── Dolphin service menu ──
-    // KDE ≥ 5.89 reads from kio/servicemenus; older versions from
-    // kservices5/ServiceMenus.
-    let desktop_entry = format!(
-        "[Desktop Entry]\n\
-         Type=Service\n\
-         X-KDE-ServiceTypes=inode/directory\n\
-         Actions=portalTabHere;portalWindowHere;\n\
-         \n\
-         [Desktop Action portalTabHere]\n\
-         Name=New Portal Tab Here\n\
-         Exec={bin} --open-tab %f\n\
-         Icon=utilities-terminal\n\
-         \n\
-         [Desktop Action portalWindowHere]\n\
-         Name=New Portal Window Here\n\
-         Exec={bin} --open-window %f\n\
-         Icon=utilities-terminal\n"
-    );
-    let kio = home.join(".local/share/kio");
-    let kservices5 = home.join(".local/share/kservices5");
-    let menu_dir = if kio.exists() || !kservices5.exists() {
-        kio.join("servicemenus")
-    } else {
-        kservices5.join("ServiceMenus")
-    };
-    std::fs::create_dir_all(&menu_dir).map_err(|e| format!("{}: {}", menu_dir.display(), e))?;
-    std::fs::write(menu_dir.join("portal_here.desktop"), desktop_entry)
-        .map_err(|e| format!("portal_here.desktop: {}", e))?;
-
-    // Reload Nautilus' script list if it's running.
-    let _ = std::process::Command::new("nautilus").arg("-q").output();
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::IntegrationStatus;
 
     #[test]
     fn xml_escape_handles_plist_breakers() {

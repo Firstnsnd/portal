@@ -496,7 +496,6 @@ impl Drop for PortalApp {
         // The socket is unlinked ONLY here (and in the signal handler):
         // cleanup_sessions also runs on last-visible-window close, where the
         // process — and the IPC endpoint — must stay alive.
-        #[cfg(unix)]
         crate::ipc::cleanup();
     }
 }
