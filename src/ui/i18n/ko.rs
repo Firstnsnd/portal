@@ -49,6 +49,7 @@ pub fn t(key: &str) -> &'static str {
         "copy" => "복사",
         "paste" => "붙여넣기",
         "duplicate_suffix" => "복사본",
+        "duplicate" => "복제",
         "integration_section" => "파일 관리자 통합",
         "integration_desc" => "Finder에서 폴더를 우클릭하여 해당 경로로 새 Portal 탭 또는 창을 엽니다.",
         "integration_installed" => "설치됨",

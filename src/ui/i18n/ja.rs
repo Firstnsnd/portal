@@ -49,6 +49,7 @@ pub fn t(key: &str) -> &'static str {
         "copy" => "コピー",
         "paste" => "ペースト",
         "duplicate_suffix" => "コピー",
+        "duplicate" => "複製",
         "integration_section" => "ファイルマネージャ統合",
         "integration_desc" => "Finderでフォルダを右クリックして、そのパスで新しいPortalタブまたはウィンドウを開きます。",
         "integration_installed" => "インストール済み",

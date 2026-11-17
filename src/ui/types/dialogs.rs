@@ -210,6 +210,23 @@ impl AddHostDialog {
     pub fn open_edit(&mut self, index: usize, host: &HostEntry) {
         self.open = true;
         self.edit_index = Some(index);
+        self.fill_from_host(host);
+    }
+
+    /// Prefill from an existing host for "Duplicate host": every value is
+    /// copied, but the drawer stays in add mode (edit_index None) so saving
+    /// creates a NEW entry. The name gets the duplicate suffix.
+    pub fn open_duplicate(&mut self, host: &HostEntry, name_suffix: &str) {
+        self.open = true;
+        self.fill_from_host(host);
+        self.edit_index = None;
+        if !name_suffix.is_empty() {
+            self.name = format!("{} {}", self.name, name_suffix);
+        }
+    }
+
+    /// Shared prefill used by open_edit and open_duplicate.
+    fn fill_from_host(&mut self, host: &HostEntry) {
         self.name = host.name.clone();
         self.host = host.host.clone();
         self.port = host.port.to_string();
@@ -469,3 +486,52 @@ pub struct CwdPermissionDialog {
 }
 
 use std::sync::Mutex;
+
+#[cfg(test)]
+mod duplicate_host_tests {
+    use super::*;
+
+    fn sample_host(name: &str) -> HostEntry {
+        HostEntry {
+            name: name.to_string(),
+            host: "10.0.0.5".to_string(),
+            port: 2222,
+            username: "deploy".to_string(),
+            group: "prod".to_string(),
+            tags: Vec::new(),
+            is_local: false,
+            credential_id: None,
+            auth: crate::config::AuthMethod::None,
+            startup_commands: Vec::new(),
+            agent_forwarding: false,
+            auto_record: false,
+            jump_host: None,
+            port_forwards: Vec::new(),
+            proxy: None,
+        }
+    }
+
+    #[test]
+    fn open_duplicate_prefills_in_add_mode_with_suffix() {
+        let host = sample_host("web-1");
+        let mut d = AddHostDialog::default();
+        d.open_duplicate(&host, "copy");
+        // Add mode: saving must create a new entry, not overwrite web-1.
+        assert_eq!(d.edit_index, None);
+        assert!(d.open);
+        assert_eq!(d.name, "web-1 copy");
+        assert_eq!(d.host, "10.0.0.5");
+        assert_eq!(d.port, "2222");
+        assert_eq!(d.username, "deploy");
+        assert_eq!(d.group, "prod");
+    }
+
+    #[test]
+    fn open_edit_still_targets_the_existing_entry() {
+        let host = sample_host("web-1");
+        let mut d = AddHostDialog::default();
+        d.open_edit(3, &host);
+        assert_eq!(d.edit_index, Some(3));
+        assert_eq!(d.name, "web-1");
+    }
+}

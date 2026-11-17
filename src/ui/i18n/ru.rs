@@ -49,6 +49,7 @@ pub fn t(key: &str) -> &'static str {
         "copy" => "Копировать",
         "paste" => "Вставить",
         "duplicate_suffix" => "копия",
+        "duplicate" => "Дублировать",
         "integration_section" => "Интеграция с файловым менеджером",
         "integration_desc" => "Правый клик по папке в Finder открывает новую вкладку или окно Portal по этому пути.",
         "integration_installed" => "Установлено",

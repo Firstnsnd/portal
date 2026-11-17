@@ -9,6 +9,30 @@ use crate::ui::i18n::Language;
 use crate::ui::types::session::SessionKind;
 use crate::ssh::SshConnectionState;
 
+/// Bar title for the tab's focused session. SSH shows `user@host` — the
+/// connection identity — so same-machine multi-account tabs stay
+/// distinguishable; local keeps the cwd's directory name, falling back to
+/// the tab title.
+fn focused_session_title(tab: &Tab) -> String {
+    if let Some(SessionKind::Ssh(_, host, _)) =
+        tab.sessions.get(tab.focused_session).map(|s| &s.kind)
+    {
+        return crate::ui::types::session::TerminalSession::ssh_tab_title(
+            &host.username,
+            &host.name,
+        );
+    }
+    tab.sessions
+        .get(tab.focused_session)
+        .and_then(|s| s.cwd.as_ref())
+        .and_then(|cwd| {
+            std::path::Path::new(cwd)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| tab.title.clone())
+}
+
 /// Tab bar action result
 #[derive(PartialEq, Debug, Clone)]
 pub enum TabBarAction {
@@ -185,15 +209,7 @@ fn render_tabs_inner(
 
                     // Tab title
                     let title_color = if is_active { theme.fg_primary } else { theme.fg_dim };
-                    let display_title = tab.sessions
-                        .get(tab.focused_session)
-                        .and_then(|s| s.cwd.as_ref())
-                        .and_then(|cwd| {
-                            std::path::Path::new(cwd)
-                                .file_name()
-                                .map(|n| n.to_string_lossy().to_string())
-                        })
-                        .unwrap_or_else(|| tab.title.clone());
+                    let display_title = focused_session_title(tab);
                     ui.label(egui::RichText::new(display_title).color(title_color).size(13.0));
 
                     // Close button
@@ -245,16 +261,7 @@ fn render_tabs_inner(
             if sense_resp.drag_started() {
                 tab_drag.source_index = Some(i);
                 tab_drag.ghost_size = tab_rect.size();
-                let display_title = tab.sessions
-                    .get(tab.focused_session)
-                    .and_then(|s| s.cwd.as_ref())
-                    .and_then(|cwd| {
-                        std::path::Path::new(cwd)
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                    })
-                    .unwrap_or_else(|| tab.title.clone());
-                tab_drag.ghost_title = display_title;
+                tab_drag.ghost_title = focused_session_title(tab);
                 tab_drag.target_index = None;
                 tab_drag.is_merge = false;
             }

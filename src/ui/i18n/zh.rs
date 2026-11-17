@@ -49,6 +49,7 @@ pub fn t(key: &str) -> &'static str {
         "copy" => "复制",
         "paste" => "粘贴",
         "duplicate_suffix" => "副本",
+        "duplicate" => "复制主机",
         "integration_section" => "文件管理器集成",
         "integration_desc" => "在 Finder 右键文件夹，即可在该路径打开新的 Portal 标签页或窗口。",
         "integration_installed" => "已安装",

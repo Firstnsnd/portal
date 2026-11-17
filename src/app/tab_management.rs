@@ -163,7 +163,7 @@ impl PortalApp {
         let jump = self.resolve_jump_host(host);
         let session = TerminalSession::new_ssh(host, auth, &self.runtime, jump);
         let tab = Tab {
-            title: host.name.clone(),
+            title: TerminalSession::ssh_tab_title(&host.username, &host.name),
             sessions: vec![session],
             layout: PaneNode::Terminal(0),
             focused_session: 0,

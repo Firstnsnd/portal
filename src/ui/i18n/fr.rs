@@ -49,6 +49,7 @@ pub fn t(key: &str) -> &'static str {
         "copy" => "Copier",
         "paste" => "Coller",
         "duplicate_suffix" => "copie",
+        "duplicate" => "Dupliquer",
         "integration_section" => "Intégration au gestionnaire de fichiers",
         "integration_desc" => "Clic droit sur un dossier dans le Finder pour ouvrir un nouvel onglet ou une nouvelle fenêtre Portal à cet emplacement.",
         "integration_installed" => "Installé",

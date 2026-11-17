@@ -49,6 +49,7 @@ pub fn t(key: &str) -> &'static str {
         "copy" => "Copy",
         "paste" => "Paste",
         "duplicate_suffix" => "copy",
+        "duplicate" => "Duplicate",
         "integration_section" => "File Manager Integration",
         "integration_desc" => "Right-click a folder in Finder to open a new Portal tab or window at that path.",
         "integration_installed" => "Installed",

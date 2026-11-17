@@ -699,6 +699,20 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                     window.confirm_delete_host = window.add_host_dialog.edit_index;
                                     window.add_host_dialog.open = false;
                                 }
+                            // Duplicate button (edit mode only): switch the
+                            // drawer into add mode prefilled with this host's
+                            // values, so only user/credential need changing.
+                            if let Some(idx) = window.add_host_dialog.edit_index {
+                                if ui.add(
+                                    egui::Button::new(egui::RichText::new(cx.language.t("duplicate")).size(FONT_BASE))
+                                        .frame(false)
+                                ).on_hover_text(cx.language.t("duplicate"))
+                                .clicked() {
+                                    if let Some(host) = cx.hosts.get(idx).cloned() {
+                                        window.add_host_dialog.open_duplicate(&host, cx.language.t("duplicate_suffix"));
+                                    }
+                                }
+                            }
                         });
                     });
                 });

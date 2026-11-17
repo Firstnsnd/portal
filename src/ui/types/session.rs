@@ -510,6 +510,18 @@ impl TerminalSession {
         }
     }
 
+    /// Tab-bar title for an SSH connection: `user@name` — the connection
+    /// identity. Same-machine multi-account tabs stay distinguishable, and
+    /// restored sessions self-heal to this form without reconnecting.
+    pub fn ssh_tab_title(username: &str, host_name: &str) -> String {
+        let user = Self::get_effective_username(username);
+        if user.is_empty() {
+            host_name.to_string()
+        } else {
+            format!("{}@{}", user, host_name)
+        }
+    }
+
     pub fn new_ssh(host: &HostEntry, auth: ResolvedAuth, runtime: &tokio::runtime::Runtime, jump_host: Option<JumpHostInfo>) -> Self {
         // Use current system user if username is empty
         let username = Self::get_effective_username(&host.username);
