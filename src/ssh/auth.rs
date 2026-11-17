@@ -226,6 +226,7 @@ async fn keyboard_interactive(
 /// was rejected (caller decides on fallback), `Err` when the agent itself
 /// is unreachable or errors (missing SSH_AUTH_SOCK, dead socket, protocol
 /// failure) — those are environment problems, not auth rejections.
+#[cfg(unix)]
 async fn agent_authenticate(
     handle: &mut russh::client::Handle<SshClient>,
     username: &str,
@@ -267,6 +268,17 @@ async fn agent_authenticate(
         }
     }
     Ok(false)
+}
+
+/// Windows: russh 0.57's `connect_env` is unix-gated (SSH_AUTH_SOCK is a
+/// unix convention; Pageant would need its own transport). Surface a clear
+/// environment error — callers treat it exactly like an unreachable agent.
+#[cfg(windows)]
+async fn agent_authenticate(
+    _handle: &mut russh::client::Handle<SshClient>,
+    _username: &str,
+) -> Result<bool, String> {
+    Err("ssh-agent is not supported on Windows yet".to_string())
 }
 
 /// Connect and authenticate an SSH session, returning the handle.

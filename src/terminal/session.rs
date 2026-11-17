@@ -641,7 +641,7 @@ impl RealPtySession {
         }
         #[cfg(windows)]
         if let Some(ref pty) = self.pty {
-            let pty_ref = pty.lock().unwrap();
+            let mut pty_ref = pty.lock().unwrap();
             return pty_ref.write(data).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()));
         }
         Err(io::Error::new(io::ErrorKind::NotConnected, "PTY not available"))

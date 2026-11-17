@@ -60,6 +60,14 @@ pub struct WindowsPty {
     pending: Arc<Mutex<Vec<u8>>>,
 }
 
+// SAFETY: WindowsPty owns raw kernel HANDLEs (HPCON, pipe ends, process).
+// Kernel handles are process-wide, not thread-affine; all access is
+// serialized through the `Arc<Mutex<WindowsPty>>` held by RealPtySession
+// (the internal reader thread touches only `conout` + the pending buffer
+// it was handed at spawn). windows 0.62 declares HANDLE as a raw pointer
+// and therefore !Send, but nothing here depends on thread identity.
+unsafe impl Send for WindowsPty {}
+
 impl Pty for WindowsPty {
     fn spawn(command: &str, args: &[&str], size: PtySize) -> Result<Self> {
         Self::spawn_in(command, args, size, None)

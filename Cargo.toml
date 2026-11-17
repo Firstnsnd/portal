@@ -71,7 +71,9 @@ windows = { version = "0.62", features = [
     "Win32_System_Threading",   # CreateProcessW, STARTUPINFOEXW, proc-thread attributes,
                                 # WaitForSingleObject, TerminateProcess, GetExitCodeProcess
     "Win32_System_Pipes",       # CreatePipe
-    "Win32_Storage_FileSystem", # ReadFile, WriteFile
+    "Win32_Storage_FileSystem", # ReadFile, WriteFile (signatures reference OVERLAPPED,
+                                # so Win32_System_IO must be on too)
+    "Win32_System_IO",          # OVERLAPPED — required for ReadFile/WriteFile to exist
     "Win32_Security",           # SECURITY_ATTRIBUTES (referenced by CreatePipe/CreateProcessW)
 ] }
 
