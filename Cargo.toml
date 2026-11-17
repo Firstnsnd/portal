@@ -75,6 +75,11 @@ windows = { version = "0.62", features = [
     "Win32_Security",           # SECURITY_ATTRIBUTES (referenced by CreatePipe/CreateProcessW)
 ] }
 
+[build-dependencies]
+# Windows VERSIONINFO + icon embedding (see build.rs). Only `compile()` needs
+# the Windows SDK resource compiler — build.rs skips it off-Windows-host.
+winresource = "0.1"
+
 [package.metadata.bundle]
 name = "Portal"
 identifier = "com.portal.app"
