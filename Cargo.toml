@@ -62,6 +62,19 @@ signal-hook = "0.3"
 # upgrades must be reviewed manually.
 rzsz = "=0.1.4"
 
+[target.'cfg(windows)'.dependencies]
+# ConPTY local terminals. Pinned to 0.62: the dep tree already carries
+# windows 0.62 (via rfd/arboard), so this adds no second copy.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",         # HANDLE, CloseHandle, WAIT_OBJECT_0, ERROR_*
+    "Win32_System_Console",     # Create/Resize/ClosePseudoConsole, COORD
+    "Win32_System_Threading",   # CreateProcessW, STARTUPINFOEXW, proc-thread attributes,
+                                # WaitForSingleObject, TerminateProcess, GetExitCodeProcess
+    "Win32_System_Pipes",       # CreatePipe
+    "Win32_Storage_FileSystem", # ReadFile, WriteFile
+    "Win32_Security",           # SECURITY_ATTRIBUTES (referenced by CreatePipe/CreateProcessW)
+] }
+
 [package.metadata.bundle]
 name = "Portal"
 identifier = "com.portal.app"

@@ -3998,6 +3998,7 @@ dependencies = [
  "ureq",
  "uuid",
  "vte",
+ "windows 0.62.2",
 ]
 
 [[package]]

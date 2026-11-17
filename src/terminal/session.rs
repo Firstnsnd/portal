@@ -56,6 +56,153 @@ impl Drop for PtyWriter {
     }
 }
 
+// ── Shared constructor building blocks (unix + windows) ─────────────────────
+// The two platform constructors below must stay behaviorally identical apart
+// from the PTY transport, so recorder bootstrap, output feeding, and metrics
+// collection are shared helpers instead of copy-pasted closures.
+
+/// Recorder slot bootstrap shared by both platform constructors. Creates the
+/// recorder BEFORE the reader thread spawns so capture starts at the very
+/// first byte.
+fn make_recorder_slot(
+    record: bool,
+    shell: &str,
+    cols: u16,
+    rows: u16,
+) -> Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>> {
+    Arc::new(Mutex::new(if record {
+        let title = std::path::Path::new(shell)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| shell.to_string());
+        match crate::terminal::cast::new_recording_path(&title).and_then(|path| {
+            crate::terminal::cast::CastRecorder::create(
+                &path, cols, rows, Some(title.clone()), Some("localhost".into()),
+            )
+        }) {
+            Ok(rec) => Some(rec),
+            Err(e) => {
+                log::warn!("auto-record: failed to open recording file: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    }))
+}
+
+/// Shared reader-side chunk handling: AI display rewrite → VTE parse into the
+/// grid → version bump → asciicast tap → AI capture tap. Both platform
+/// constructors call this so the choreography can't drift.
+fn feed_chunk(
+    parser: &mut Parser,
+    attrs: &mut CellAttrs,
+    grid: &Arc<Mutex<TerminalGrid>>,
+    recorder: &Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>>,
+    ai_capture: &crate::terminal::ai_capture::AiCaptureSlot,
+    bytes: &[u8],
+) {
+    // Display path goes through the AI capture's echo rewrite when armed
+    // (bare command instead of the sentinel wrapper); the taps below still
+    // see the raw bytes.
+    let display = crate::terminal::ai_capture::display_bytes(ai_capture, bytes);
+    let mut grid = grid.lock().unwrap();
+    let mut handler = VteHandler {
+        grid: &mut grid,
+        attrs,
+    };
+    for &byte in &display {
+        parser.advance(&mut handler, byte);
+    }
+    // One bump per chunk (not per byte): the renderer's visible-rows cache
+    // keys on this version to skip re-snapshotting when nothing changed.
+    grid.version = grid.version.wrapping_add(1);
+    // Asciicast tap: capture the raw chunk with a timestamp.
+    if let Ok(mut slot) = recorder.lock() {
+        if let Some(rec) = slot.as_mut() {
+            rec.output(bytes);
+        }
+    }
+    // AI run-feedback tap (same tap point; only armed while a capture is
+    // active).
+    if let Ok(slot) = ai_capture.lock() {
+        if let Some(cap) = slot.as_ref() {
+            if let Ok(mut cap) = cap.lock() {
+                cap.feed(bytes);
+            }
+        }
+    }
+}
+
+/// Background thread for local metrics collection, shared by both platform
+/// constructors. Gated by `gate` (raised by the UI only while the Metrics
+/// drawer is visible for the focused pane) and bounded by `alive`: the thread
+/// exits within a tick of the child dying, so closed sessions don't leak a
+/// thread that refreshes sysinfo and forces repaints forever.
+fn spawn_metrics_collector(
+    alive: &Arc<AtomicBool>,
+    metrics: &Arc<Mutex<MetricsSnapshot>>,
+    gate: &Arc<AtomicBool>,
+) {
+    let metrics_clone = Arc::clone(metrics);
+    let metrics_gate = Arc::clone(gate);
+    let alive_for_metrics = Arc::clone(alive);
+    thread::Builder::new()
+        .name("metrics-collector".to_string())
+        .spawn(move || {
+            let mut sys = System::new();
+            let mut nets = sysinfo::Networks::new_with_refreshed_list();
+            let mut prev_rx: Option<u64> = None;
+            let mut prev_tx: Option<u64> = None;
+            let mut last_poll: Option<Instant> = None;
+            while alive_for_metrics.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                // 1 s tick keeps enable→first-sample latency low at zero
+                // cost while the gate is off; collection itself stays on
+                // the 5 s cadence.
+                if !metrics_gate.load(std::sync::atomic::Ordering::Relaxed) {
+                    continue;
+                }
+                if last_poll.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(5)) {
+                    continue;
+                }
+                last_poll = Some(Instant::now());
+                sys.refresh_memory();
+                sys.refresh_cpu_usage();
+                nets.refresh();
+                let rx: u64 = nets.values().map(|n| n.total_received()).sum();
+                let tx: u64 = nets.values().map(|n| n.total_transmitted()).sum();
+                let net_rx_rate = prev_rx
+                    .map(|p| ((rx.saturating_sub(p)) as f64 / 5.0) as u64)
+                    .unwrap_or(0);
+                let net_tx_rate = prev_tx
+                    .map(|p| ((tx.saturating_sub(p)) as f64 / 5.0) as u64)
+                    .unwrap_or(0);
+                prev_rx = Some(rx);
+                prev_tx = Some(tx);
+                // load_average is unix-only in sysinfo; windows reports 0.
+                #[cfg(unix)]
+                let load_1 = System::load_average().one as f32;
+                #[cfg(not(unix))]
+                let load_1 = 0.0f32;
+                let m = SystemMetrics {
+                    cpu_percent: sys.global_cpu_usage(),
+                    mem_used_bytes: sys.used_memory(),
+                    mem_total_bytes: sys.total_memory(),
+                    load_1,
+                    net_rx_bytes_per_sec: net_rx_rate,
+                    net_tx_bytes_per_sec: net_tx_rate,
+                };
+                metrics_clone.lock().unwrap().push(m);
+                // Metrics snapshots change independently of terminal output;
+                // wake the UI so the drawer's sparklines keep animating.
+                // Only while the drawer is actually watching this session.
+                crate::repaint::notify_repaint();
+            }
+        })
+        .ok();
+}
+
 /// Real PTY session with background reader thread
 pub struct RealPtySession {
     #[cfg(unix)]
@@ -164,30 +311,9 @@ impl RealPtySession {
         let grid_clone: Arc<Mutex<TerminalGrid>> = Arc::clone(&grid);
         let pty_clone = Arc::clone(&pty);
         let alive_clone = Arc::clone(&alive);
-        let recorder = Arc::new(Mutex::new(
-            if record {
-                // Zero-loss auto-record: create the recorder BEFORE the reader
-                // thread spawns so capture starts at the very first byte.
-                let title = std::path::Path::new(shell)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| shell.to_string());
-                match crate::terminal::cast::new_recording_path(&title)
-                    .and_then(|path| {
-                        crate::terminal::cast::CastRecorder::create(
-                            &path, cols, rows, Some(title.clone()), Some("localhost".into()),
-                        )
-                    }) {
-                    Ok(rec) => Some(rec),
-                    Err(e) => {
-                        log::warn!("auto-record: failed to open recording file: {e}");
-                        None
-                    }
-                }
-            } else {
-                None
-            },
-        ));
+        // Zero-loss auto-record: the recorder is created before the reader
+        // thread spawns so capture starts at the very first byte.
+        let recorder = make_recorder_slot(record, shell, cols, rows);
         let recorder_clone = Arc::clone(&recorder);
         let ai_capture: crate::terminal::ai_capture::AiCaptureSlot =
             Arc::new(Mutex::new(None));
@@ -301,46 +427,14 @@ impl RealPtySession {
                                     &zmodem_bridge_clone,
                                     &data,
                                     |bytes| {
-                                        // Display path goes through the AI
-                                        // capture's echo rewrite when armed
-                                        // (bare command instead of the
-                                        // sentinel wrapper); the taps below
-                                        // still see the raw bytes.
-                                        let display =
-                                            crate::terminal::ai_capture::display_bytes(
-                                                &ai_capture_clone,
-                                                bytes,
-                                            );
-                                        let mut grid = grid_clone.lock().unwrap();
-                                        let mut handler = VteHandler {
-                                            grid: &mut grid,
-                                            attrs: &mut attrs,
-                                        };
-                                        for &byte in &display {
-                                            parser.advance(&mut handler, byte);
-                                        }
-                                        // One bump per chunk (not per byte): the
-                                        // renderer's visible-rows cache keys on
-                                        // this version to skip re-snapshotting
-                                        // when nothing changed.
-                                        grid.version = grid.version.wrapping_add(1);
-                                        // Asciicast tap: capture the raw chunk
-                                        // with a timestamp (outside the grid
-                                        // lock, in the reader thread).
-                                        if let Ok(mut slot) = recorder_clone.lock() {
-                                            if let Some(rec) = slot.as_mut() {
-                                                rec.output(bytes);
-                                            }
-                                        }
-                                        // AI run-feedback tap (same tap point;
-                                        // only armed while a capture is active).
-                                        if let Ok(slot) = ai_capture_clone.lock() {
-                                            if let Some(cap) = slot.as_ref() {
-                                                if let Ok(mut cap) = cap.lock() {
-                                                    cap.feed(bytes);
-                                                }
-                                            }
-                                        }
+                                        feed_chunk(
+                                            &mut parser,
+                                            &mut attrs,
+                                            &grid_clone,
+                                            &recorder_clone,
+                                            &ai_capture_clone,
+                                            bytes,
+                                        )
                                     },
                                 );
                                 if diverted == crate::terminal::zmodem::ChunkRoute::Diverted {
@@ -397,64 +491,7 @@ impl RealPtySession {
         let metrics = Arc::new(Mutex::new(MetricsSnapshot::new()));
         let metrics_enabled = Arc::new(AtomicBool::new(false));
 
-        // Spawn a background thread for local metrics collection.
-        // Gated by `metrics_enabled` (raised by the UI only while the Metrics
-        // drawer is visible for the focused pane) and bounded by `alive`: the
-        // thread exits within a tick of the child dying, so closed sessions
-        // don't leak a thread that refreshes sysinfo and forces repaints
-        // forever.
-        let metrics_clone: Arc<Mutex<MetricsSnapshot>> = Arc::clone(&metrics);
-        let metrics_gate = Arc::clone(&metrics_enabled);
-        let alive_for_metrics = Arc::clone(&alive);
-        thread::Builder::new()
-            .name("metrics-collector".to_string())
-            .spawn(move || {
-                let mut sys = System::new();
-                let mut nets = sysinfo::Networks::new_with_refreshed_list();
-                let mut prev_rx: Option<u64> = None;
-                let mut prev_tx: Option<u64> = None;
-                let mut last_poll: Option<Instant> = None;
-                while alive_for_metrics.load(std::sync::atomic::Ordering::Relaxed) {
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                    // 1 s tick keeps enable→first-sample latency low at zero
-                    // cost while the gate is off; collection itself stays on
-                    // the 5 s cadence.
-                    if !metrics_gate.load(std::sync::atomic::Ordering::Relaxed) {
-                        continue;
-                    }
-                    if last_poll.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(5)) {
-                        continue;
-                    }
-                    last_poll = Some(Instant::now());
-                    sys.refresh_memory();
-                    sys.refresh_cpu_usage();
-                    nets.refresh();
-                    let rx: u64 = nets.values().map(|n| n.total_received()).sum();
-                    let tx: u64 = nets.values().map(|n| n.total_transmitted()).sum();
-                    let net_rx_rate = prev_rx
-                        .map(|p| ((rx.saturating_sub(p)) as f64 / 5.0) as u64)
-                        .unwrap_or(0);
-                    let net_tx_rate = prev_tx
-                        .map(|p| ((tx.saturating_sub(p)) as f64 / 5.0) as u64)
-                        .unwrap_or(0);
-                    prev_rx = Some(rx);
-                    prev_tx = Some(tx);
-                    let m = SystemMetrics {
-                        cpu_percent: sys.global_cpu_usage(),
-                        mem_used_bytes: sys.used_memory(),
-                        mem_total_bytes: sys.total_memory(),
-                        load_1: System::load_average().one as f32,
-                        net_rx_bytes_per_sec: net_rx_rate,
-                        net_tx_bytes_per_sec: net_tx_rate,
-                    };
-                    metrics_clone.lock().unwrap().push(m);
-                    // Metrics snapshots change independently of terminal output;
-                    // wake the UI so the drawer's sparklines keep animating.
-                    // Only while the drawer is actually watching this session.
-                    crate::repaint::notify_repaint();
-                }
-            })
-            .ok();
+        spawn_metrics_collector(&alive, &metrics, &metrics_enabled);
 
         Ok(Self {
             pty: Some(pty),
@@ -476,15 +513,124 @@ impl RealPtySession {
     }
 
     #[cfg(windows)]
+    #[allow(dead_code)] // mirrors the unix `new`; bin tree spawns via with_scrollback_limit
     pub fn new(id: usize, cols: u16, rows: u16, shell: &str) -> Result<Self> {
-        let _ = (id, cols, rows, shell);
-        Err(super::Error::SpawnFailed("Windows PTY not implemented".to_string()))
+        Self::with_scrollback_limit(id, cols, rows, shell, TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES, None, false)
     }
 
+    /// Windows constructor — a line-by-line mirror of the unix one above,
+    /// minus the unix-only pieces (PtyWriter fd dup, ZMODEM slots, poll-based
+    /// reader): ConPTY routes writes through the pty mutex instead, and the
+    /// reader polls `try_read()` since there is no non-blocking master fd.
     #[cfg(windows)]
-    pub fn with_scrollback_limit(id: usize, cols: u16, rows: u16, shell: &str, _scrollback_limit_bytes: usize) -> Result<Self> {
-        let _ = (id, cols, rows, shell);
-        Err(super::Error::SpawnFailed("Windows PTY not implemented".to_string()))
+    pub fn with_scrollback_limit(id: usize, cols: u16, rows: u16, shell: &str, scrollback_limit_bytes: usize, cwd: Option<&str>, record: bool) -> Result<Self> {
+        let _ = id;
+
+        let grid: Arc<Mutex<TerminalGrid>> = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols as usize, rows as usize, scrollback_limit_bytes)));
+
+        // Shells differ in startup flags; only ones we know get any. (Unix
+        // hardcodes `["-l"]` — a login flag that does not exist on Windows
+        // shells.)
+        let basename = std::path::Path::new(shell)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase())
+            .unwrap_or_default();
+        let args: Vec<&str> = if basename == "powershell" || basename == "pwsh" {
+            // Skip the banner so the first frame isn't polluted.
+            vec!["-NoLogo"]
+        } else {
+            vec![]
+        };
+
+        let pty = WindowsPty::spawn_in(shell, &args, PtySize::new(rows, cols), cwd)?;
+        let pty = Arc::new(Mutex::new(pty));
+        let alive = Arc::new(AtomicBool::new(true));
+        let grid_clone: Arc<Mutex<TerminalGrid>> = Arc::clone(&grid);
+        let pty_clone = Arc::clone(&pty);
+        let alive_clone = Arc::clone(&alive);
+        // Zero-loss auto-record: the recorder is created before the reader
+        // thread spawns so capture starts at the very first byte.
+        let recorder = make_recorder_slot(record, shell, cols, rows);
+        let recorder_clone = Arc::clone(&recorder);
+        let ai_capture: crate::terminal::ai_capture::AiCaptureSlot =
+            Arc::new(Mutex::new(None));
+        let ai_capture_clone = Arc::clone(&ai_capture);
+
+        let reader_thread = thread::Builder::new()
+            .name(format!("pty-reader-{}", id))
+            .spawn(move || {
+                let mut parser = Parser::new();
+                let mut attrs = CellAttrs::default();
+
+                // ── INVARIANT ────────────────────────────────────────────
+                // Same as unix: `alive` is set false ONLY via
+                // `liveness_check`, and ONLY after `is_alive()`
+                // (WaitForSingleObject) confirmed the child is gone.
+                let liveness_check = || -> bool {
+                    let is_alive = {
+                        let pty_ref = pty_clone.lock().unwrap();
+                        pty_ref.is_alive()
+                    };
+                    if !is_alive {
+                        alive_clone.store(false, Ordering::Relaxed);
+                        false
+                    } else {
+                        true
+                    }
+                };
+
+                // No non-blocking master fd here: the ConPTY reader thread
+                // fills `pending`, and we poll it on a short sleep — idle
+                // terminals cost one mutex check per 25 ms.
+                while alive_clone.load(Ordering::Relaxed) {
+                    let data = {
+                        let mut pty_ref = pty_clone.lock().unwrap();
+                        pty_ref.try_read()
+                    };
+                    match data {
+                        Ok(data) if !data.is_empty() => {
+                            feed_chunk(
+                                &mut parser,
+                                &mut attrs,
+                                &grid_clone,
+                                &recorder_clone,
+                                &ai_capture_clone,
+                                &data,
+                            );
+                            // Wake the UI so the new output is painted promptly.
+                            crate::repaint::notify_repaint();
+                        }
+                        _ => {
+                            if !liveness_check() {
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(25));
+                        }
+                    }
+                }
+            })
+            .map_err(|_| super::Error::SpawnFailed("Failed to spawn reader thread".to_string()))?;
+
+        let cached_shell_name = Arc::new(Mutex::new(None));
+        let last_shell_check = Arc::new(Mutex::new(Instant::now()));
+        let metrics = Arc::new(Mutex::new(MetricsSnapshot::new()));
+        let metrics_enabled = Arc::new(AtomicBool::new(false));
+
+        spawn_metrics_collector(&alive, &metrics, &metrics_enabled);
+
+        Ok(Self {
+            pty: Some(pty),
+            grid,
+            alive,
+            _reader_thread: Some(reader_thread),
+            cached_shell_name,
+            last_shell_check,
+            metrics,
+            metrics_enabled,
+            recorder,
+            ai_capture,
+        })
     }
 
     /// Write data to the PTY
