@@ -129,6 +129,16 @@ pub fn select_asset_for<'a>(
                 .iter()
                 .find(|a| a.name.starts_with(&prefix) && a.name.ends_with(".tar.gz"))
         }
+        "windows" => {
+            // consts::ARCH reports ARM64 Windows as "aarch64" and the release
+            // assets use that spelling directly — no remap like the macos
+            // "arm64". The portable zip exists too; updates point at the
+            // installer so a stock install gets the full upgrade path.
+            let prefix = format!("Portal-windows-{arch}-v");
+            assets
+                .iter()
+                .find(|a| a.name.starts_with(&prefix) && a.name.ends_with("-setup.exe"))
+        }
         _ => None,
     }
 }
@@ -226,8 +236,26 @@ pub fn reveal_downloaded(
     Ok(archive_path.to_path_buf())
 }
 
+/// Windows: the asset is the NSIS setup.exe — launch it directly (its own
+/// UAC prompt covers elevation). CREATE_NO_WINDOW keeps the `cmd` shim from
+/// flashing a console.
+#[cfg(target_os = "windows")]
+pub fn reveal_downloaded(
+    _asset_name: &str,
+    archive_path: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", &archive_path.to_string_lossy()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|e| format!("failed to launch installer: {e}"))?;
+    Ok(archive_path.to_path_buf())
+}
+
 /// See `reveal_downloaded` on macOS above.
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 pub fn reveal_downloaded(
     asset_name: &str,
     archive_path: &std::path::Path,
@@ -265,15 +293,34 @@ pub fn reveal_downloaded(
 /// Open an already-revealed path again (used by the "Open" button after a
 /// download completes). Returns the path on success.
 pub fn open_revealed(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    #[cfg(target_os = "macos")]
-    let mut cmd = std::process::Command::new("open");
-    #[cfg(not(target_os = "macos"))]
-    let mut cmd = std::process::Command::new("xdg-open");
-    let status = cmd.arg(path).status().map_err(|e| e.to_string())?;
-    if !status.success() {
-        return Err("failed to open folder".to_string());
+    // Windows: `cmd /C start` (empty first arg = window title, not the path);
+    // CREATE_NO_WINDOW keeps the shim console from flashing.
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path.to_string_lossy()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err("failed to open".to_string());
+        }
+        return Ok(path.to_path_buf());
     }
-    Ok(path.to_path_buf())
+    #[cfg(not(target_os = "windows"))]
+    {
+        #[cfg(target_os = "macos")]
+        let mut cmd = std::process::Command::new("open");
+        #[cfg(not(target_os = "macos"))]
+        let mut cmd = std::process::Command::new("xdg-open");
+        let status = cmd.arg(path).status().map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err("failed to open folder".to_string());
+        }
+        Ok(path.to_path_buf())
+    }
 }
 
 /// Download `url` (for `version`) into the Downloads dir and reveal it.
@@ -349,6 +396,9 @@ mod tests {
             asset("Portal-macos-x86_64.dmg"),
             asset("Portal-macos-arm64.dmg"),
             asset("Portal-linux-x86_64-v0.15.0.tar.gz"),
+            asset("Portal-windows-x86_64-v0.15.0.zip"),
+            asset("Portal-windows-x86_64-v0.15.0-setup.exe"),
+            asset("Portal-windows-aarch64-v0.15.0-setup.exe"),
         ]
     }
 
@@ -358,7 +408,11 @@ mod tests {
         assert_eq!(select_asset_for("macos", "aarch64", &assets).map(|a| a.name.as_str()), Some("Portal-macos-arm64.dmg"));
         assert_eq!(select_asset_for("macos", "x86_64", &assets).map(|a| a.name.as_str()), Some("Portal-macos-x86_64.dmg"));
         assert_eq!(select_asset_for("linux", "x86_64", &assets).map(|a| a.name.as_str()), Some("Portal-linux-x86_64-v0.15.0.tar.gz"));
-        assert!(select_asset_for("windows", "x86_64", &assets).is_none());
+        // Windows: the setup.exe over the portable zip, per arch.
+        assert_eq!(select_asset_for("windows", "x86_64", &assets).map(|a| a.name.as_str()), Some("Portal-windows-x86_64-v0.15.0-setup.exe"));
+        assert_eq!(select_asset_for("windows", "aarch64", &assets).map(|a| a.name.as_str()), Some("Portal-windows-aarch64-v0.15.0-setup.exe"));
+        // No setup.exe for this arch (zip alone doesn't count).
+        assert!(select_asset_for("windows", "x86_64", &assets[3..4]).is_none());
         // missing platform asset: only a Linux tarball present → no macOS match
         assert!(select_asset_for("macos", "x86_64", &assets[2..3]).is_none());
     }
