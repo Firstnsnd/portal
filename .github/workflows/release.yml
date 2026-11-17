@@ -126,7 +126,11 @@ jobs:
       - name: Install NSIS
         # Unconditional: makensis's presence on the windows-2025 image is
         # uncertain (actions/runner-images#11754); choco is idempotent.
-        run: choco install nsis -y --no-progress
+        # choco adds the install dir to the MACHINE path, which later steps
+        # of this job never re-read — publish it into the job's PATH.
+        run: |
+          choco install nsis -y --no-progress
+          Add-Content $env:GITHUB_PATH "${env:ProgramFiles(x86)}\NSIS"
 
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
