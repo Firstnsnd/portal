@@ -32,3 +32,22 @@ jobs:
 
       - name: cargo check (aarch64-pc-windows-msvc)
         run: cargo check --target aarch64-pc-windows-msvc
+
+  # Linux is the other platform invisible from a macOS host: the keyring
+  # Secret Service backend (and any future Linux-gated code) only compiles
+  # here. Same feedback loop as windows-check.
+  linux-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libfontconfig1-dev
+
+      - name: cargo check (all targets)
+        run: cargo check --all-targets

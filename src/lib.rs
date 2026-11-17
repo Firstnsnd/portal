@@ -8,7 +8,8 @@
 //! - **Multiple Tabs & Panes**: Split panes horizontally/vertically with drag-to-resize
 //! - **SSH Connections**: Password and SSH key authentication with secure credential storage
 //! - **SFTP File Browser**: Dual-panel local/remote file browser with drag-and-drop transfers
-//! - **System Keychain Integration**: Secure password and key storage (macOS Keychain)
+//! - **System Keychain Integration**: Secure password and key storage (macOS Keychain,
+//!   Windows Credential Manager, Linux Secret Service)
 //! - **Multi-language Support**: English, Chinese, Japanese, Korean
 //! - **Broadcast Mode**: Type into multiple terminals simultaneously
 //! - **Detached Windows**: Open terminals in separate windows
@@ -37,6 +38,7 @@
 
 pub mod terminal;
 pub mod config;
+pub mod secret_store;
 pub mod ssh;
 pub mod sftp;
 pub mod repaint;

@@ -11,6 +11,7 @@ mod integration;
 mod ipc;
 mod llm;
 mod repaint;
+mod secret_store;
 mod sftp;
 mod ssh;
 mod terminal;

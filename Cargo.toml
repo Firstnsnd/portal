@@ -75,7 +75,15 @@ windows = { version = "0.62", features = [
                                 # so Win32_System_IO must be on too)
     "Win32_System_IO",          # OVERLAPPED — required for ReadFile/WriteFile to exist
     "Win32_Security",           # SECURITY_ATTRIBUTES (referenced by CreatePipe/CreateProcessW)
+    "Win32_Security_Credentials", # CredRead/Write/DeleteW — Credential Manager keychain backend
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Secret Service (gnome-keyring/KWallet) keychain backend. keyring ships with
+# NO default features — backends are opt-in. crypto-rust: pure-Rust bus
+# encryption (no system OpenSSL); vendored: statically linked libdbus, so no
+# system -dev packages are needed at build time.
+keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust", "vendored"] }
 
 [build-dependencies]
 # Windows VERSIONINFO + icon embedding (see build.rs). Only `compile()` needs

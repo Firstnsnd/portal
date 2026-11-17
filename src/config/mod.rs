@@ -99,7 +99,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::llm::types::LlmConfig;
@@ -398,15 +397,14 @@ impl HostEntry {
     }
 }
 
-// ── Keychain helpers (macOS `security` CLI) ───────────────────────
+// ── Keychain (system secret store) ─────────────────────────────────
 //
-// Uses the `security` command-line tool instead of the `keyring` crate.
-// - Store: `security add-generic-password -A` (allow all apps, no prompt on rebuild)
-// - Read:  `security find-generic-password -g` (always accessible, no ACL check)
-// - Delete: `security delete-generic-password`
-//
-// This avoids the macOS Keychain ACL issue where recompiling the app
-// changes its code signature and triggers a password prompt on every read.
+// Thin facade over the `secret_store` module: this file owns the naming
+// scheme (which service/account strings stand for which entity); each OS's
+// implementation lives in its own module there (macOS `security` CLI,
+// Windows Credential Manager, Linux Secret Service). macOS additionally
+// keeps a legacy "portal-ssh" service for entries written before the
+// per-host service scheme existed.
 
 const KEYRING_SERVICE_LEGACY: &str = "portal-ssh";
 
@@ -420,100 +418,66 @@ fn keyring_key(host: &str, port: u16, username: &str, kind: &str) -> String {
     format!("{host}:{port}:{username}:{kind}")
 }
 
-/// Store a credential in the system keychain via `security` CLI.
-/// Uses `-A` to allow any application to access (no password prompt on rebuild).
+/// Store via the platform backend, mapping errors to the bool API + a warn.
+fn secret_set(service: &str, account: &str, secret: &str, what: &str) -> bool {
+    let store = crate::secret_store::platform_store();
+    match store.set(service, account, secret) {
+        Ok(()) => true,
+        Err(e) => {
+            log::warn!("[{}] Failed to store {what}: {e}", store.name());
+            false
+        }
+    }
+}
+
+/// Read via the platform backend; backend failures degrade to `None` + a warn.
+fn secret_get(service: &str, account: &str) -> Option<String> {
+    let store = crate::secret_store::platform_store();
+    match store.get(service, account) {
+        Ok(secret) => secret,
+        Err(e) => {
+            log::warn!("[{}] Failed to read {service}/{account}: {e}", store.name());
+            None
+        }
+    }
+}
+
+/// Delete via the platform backend; failures are logged, never propagated
+/// (an absent entry is not an error on any backend).
+fn secret_delete(service: &str, account: &str) {
+    if let Err(e) = crate::secret_store::platform_store().delete(service, account) {
+        log::warn!("Failed to delete {service}/{account} from keychain: {e}");
+    }
+}
+
+/// Store a host-keyed credential in the system keychain.
 fn store_host_credential(host: &str, port: u16, username: &str, kind: &str, secret: &str, display_name: &str) -> bool {
     let account = keyring_key(host, port, username, kind);
     let service = keyring_service(display_name);
 
-    // Delete existing entry first (-U can't change ACL on existing items)
-    let _ = Command::new("security")
-        .args(["delete-generic-password", "-a", &account, "-s", &service])
-        .output();
-
-    // Add with -A (allow all applications to access without prompt)
-    let result = Command::new("security")
-        .args(["add-generic-password", "-a", &account, "-s", &service, "-w", secret, "-A"])
-        .output();
-
-    match result {
-        Ok(o) if o.status.success() => {
-            // Clean up legacy entry if it exists
-            let _ = Command::new("security")
-                .args(["delete-generic-password", "-a", &account, "-s", KEYRING_SERVICE_LEGACY])
-                .output();
-            true
-        }
-        Ok(o) => {
-            log::warn!(
-                "Failed to store credential in keychain: {}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            );
-            false
-        }
-        Err(e) => {
-            log::warn!("Failed to run security command: {e}");
-            false
-        }
+    let ok = secret_set(&service, &account, secret, "host credential");
+    if ok {
+        // Clean up the legacy entry if one exists (pre-per-host-service scheme)
+        secret_delete(KEYRING_SERVICE_LEGACY, &account);
     }
-}
-
-/// Read a password from the keychain using `security find-generic-password -g`.
-/// Handles both quoted strings and hex-encoded output (for multi-line content like SSH keys).
-fn security_find_password(service: &str, account: &str) -> Option<String> {
-    let output = Command::new("security")
-        .args(["find-generic-password", "-s", service, "-a", account, "-g"])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return Option::None;
-    }
-
-    // Password is on stderr in format:
-    //   password: "the password"          (text)
-    //   password: 0x2d2d2d2d2d42454...   (hex, for binary/multi-line content)
-    //   On some macOS versions the hex is followed by the quoted string on the same line.
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    for line in stderr.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("password: ") {
-            if let Some(hex_str) = rest.strip_prefix("0x") {
-                // Hex-encoded binary content — take only hex chars (stop at first space/non-hex)
-                let hex_only: String = hex_str.chars()
-                    .take_while(|c| c.is_ascii_hexdigit())
-                    .collect();
-                if !hex_only.is_empty() && hex_only.len().is_multiple_of(2) {
-                    let bytes: Vec<u8> = (0..hex_only.len())
-                        .step_by(2)
-                        .filter_map(|i| hex_only.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok()))
-                        .collect();
-                    if bytes.len() == hex_only.len() / 2 {
-                        return String::from_utf8(bytes).ok();
-                    }
-                }
-            } else if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                // Quoted string
-                return Some(rest[1..rest.len() - 1].to_string());
-            }
-        }
-    }
-    Option::None
+    ok
 }
 
 /// Load a credential from the system keychain (host-based key scheme).
-/// Tries new per-host service first, then falls back to legacy "portal-ssh".
+/// Tries new per-host service first, then falls back to legacy "portal-ssh"
+/// (that service only ever holds entries on macOS, but the lookup is
+/// harmless everywhere).
 pub fn load_host_credential(host: &str, port: u16, username: &str, kind: &str, display_name: &str) -> Option<String> {
     let account = keyring_key(host, port, username, kind);
 
     // Try per-host service first
     let service = keyring_service(display_name);
-    if let Some(secret) = security_find_password(&service, &account) {
+    if let Some(secret) = secret_get(&service, &account) {
         return Some(secret);
     }
 
     // Fall back to legacy service
-    if let Some(secret) = security_find_password(KEYRING_SERVICE_LEGACY, &account) {
+    if let Some(secret) = secret_get(KEYRING_SERVICE_LEGACY, &account) {
         return Some(secret);
     }
 
@@ -524,15 +488,8 @@ pub fn load_host_credential(host: &str, port: u16, username: &str, kind: &str, d
 /// Delete a host-based credential from the system keychain (both new and legacy service).
 pub fn delete_host_credential(host: &str, port: u16, username: &str, kind: &str, display_name: &str) {
     let account = keyring_key(host, port, username, kind);
-    // Delete from new service
-    let service = keyring_service(display_name);
-    let _ = Command::new("security")
-        .args(["delete-generic-password", "-a", &account, "-s", &service])
-        .output();
-    // Also delete legacy entry
-    let _ = Command::new("security")
-        .args(["delete-generic-password", "-a", &account, "-s", KEYRING_SERVICE_LEGACY])
-        .output();
+    secret_delete(&keyring_service(display_name), &account);
+    secret_delete(KEYRING_SERVICE_LEGACY, &account);
 }
 
 /// Delete all keychain entries associated with a host entry (legacy scheme).
@@ -570,36 +527,14 @@ fn credential_keyring_key(cred_id: &str, kind: &str) -> String {
 pub fn store_credential_secret(cred_id: &str, cred_name: &str, kind: &str, secret: &str) -> bool {
     let account = credential_keyring_key(cred_id, kind);
     let service = credential_keyring_service(cred_name);
-
-    let _ = Command::new("security")
-        .args(["delete-generic-password", "-a", &account, "-s", &service])
-        .output();
-
-    let result = Command::new("security")
-        .args(["add-generic-password", "-a", &account, "-s", &service, "-w", secret, "-A"])
-        .output();
-
-    match result {
-        Ok(o) if o.status.success() => true,
-        Ok(o) => {
-            log::warn!(
-                "Failed to store credential secret in keychain: {}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            );
-            false
-        }
-        Err(e) => {
-            log::warn!("Failed to run security command: {e}");
-            false
-        }
-    }
+    secret_set(&service, &account, secret, "credential secret")
 }
 
 /// Load a secret for a Credential entity from the system keychain.
 pub fn load_credential_secret(cred_id: &str, cred_name: &str, kind: &str) -> Option<String> {
     let account = credential_keyring_key(cred_id, kind);
     let service = credential_keyring_service(cred_name);
-    security_find_password(&service, &account)
+    secret_get(&service, &account)
 }
 
 /// Delete all keychain secrets for a Credential entity.
@@ -607,9 +542,7 @@ pub fn delete_credential_secrets(cred_id: &str, cred_name: &str) {
     for kind in &["password", "privatekey", "passphrase"] {
         let account = credential_keyring_key(cred_id, kind);
         let service = credential_keyring_service(cred_name);
-        let _ = Command::new("security")
-            .args(["delete-generic-password", "-a", &account, "-s", &service])
-            .output();
+        secret_delete(&service, &account);
     }
 }
 
@@ -628,38 +561,17 @@ fn llm_keychain_account(backend: &str) -> String {
 /// Store the LLM API key for the given `backend` (`"openai"` / `"anthropic"`)
 /// in the system keychain. Returns `true` on success.
 pub fn store_llm_api_key(backend: &str, key: &str) -> bool {
-    let account = llm_keychain_account(backend);
-    let _ = Command::new("security")
-        .args(["delete-generic-password", "-a", &account, "-s", LLM_KEYCHAIN_SERVICE])
-        .output();
-    let result = Command::new("security")
-        .args(["add-generic-password", "-a", &account, "-s", LLM_KEYCHAIN_SERVICE, "-w", key, "-A"])
-        .output();
-    match result {
-        Ok(o) if o.status.success() => true,
-        Ok(o) => {
-            log::warn!("Failed to store LLM API key: {}", String::from_utf8_lossy(&o.stderr).trim());
-            false
-        }
-        Err(e) => {
-            log::warn!("Failed to run security command: {e}");
-            false
-        }
-    }
+    secret_set(LLM_KEYCHAIN_SERVICE, &llm_keychain_account(backend), key, "LLM API key")
 }
 
 /// Load the LLM API key for the given `backend`, if one is stored.
 pub fn load_llm_api_key(backend: &str) -> Option<String> {
-    let account = llm_keychain_account(backend);
-    security_find_password(LLM_KEYCHAIN_SERVICE, &account)
+    secret_get(LLM_KEYCHAIN_SERVICE, &llm_keychain_account(backend))
 }
 
 /// Remove the LLM API key for the given `backend` from the keychain.
 pub fn delete_llm_api_key(backend: &str) {
-    let account = llm_keychain_account(backend);
-    let _ = Command::new("security")
-        .args(["delete-generic-password", "-a", &account, "-s", LLM_KEYCHAIN_SERVICE])
-        .output();
+    secret_delete(LLM_KEYCHAIN_SERVICE, &llm_keychain_account(backend))
 }
 
 // ── resolve_auth ────────────────────────────────────────────────────
