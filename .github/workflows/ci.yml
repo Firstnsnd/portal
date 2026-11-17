@@ -22,7 +22,13 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: x86_64-pc-windows-msvc aarch64-pc-windows-msvc
 
+      # Both release architectures, so the ARM64 leg's first compile is
+      # not saved for tag day. Deps resolve once; the second check is
+      # incremental.
       - name: cargo check (x86_64-pc-windows-msvc)
         run: cargo check --target x86_64-pc-windows-msvc
+
+      - name: cargo check (aarch64-pc-windows-msvc)
+        run: cargo check --target aarch64-pc-windows-msvc
