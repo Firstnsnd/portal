@@ -19,7 +19,7 @@
 - **SSH**: russh 0.57 (纯 Rust, tokio-native)
 - **宽字符**: unicode-width 0.2
 - **剪贴板**: arboard 3.4
-- **凭据存储**: keyring 3 + apple-native (macOS Keychain)
+- **凭据存储**: secret_store 抽象 (macOS Keychain / Windows Credential Manager / Linux Secret Service)
 - **序列化**: serde + serde_json
 - **配置目录**: dirs 5.0
 
@@ -38,9 +38,26 @@
 ### P3 — 低优先级
 - [ ] 会话恢复
 - [ ] 云同步配置
-- [ ] Windows 支持 (ConPTY)
-- [ ] Linux 完整支持
 - [ ] macOS 优化
+
+---
+
+## 🖥️ 跨平台支持 (Windows / Linux / macOS)
+
+三平台代码强制走「抽象接口 + 每平台独立实现文件」结构，范本：`secret_store/`、`ipc/`、`integration/`、`unix_pty.rs` / `windows_pty.rs`。
+
+### 已对齐
+- [x] **ConPTY 本地终端** (Windows) — 真实伪终端, PowerShell 默认
+- [x] **安装包** — Windows NSIS setup.exe + 便携 zip (x86_64/ARM64), macOS dmg/pkg, Linux tar.gz
+- [x] **CJK 字体回退** — 三平台按系统字体路径探测 (微软雅黑/Noto/苹方)
+- [x] **录制回放定位** — Finder / Explorer (`explorer /select`) / xdg-open
+- [x] **凭据安全存储** — `secret_store` trait: macOS `security` CLI、Windows Credential Manager (CredWriteW)、Linux Secret Service (keyring + vendored libdbus)
+- [x] **单实例 IPC** — Unix socket / Windows 命名管道 (`\\.\pipe\portal-{user}`)
+- [x] **文件管理器右键集成** — Finder Quick Actions / Nautilus/Dolphin / Explorer 上下文菜单 (HKCU 注册表)
+
+### 刻意延期 (Windows)
+- [ ] **ZMODEM** — rzsz crate 依赖 nix, 仅 Unix; Windows 需要独立的 ZMODEM 实现
+- [ ] **ssh-agent / Pageant** — russh 的 `AgentClient::connect_env` 是 unix-gated; 接入 Pageant 命名管道传输是一个独立工作项
 
 ---
 

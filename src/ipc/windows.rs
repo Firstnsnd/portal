@@ -8,7 +8,8 @@
 
 use windows::core::{HRESULT, PCWSTR};
 use windows::Win32::Foundation::{
-    GENERIC_READ, GENERIC_WRITE, GetLastError, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, HANDLE,
+    CloseHandle, GENERIC_READ, GENERIC_WRITE, GetLastError, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
+    HANDLE,
 };
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_SHARE_MODE, FILE_FLAGS_AND_ATTRIBUTES,
