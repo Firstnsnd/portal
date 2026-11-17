@@ -215,9 +215,16 @@ impl Pty for WindowsPty {
         // after the conhost dies = EOF.
         let pending: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let pending_clone = Arc::clone(&pending);
+        // HANDLE is a raw pointer (hence !Send), but kernel handles are
+        // process-wide values — carrying it across spawn as its integer
+        // value and rebuilding it inside the thread is sound: the thread
+        // only ever blocks in ReadFile on this handle, nothing else
+        // touches it, and thread identity carries no handle semantics.
+        let conout_addr = out_read.0 as usize;
         std::thread::Builder::new()
             .name("conpty-reader".to_string())
             .spawn(move || {
+                let out_read = HANDLE(conout_addr as *mut core::ffi::c_void);
                 let mut buf = [0u8; 8192];
                 loop {
                     let mut n: u32 = 0;
