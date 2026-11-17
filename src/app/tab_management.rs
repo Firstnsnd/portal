@@ -61,8 +61,7 @@ impl PortalApp {
 
         let id = window.next_id;
         window.next_id += 1;
-        let default_shell = std::env::var("SHELL")
-            .unwrap_or_else(|_| "/bin/zsh".to_string());
+        let default_shell = crate::terminal::default_shell_path();
         let tab = Tab {
             title: format!("Terminal {}", id),
             sessions: vec![TerminalSession::new_local_in(id, &default_shell, cwd)],
@@ -95,8 +94,7 @@ impl PortalApp {
     /// show_viewport_immediate on the next frame. An inaccessible `cwd`
     /// opens the window at ~ and raises the authorization dialog there.
     pub fn open_local_window_here(&mut self, cwd: &str) {
-        let default_shell = std::env::var("SHELL")
-            .unwrap_or_else(|_| "/bin/zsh".to_string());
+        let default_shell = crate::terminal::default_shell_path();
         let denied = !cwd_accessible(cwd);
         let session_cwd = if denied { None } else { Some(cwd) };
         // Session/tab ids must not collide with any existing window's ids.
@@ -214,8 +212,7 @@ impl PortalApp {
             let jump = self.resolve_jump_host(host);
             TerminalSession::new_ssh(host, auth, &self.runtime, jump)
         } else {
-            let default_shell = std::env::var("SHELL")
-                .unwrap_or_else(|_| "/bin/zsh".to_string());
+            let default_shell = crate::terminal::default_shell_path();
             TerminalSession::new_local(new_id, &default_shell)
         };
 

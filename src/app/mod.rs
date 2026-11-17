@@ -220,8 +220,7 @@ impl PortalApp {
             match session_restore::restore_root_tabs(&hosts, &credentials, &runtime) {
                 Some((tabs, active_tab, next_id)) => (tabs, Some(active_tab), next_id),
                 None => {
-                    let default_shell = std::env::var("SHELL")
-                        .unwrap_or_else(|_| "/bin/zsh".to_string());
+                    let default_shell = crate::terminal::default_shell_path();
                     let first_tab = Tab {
                         title: "Terminal 1".to_owned(),
                         sessions: vec![TerminalSession::new_local(0, &default_shell)],

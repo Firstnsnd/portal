@@ -461,7 +461,7 @@ impl TerminalSession {
             Ok(p) => p,
             Err(e) => {
                 log::error!("Failed to spawn local PTY {:?}: {} — trying $SHELL", shell, e);
-                let fallback = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+                let fallback = crate::terminal::default_shell_path();
                 if fallback == shell {
                     RealPtySession::dead_placeholder(80, 24)
                 } else {

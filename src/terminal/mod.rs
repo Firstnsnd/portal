@@ -38,6 +38,28 @@ pub struct PtySize {
     pub ypixel: u16,
 }
 
+/// Platform default shell for new local terminals. Unix honors `$SHELL`
+/// (falling back to /bin/zsh); Windows prefers PowerShell 7 (pwsh) when it
+/// is on PATH and falls back to Windows PowerShell 5.1, which ships with
+/// every Windows install.
+pub fn default_shell_path() -> String {
+    if cfg!(windows) {
+        const FALLBACK: &str = "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+        let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+        let fallback = FALLBACK.replace("%SystemRoot%", &system_root);
+        let pwsh = "pwsh.exe";
+        let on_path = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .any(|dir| dir.join(pwsh).is_file());
+        if on_path {
+            pwsh.to_string()
+        } else {
+            fallback
+        }
+    } else {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+    }
+}
+
 impl PtySize {
     pub fn new(rows: u16, cols: u16) -> Self {
         Self {

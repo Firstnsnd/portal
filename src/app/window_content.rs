@@ -826,8 +826,7 @@ impl PortalApp {
                 let window = &mut self.windows[window_idx];
                 let id = window.next_id;
                 window.next_id += 1;
-                let default_shell = std::env::var("SHELL")
-                    .unwrap_or_else(|_| "/bin/zsh".to_string());
+                let default_shell = crate::terminal::default_shell_path();
                 let new_tab = Tab {
                     title: format!("Terminal {}", id),
                     sessions: vec![TerminalSession::new_local(id, &default_shell)],
@@ -1251,8 +1250,7 @@ impl PortalApp {
                             TerminalSession::new_ssh(host, auth.clone(), &self.runtime, None)
                         }
                         _ => {
-                            let default_shell = std::env::var("SHELL")
-                                .unwrap_or_else(|_| "/bin/zsh".to_string());
+                            let default_shell = crate::terminal::default_shell_path();
                             let id = window.next_id;
                             window.next_id += 1;
                             TerminalSession::new_local(id, &default_shell)
@@ -1277,8 +1275,7 @@ impl PortalApp {
                             TerminalSession::new_ssh(host, auth.clone(), &self.runtime, None)
                         }
                         _ => {
-                            let default_shell = std::env::var("SHELL")
-                                .unwrap_or_else(|_| "/bin/zsh".to_string());
+                            let default_shell = crate::terminal::default_shell_path();
                             let id = window.next_id;
                             window.next_id += 1;
                             TerminalSession::new_local(id, &default_shell)

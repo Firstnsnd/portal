@@ -137,7 +137,7 @@ pub fn build_tabs_from_state(
 
 /// Platform default shell — shared by the fallback session paths.
 fn default_shell() -> String {
-    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+    crate::terminal::default_shell_path()
 }
 
 /// Build one tab. Every DTO yields exactly one session (missing SSH hosts
@@ -322,7 +322,7 @@ mod tests {
     #[test]
     fn snapshot_then_restore_local_windows_roundtrips() {
         let tmp = tempfile::tempdir().unwrap();
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let shell = crate::terminal::default_shell_path();
 
         // Two tabs: one shell in the tempdir, one plain. Built like
         // add_local_tab_to_window_in does.
@@ -470,7 +470,7 @@ mod tests {
     /// tabs' indices stay valid.
     #[test]
     fn restore_skips_empty_tabs_keeps_usable_ones() {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let shell = crate::terminal::default_shell_path();
         let state = SessionStateFile {
             version: ss::SESSION_STATE_VERSION,
             windows: vec![WindowState {

@@ -112,16 +112,13 @@ pub fn os_label() -> &'static str {
     }
 }
 
-/// Human-readable shell name (basename of `$SHELL`), falling back to the OS
-/// default when unset.
+/// Human-readable shell name (basename of the platform default shell).
 pub fn shell_label() -> String {
-    shell_basename(&std::env::var("SHELL").unwrap_or_else(|_| {
-        if cfg!(windows) {
-            "PowerShell".to_string()
-        } else {
-            "/bin/sh".to_string()
-        }
-    }))
+    let base = shell_basename(&crate::terminal::default_shell_path());
+    match base.trim_end_matches(".exe").to_ascii_lowercase().as_str() {
+        "powershell" => "PowerShell".to_string(),
+        other => other.to_string(),
+    }
 }
 
 /// Return the basename of a shell path (e.g. `/bin/zsh` → `zsh`).
