@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Windows is the one platform we cannot type-check locally: `cargo check
+  # --target x86_64-pc-windows-msvc` from macOS dies inside ring's build
+  # script (it compiles C with clang-cl for the MSVC ABI). This job is the
+  # compile-feedback loop for every Windows-gated change.
+  windows-check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: cargo check (x86_64-pc-windows-msvc)
+        run: cargo check --target x86_64-pc-windows-msvc
