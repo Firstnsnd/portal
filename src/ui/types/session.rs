@@ -164,11 +164,15 @@ impl SessionKind {
         }
     }
 
-    // ── ZMODEM (unix) ────────────────────────────────────────────────────
+    // ── ZMODEM ───────────────────────────────────────────────────────────
+    //
+    // Both session kinds answer on every platform; the underlying slots are
+    // inert where the engine is absent (see `terminal::zmodem`), and the
+    // start paths refuse there. UI visibility gates on
+    // `zmodem::platform_supports_zmodem()`.
 
     /// Whether rz/sz exist on this session's host (probed at connect for
     /// SSH, at creation for local shells; `Unknown` until then).
-    #[cfg(unix)]
     pub fn zmodem_support(&self) -> crate::terminal::zmodem::ZmodemSupport {
         match self {
             SessionKind::Local(s, _) => s.zmodem_support(),
@@ -178,7 +182,6 @@ impl SessionKind {
 
     /// Chip state for the status bar: `Some` from the moment a transfer is
     /// started on this session until the chip is dismissed.
-    #[cfg(unix)]
     pub fn zmodem_transfer(&self) -> Option<crate::terminal::zmodem::ZmodemTransfer> {
         let slot = match self {
             SessionKind::Local(s, _) => &s.zmodem_transfer,
@@ -188,7 +191,6 @@ impl SessionKind {
     }
 
     /// Bytes transferred so far by the active bridge (0 when idle/finished).
-    #[cfg(unix)]
     pub fn zmodem_bytes(&self) -> u64 {
         match self {
             SessionKind::Local(s, _) => s.zmodem_bytes(),
@@ -197,7 +199,6 @@ impl SessionKind {
     }
 
     /// Start a ZMODEM upload of a local file into this session.
-    #[cfg(unix)]
     pub fn start_zmodem_upload(&self, path: &std::path::Path) -> std::io::Result<()> {
         match self {
             SessionKind::Local(s, _) => s.start_zmodem_upload(path.to_path_buf()),
@@ -206,7 +207,6 @@ impl SessionKind {
     }
 
     /// Start a ZMODEM download of `remote_path` into `local_dir`.
-    #[cfg(unix)]
     pub fn start_zmodem_download(
         &self,
         remote_path: &str,
@@ -223,7 +223,6 @@ impl SessionKind {
     }
 
     /// Abort the active ZMODEM transfer (no-op when idle).
-    #[cfg(unix)]
     pub fn cancel_zmodem(&self) {
         match self {
             SessionKind::Local(s, _) => s.cancel_zmodem(),
@@ -232,7 +231,6 @@ impl SessionKind {
     }
 
     /// Clear the finished-transfer chip (dismiss).
-    #[cfg(unix)]
     pub fn clear_zmodem_state(&self) {
         let slot = match self {
             SessionKind::Local(s, _) => &s.zmodem_transfer,

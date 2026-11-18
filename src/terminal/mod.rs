@@ -10,8 +10,8 @@ pub mod url;
 pub mod metrics;
 pub mod ai_capture;
 
-// ZMODEM bridge — depends on the rzsz crate (nix), unix-only like the PTY layer.
-#[cfg(unix)]
+// ZMODEM bridge — cross-platform facade (types + routing); the rzsz engine
+// lives in zmodem/unix.rs, Windows gets inert no-ops (zmodem/windows.rs).
 pub mod zmodem;
 
 #[cfg(unix)]

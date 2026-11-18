@@ -1025,9 +1025,9 @@ impl PortalApp {
                     }
                     // ZMODEM transfer chip (focused pane): live byte progress
                     // while active (click cancels); final states stay until
-                    // clicked (dismiss).
-                    #[cfg(unix)]
-                    {
+                    // clicked (dismiss). Hidden entirely on platforms without
+                    // the engine (see terminal::zmodem).
+                    if crate::terminal::zmodem::platform_supports_zmodem() {
                         use crate::terminal::zmodem::{Direction, ZmodemState};
                         fn format_transfer_bytes(bytes: u64) -> String {
                             const KB: f64 = 1024.0;
@@ -1359,7 +1359,6 @@ impl PortalApp {
                         window.current_view = AppView::Replay;
                     }
                 }
-                #[cfg(unix)]
                 PaneAction::ZmodemUpload => {
                     let window = &mut self.windows[window_idx];
                     if let Some(session) = window.tabs[active].sessions.get(idx) {
@@ -1371,12 +1370,10 @@ impl PortalApp {
                         }
                     }
                 }
-                #[cfg(unix)]
                 PaneAction::ZmodemDownload => {
                     let window = &mut self.windows[window_idx];
                     window.zmodem_download_dialog = Some(String::new());
                 }
-                #[cfg(unix)]
                 PaneAction::ZmodemCancel => {
                     let window = &mut self.windows[window_idx];
                     if let Some(session) = window.tabs[active].sessions.get(idx) {
@@ -1445,11 +1442,14 @@ impl PortalApp {
             }
         }
 
-        // ── ZMODEM download: remote-path prompt (unix only) ──
+        // ── ZMODEM download: remote-path prompt ──
         // Opening it takes the buffer out; submitting starts the transfer
-        // (the buffer stays taken = dialog closed) or puts it back.
-        #[cfg(unix)]
-        if self.windows[window_idx].zmodem_download_dialog.is_some() {
+        // (the buffer stays taken = dialog closed) or puts it back. The
+        // dialog can only be opened from the context menu, which hides the
+        // items on platforms without the engine.
+        if crate::terminal::zmodem::platform_supports_zmodem()
+            && self.windows[window_idx].zmodem_download_dialog.is_some()
+        {
             let t_download = self.language.t("zmodem_download").to_string();
             let t_remote_path = self.language.t("zmodem_remote_path").to_string();
             let t_cancel = self.language.t("cancel").to_string();

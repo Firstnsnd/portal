@@ -39,6 +39,14 @@ impl RealPtySession {
         let pty = WindowsPty::spawn_in(shell, &args, PtySize::new(rows, cols), cwd)?;
         let pty: Arc<Mutex<Box<dyn Pty>>> = Arc::new(Mutex::new(Box::new(pty)));
         let alive = Arc::new(AtomicBool::new(true));
+        // ZMODEM slots — inert on this platform (no engine); the support
+        // probe is seeded `Missing` so the UI never offers the menu items.
+        let zmodem_tap = Arc::new(Mutex::new(None));
+        let zmodem_bridge = Arc::new(Mutex::new(None));
+        let zmodem_transfer = Arc::new(Mutex::new(None));
+        let zmodem_support = Arc::new(std::sync::atomic::AtomicU8::new(
+            crate::terminal::zmodem::ZmodemSupport::Missing.to_u8(),
+        ));
         let grid_clone: Arc<Mutex<TerminalGrid>> = Arc::clone(&grid);
         let pty_clone = Arc::clone(&pty);
         let alive_clone = Arc::clone(&alive);
@@ -123,6 +131,10 @@ impl RealPtySession {
             metrics_enabled,
             recorder,
             ai_capture,
+            zmodem_tap,
+            zmodem_bridge,
+            zmodem_transfer,
+            zmodem_support,
         })
     }
 
@@ -148,5 +160,32 @@ impl RealPtySession {
             *self.cached_shell_name.lock().unwrap() = Some(name.clone());
         }
         name
+    }
+
+    // ── ZMODEM ───────────────────────────────────────────────────────────
+    //
+    // Slot readers (support/cancel/bytes) are shared in `super`. Only the
+    // engine entry points differ: this platform has none, so both start
+    // paths refuse — the UI hides the menu items anyway via
+    // `zmodem::platform_supports_zmodem()`.
+
+    /// ZMODEM uploads are not available on this platform.
+    pub fn start_zmodem_upload(&self, _path: std::path::PathBuf) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "ZMODEM is not available on this platform",
+        ))
+    }
+
+    /// ZMODEM downloads are not available on this platform.
+    pub fn start_zmodem_download(
+        &self,
+        _remote_path: &str,
+        _local_dir: std::path::PathBuf,
+    ) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "ZMODEM is not available on this platform",
+        ))
     }
 }

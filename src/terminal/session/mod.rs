@@ -224,17 +224,15 @@ pub struct RealPtySession {
     pub ai_capture: crate::terminal::ai_capture::AiCaptureSlot,
     /// ZMODEM tap: watches output for a remote `sz` ZRQINIT and, once armed
     /// or triggered, diverts all output into the transfer bridge. Cloned
-    /// into the reader thread at spawn, like the recorder slot.
-    #[cfg(unix)]
+    /// into the reader thread at spawn, like the recorder slot. (Windows
+    /// carries the same inert slots — see `terminal::zmodem`.)
     pub zmodem_tap: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTap>>>,
     /// Active ZMODEM transfer bridge (engine thread + its input path).
-    #[cfg(unix)]
     pub zmodem_bridge: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemBridge>>>,
     /// Chip state for the UI: what is transferring and how far it got.
-    #[cfg(unix)]
     pub zmodem_transfer: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTransfer>>>,
-    /// ZMODEM support on this machine (PATH scan at session creation).
-    #[cfg(unix)]
+    /// ZMODEM support on this machine (probed at session creation; `Missing`
+    /// on platforms without the engine).
     pub zmodem_support: Arc<std::sync::atomic::AtomicU8>,
 }
 
@@ -265,15 +263,47 @@ impl RealPtySession {
             metrics_enabled: Arc::new(AtomicBool::new(false)),
             recorder: Arc::new(Mutex::new(None)),
             ai_capture: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_tap: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_bridge: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_transfer: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         }
+    }
+
+    // ── ZMODEM (slot readers — shared; engine entry points are per-OS) ───
+
+    /// ZMODEM support on this machine (probed at session creation).
+    pub fn zmodem_support(&self) -> crate::terminal::zmodem::ZmodemSupport {
+        crate::terminal::zmodem::ZmodemSupport::from_u8(
+            self.zmodem_support
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
+    /// Abort any ZMODEM transfer on this session (no-op when idle).
+    pub fn cancel_zmodem(&self) {
+        if let Ok(mut b) = self.zmodem_bridge.lock() {
+            if let Some(bridge) = b.as_mut() {
+                bridge.cancel();
+            }
+            *b = None;
+        }
+        if let Ok(mut t) = self.zmodem_tap.lock() {
+            if let Some(tap) = t.as_mut() {
+                tap.reset();
+            }
+        }
+        // The transfer slot keeps its final state for the status chip until
+        // the next transfer replaces it.
+    }
+
+    /// Bytes transferred so far by the active bridge (0 when idle).
+    pub fn zmodem_bytes(&self) -> u64 {
+        self.zmodem_bridge
+            .lock()
+            .ok()
+            .and_then(|b| b.as_ref().map(|bridge| bridge.bytes()))
+            .unwrap_or(0)
     }
 
     /// Resize the PTY
@@ -647,13 +677,9 @@ mod tests {
             metrics_enabled: Arc::new(AtomicBool::new(false)),
             recorder: Arc::new(Mutex::new(None)),
             ai_capture: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_tap: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_bridge: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_transfer: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         };
 
@@ -683,13 +709,9 @@ mod tests {
             metrics_enabled: Arc::new(AtomicBool::new(false)),
             recorder: Arc::new(Mutex::new(None)),
             ai_capture: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_tap: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_bridge: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_transfer: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         };
 
@@ -718,13 +740,9 @@ mod tests {
             metrics_enabled: Arc::new(AtomicBool::new(false)),
             recorder: Arc::new(Mutex::new(None)),
             ai_capture: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_tap: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_bridge: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_transfer: Arc::new(Mutex::new(None)),
-            #[cfg(unix)]
             zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         };
 
@@ -753,14 +771,10 @@ mod tests {
                 metrics: Arc::new(Mutex::new(MetricsSnapshot::new())),
                 metrics_enabled: Arc::new(AtomicBool::new(false)),
                 recorder: Arc::new(Mutex::new(None)),
-            ai_capture: Arc::new(Mutex::new(None)),
-                #[cfg(unix)]
+                ai_capture: Arc::new(Mutex::new(None)),
                 zmodem_tap: Arc::new(Mutex::new(None)),
-                #[cfg(unix)]
                 zmodem_bridge: Arc::new(Mutex::new(None)),
-                #[cfg(unix)]
                 zmodem_transfer: Arc::new(Mutex::new(None)),
-                #[cfg(unix)]
                 zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             };
             // session is alive while in scope

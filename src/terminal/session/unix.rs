@@ -364,37 +364,6 @@ impl RealPtySession {
         self.write(format!("sz {}\r", shell_quote_single(remote_path)).as_bytes())
     }
 
-    /// ZMODEM support on this machine (from the PATH scan at creation).
-    pub fn zmodem_support(&self) -> crate::terminal::zmodem::ZmodemSupport {
-        crate::terminal::zmodem::ZmodemSupport::from_u8(
-            self.zmodem_support
-                .load(std::sync::atomic::Ordering::Relaxed),
-        )
-    }
-
-    /// Abort any ZMODEM transfer on this session (no-op when idle).
-    pub fn cancel_zmodem(&self) {
-        if let Ok(mut b) = self.zmodem_bridge.lock() {
-            if let Some(bridge) = b.as_mut() {
-                bridge.cancel();
-            }
-            *b = None;
-        }
-        if let Ok(mut t) = self.zmodem_tap.lock() {
-            if let Some(tap) = t.as_mut() {
-                tap.reset();
-            }
-        }
-        // The transfer slot keeps its final state for the status chip until
-        // the next transfer replaces it.
-    }
-
-    /// Bytes transferred so far by the active bridge (0 when idle).
-    pub fn zmodem_bytes(&self) -> u64 {
-        self.zmodem_bridge
-            .lock()
-            .ok()
-            .and_then(|b| b.as_ref().map(|bridge| bridge.bytes()))
-            .unwrap_or(0)
-    }
+    // ZMODEM support getter, cancel, and byte counting live in the shared
+    // `super` impl — they only read the slots every platform carries.
 }

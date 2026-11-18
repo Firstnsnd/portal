@@ -201,13 +201,11 @@ pub enum PaneAction {
     /// Open the replay library filtered to the pane session's host
     ViewHostRecordings,
     /// Pick a local file and ZMODEM-upload it into this pane's session
-    #[cfg(unix)]
+    /// (hidden on platforms without the engine — see `terminal::zmodem`)
     ZmodemUpload,
     /// Open the remote-path prompt for a ZMODEM download into this pane
-    #[cfg(unix)]
     ZmodemDownload,
     /// Cancel the active ZMODEM transfer / dismiss its status chip
-    #[cfg(unix)]
     ZmodemCancel,
     /// Hand the pane's selected text to the AI assistant composer (prefill;
     /// the dispatcher re-extracts the selection with `selected_text_of`)

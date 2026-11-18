@@ -315,38 +315,21 @@ pub struct SshSession {
     pub ai_capture: crate::terminal::ai_capture::AiCaptureSlot,
     /// ZMODEM tap: watches output for a remote `sz` ZRQINIT and, once armed
     /// or triggered, diverts all output into the transfer bridge. Cloned
-    /// into ssh_task at spawn, like the recorder slot.
-    #[cfg(unix)]
+    /// into ssh_task at spawn, like the recorder slot. (Windows carries the
+    /// same inert slots — see `terminal::zmodem`.)
     pub zmodem_tap: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTap>>>,
     /// Active ZMODEM transfer bridge (engine thread + its input path).
-    #[cfg(unix)]
     pub zmodem_bridge: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemBridge>>>,
     /// Chip state for the UI: what is transferring and how far it got.
-    #[cfg(unix)]
     pub zmodem_transfer: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTransfer>>>,
     /// ZMODEM support probe result for the remote host
-    /// ([`ZmodemSupport::to_u8`]; 0 = unknown until the probe lands).
-    #[cfg(unix)]
+    /// ([`ZmodemSupport::to_u8`]; 0 = unknown until the probe lands). Only
+    /// probed on platforms with a ZMODEM engine (see `ssh_task`).
     pub zmodem_support: Arc<std::sync::atomic::AtomicU8>,
     /// SFTP subsystem support for the remote host
     /// ([`HostCapability::to_u8`]) — drives the hosts-list badge.
     pub sftp_support: Arc<std::sync::atomic::AtomicU8>,
 }
-
-/// ZMODEM slot types — real on unix, unit placeholders elsewhere (the rzsz
-/// engine is unix-only; SshSession itself compiles on every platform).
-#[cfg(unix)]
-type ZmodemTapSlot = Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTap>>>;
-#[cfg(not(unix))]
-type ZmodemTapSlot = ();
-#[cfg(unix)]
-type ZmodemBridgeSlot = Arc<Mutex<Option<crate::terminal::zmodem::ZmodemBridge>>>;
-#[cfg(not(unix))]
-type ZmodemBridgeSlot = ();
-#[cfg(unix)]
-type ZmodemSupportSlot = Arc<std::sync::atomic::AtomicU8>;
-#[cfg(not(unix))]
-type ZmodemSupportSlot = ();
 
 impl SshSession {
     #[allow(clippy::too_many_arguments)]
@@ -417,10 +400,7 @@ impl SshSession {
         let notifications = Arc::new(Mutex::new(Vec::<AppNotification>::new()));
         let metrics = Arc::new(Mutex::new(MetricsSnapshot::new()));
         let metrics_enabled = Arc::new(AtomicBool::new(false));
-        #[cfg(unix)]
         let zmodem_support = Arc::new(std::sync::atomic::AtomicU8::new(0));
-        #[cfg(not(unix))]
-        let zmodem_support = ();
         let sftp_support = Arc::new(std::sync::atomic::AtomicU8::new(0));
 
         let grid_clone = Arc::clone(&grid);
@@ -466,24 +446,12 @@ impl SshSession {
         let ai_capture_task = Arc::clone(&ai_capture);
 
         // ZMODEM slots — cloned into ssh_task like the recorder.
-        #[cfg(unix)]
         let zmodem_tap = Arc::new(Mutex::new(None));
-        #[cfg(unix)]
         let zmodem_bridge = Arc::new(Mutex::new(None));
-        #[cfg(unix)]
         let zmodem_transfer = Arc::new(Mutex::new(None));
-        #[cfg(unix)]
         let zmodem_tap_task = Arc::clone(&zmodem_tap);
-        #[cfg(unix)]
         let zmodem_bridge_task = Arc::clone(&zmodem_bridge);
-        #[cfg(not(unix))]
-        let zmodem_tap_task = ();
-        #[cfg(not(unix))]
-        let zmodem_bridge_task = ();
-        #[cfg(unix)]
         let zmodem_support_probe = Arc::clone(&zmodem_support);
-        #[cfg(not(unix))]
-        let zmodem_support_probe = ();
         let sftp_support_probe = Arc::clone(&sftp_support);
 
         runtime.spawn(async move {
@@ -516,13 +484,9 @@ impl SshSession {
             auth_prompt,
             recorder,
             ai_capture,
-            #[cfg(unix)]
             zmodem_tap,
-            #[cfg(unix)]
             zmodem_bridge,
-            #[cfg(unix)]
             zmodem_transfer,
-            #[cfg(unix)]
             zmodem_support,
             sftp_support,
         }
@@ -554,9 +518,9 @@ impl SshSession {
         auth_bridge: Arc<super::auth_prompt::AuthPromptBridge>,
         recorder: Arc<Mutex<Option<crate::terminal::cast::CastRecorder>>>,
         ai_capture: crate::terminal::ai_capture::AiCaptureSlot,
-        zmodem_tap: ZmodemTapSlot,
-        zmodem_bridge: ZmodemBridgeSlot,
-        zmodem_support: ZmodemSupportSlot,
+        zmodem_tap: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemTap>>>,
+        zmodem_bridge: Arc<Mutex<Option<crate::terminal::zmodem::ZmodemBridge>>>,
+        zmodem_support: Arc<std::sync::atomic::AtomicU8>,
         sftp_support: Arc<std::sync::atomic::AtomicU8>,
         jump_host: Option<JumpHostInfo>,
         proxy: Option<ResolvedProxy>,
@@ -748,22 +712,24 @@ impl SshSession {
         // `command -v` is POSIX; `echo yes` marks success because
         // exec_command only returns stdout. Exec failing (hardened servers
         // may disable it) leaves Unknown — the interactive shell may still
-        // run sz, so a probe error must never claim Missing.
-        #[cfg(unix)]
-        if let Ok(out) = exec_command(
-            &handle,
-            "command -v sz >/dev/null 2>&1 && command -v rz >/dev/null 2>&1 && echo yes",
-        )
-        .await
-        {
-            let support = if out.trim() == "yes" {
-                crate::terminal::zmodem::ZmodemSupport::Available
-            } else {
-                crate::terminal::zmodem::ZmodemSupport::Missing
-            };
-            zmodem_support.store(support.to_u8(), Ordering::Relaxed);
-            // The context menu greys out once this lands — wake the UI.
-            crate::repaint::notify_repaint();
+        // run sz, so a probe error must never claim Missing. Probed only
+        // where a local engine exists to use the answer (see zmodem facade).
+        if crate::terminal::zmodem::platform_supports_zmodem() {
+            if let Ok(out) = exec_command(
+                &handle,
+                "command -v sz >/dev/null 2>&1 && command -v rz >/dev/null 2>&1 && echo yes",
+            )
+            .await
+            {
+                let support = if out.trim() == "yes" {
+                    crate::terminal::zmodem::ZmodemSupport::Available
+                } else {
+                    crate::terminal::zmodem::ZmodemSupport::Missing
+                };
+                zmodem_support.store(support.to_u8(), Ordering::Relaxed);
+                // The context menu greys out once this lands — wake the UI.
+                crate::repaint::notify_repaint();
+            }
         }
 
         // SFTP subsystem support: open a throwaway session channel and
@@ -864,186 +830,68 @@ impl SshSession {
                 }
                 msg = channel.wait() => {
                     match msg {
-                        Some(russh::ChannelMsg::Data { data }) => {
+                        // stdout and stderr share one render path: ZMODEM
+                        // diversion first, then VTE/recorder/AI taps.
+                        Some(russh::ChannelMsg::Data { data })
+                        | Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
                             // ZMODEM diversion must run BEFORE the VTE parse
                             // and the asciicast tap so binary protocol frames
-                            // never reach scrollback or the recording.
-                            // NOTE: the emit closure is the ONLY render path
-                            // here — on diversion it may receive just the
-                            // non-protocol prefix, so this chunk must never
-                            // be parsed again after route_chunk returns.
-                            #[cfg(unix)]
-                            {
-                                let diverted = crate::terminal::zmodem::route_chunk(
-                                    &zmodem_tap,
-                                    &zmodem_bridge,
-                                    &data,
-                                    |bytes| {
-                                        // Display path goes through the AI
-                                        // capture's echo rewrite when armed;
-                                        // the taps below see the raw bytes.
-                                        let display =
-                                            crate::terminal::ai_capture::display_bytes(
-                                                &ai_capture,
-                                                bytes,
-                                            );
-                                        if let Ok(mut g) = grid.lock() {
-                                            let mut handler = VteHandler {
-                                                grid: &mut g,
-                                                attrs: &mut attrs,
-                                            };
-                                            for &byte in &display {
-                                                parser.advance(&mut handler, byte);
-                                            }
-                                            // One bump per chunk — the renderer's
-                                            // visible-rows cache keys on this version.
-                                            g.version = g.version.wrapping_add(1);
+                            // never reach scrollback or the recording. The
+                            // emit closure is the ONLY render path for this
+                            // chunk — on diversion it may receive just the
+                            // non-protocol prefix, so `data` must never be
+                            // parsed again after route_chunk returns.
+                            // (Windows: route_chunk is a passthrough — the
+                            // engine lives in zmodem/unix.rs.)
+                            let diverted = crate::terminal::zmodem::route_chunk(
+                                &zmodem_tap,
+                                &zmodem_bridge,
+                                &data,
+                                |bytes| {
+                                    // Display path goes through the AI
+                                    // capture's echo rewrite when armed;
+                                    // the taps below see the raw bytes.
+                                    let display =
+                                        crate::terminal::ai_capture::display_bytes(
+                                            &ai_capture,
+                                            bytes,
+                                        );
+                                    if let Ok(mut g) = grid.lock() {
+                                        let mut handler = VteHandler {
+                                            grid: &mut g,
+                                            attrs: &mut attrs,
+                                        };
+                                        for &byte in &display {
+                                            parser.advance(&mut handler, byte);
                                         }
-                                        // Asciicast tap (outside the grid lock).
-                                        if let Ok(mut slot) = recorder.lock() {
-                                            if let Some(rec) = slot.as_mut() {
-                                                rec.output(bytes);
-                                            }
-                                        }
-                                        // AI run-feedback tap (same tap point;
-                                        // only armed while a capture is active).
-                                        if let Ok(slot) = ai_capture.lock() {
-                                            if let Some(cap) = slot.as_ref() {
-                                                if let Ok(mut cap) = cap.lock() {
-                                                    cap.feed(bytes);
-                                                }
-                                            }
-                                        }
-                                    },
-                                );
-                                if diverted
-                                    == crate::terminal::zmodem::ChunkRoute::Diverted
-                                {
-                                    crate::repaint::notify_repaint();
-                                    continue;
-                                }
-                            }
-                            #[cfg(not(unix))]
-                            {
-                                // No ZMODEM routing on this platform. The
-                                // display still goes through the AI capture's
-                                // echo rewrite when armed; taps see raw bytes.
-                                let display =
-                                    crate::terminal::ai_capture::display_bytes(&ai_capture, &data);
-                                if let Ok(mut g) = grid.lock() {
-                                    let mut handler = VteHandler {
-                                        grid: &mut g,
-                                        attrs: &mut attrs,
-                                    };
-                                    for &byte in &display {
-                                        parser.advance(&mut handler, byte);
+                                        // One bump per chunk — the renderer's
+                                        // visible-rows cache keys on this version.
+                                        g.version = g.version.wrapping_add(1);
                                     }
-                                    // One bump per chunk — the renderer's
-                                    // visible-rows cache keys on this version.
-                                    g.version = g.version.wrapping_add(1);
-                                }
-                                if let Ok(mut slot) = recorder.lock() {
-                                    if let Some(rec) = slot.as_mut() {
-                                        rec.output(&data);
-                                    }
-                                }
-                                if let Ok(slot) = ai_capture.lock() {
-                                    if let Some(cap) = slot.as_ref() {
-                                        if let Ok(mut cap) = cap.lock() {
-                                            cap.feed(&data);
+                                    // Asciicast tap (outside the grid lock;
+                                    // stderr merges into the same stream).
+                                    if let Ok(mut slot) = recorder.lock() {
+                                        if let Some(rec) = slot.as_mut() {
+                                            rec.output(bytes);
                                         }
                                     }
-                                }
-                            }
+                                    // AI run-feedback tap (same tap point;
+                                    // only armed while a capture is active).
+                                    if let Ok(slot) = ai_capture.lock() {
+                                        if let Some(cap) = slot.as_ref() {
+                                            if let Ok(mut cap) = cap.lock() {
+                                                cap.feed(bytes);
+                                            }
+                                        }
+                                    }
+                                },
+                            );
+                            // Wake the UI: new output painted, or the
+                            // transfer progress counter moved.
                             crate::repaint::notify_repaint();
-                        }
-                        Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
-                            // ZMODEM diversion (same ordering and single-render
-                            // rule as the Data arm above).
-                            #[cfg(unix)]
-                            {
-                                let diverted = crate::terminal::zmodem::route_chunk(
-                                    &zmodem_tap,
-                                    &zmodem_bridge,
-                                    &data,
-                                    |bytes| {
-                                        // Display path goes through the AI
-                                        // capture's echo rewrite when armed;
-                                        // the taps below see the raw bytes.
-                                        let display =
-                                            crate::terminal::ai_capture::display_bytes(
-                                                &ai_capture,
-                                                bytes,
-                                            );
-                                        if let Ok(mut g) = grid.lock() {
-                                            let mut handler = VteHandler {
-                                                grid: &mut g,
-                                                attrs: &mut attrs,
-                                            };
-                                            for &byte in &display {
-                                                parser.advance(&mut handler, byte);
-                                            }
-                                            // One bump per chunk — the renderer's
-                                            // visible-rows cache keys on this version.
-                                            g.version = g.version.wrapping_add(1);
-                                        }
-                                        // Asciicast tap (stderr merged into the
-                                        // same stream).
-                                        if let Ok(mut slot) = recorder.lock() {
-                                            if let Some(rec) = slot.as_mut() {
-                                                rec.output(bytes);
-                                            }
-                                        }
-                                        // AI run-feedback tap (same tap point).
-                                        if let Ok(slot) = ai_capture.lock() {
-                                            if let Some(cap) = slot.as_ref() {
-                                                if let Ok(mut cap) = cap.lock() {
-                                                    cap.feed(bytes);
-                                                }
-                                            }
-                                        }
-                                    },
-                                );
-                                if diverted
-                                    == crate::terminal::zmodem::ChunkRoute::Diverted
-                                {
-                                    crate::repaint::notify_repaint();
-                                    continue;
-                                }
+                            if diverted == crate::terminal::zmodem::ChunkRoute::Diverted {
+                                continue;
                             }
-                            #[cfg(not(unix))]
-                            {
-                                // No ZMODEM routing on this platform. The
-                                // display still goes through the AI capture's
-                                // echo rewrite when armed; taps see raw bytes.
-                                let display =
-                                    crate::terminal::ai_capture::display_bytes(&ai_capture, &data);
-                                if let Ok(mut g) = grid.lock() {
-                                    let mut handler = VteHandler {
-                                        grid: &mut g,
-                                        attrs: &mut attrs,
-                                    };
-                                    for &byte in &display {
-                                        parser.advance(&mut handler, byte);
-                                    }
-                                    // One bump per chunk — the renderer's
-                                    // visible-rows cache keys on this version.
-                                    g.version = g.version.wrapping_add(1);
-                                }
-                                if let Ok(mut slot) = recorder.lock() {
-                                    if let Some(rec) = slot.as_mut() {
-                                        rec.output(&data);
-                                    }
-                                }
-                                if let Ok(slot) = ai_capture.lock() {
-                                    if let Some(cap) = slot.as_ref() {
-                                        if let Ok(mut cap) = cap.lock() {
-                                            cap.feed(&data);
-                                        }
-                                    }
-                                }
-                            }
-                            crate::repaint::notify_repaint();
                         }
                         Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => {
                             set_state(SshConnectionState::Disconnected("Session ended".into()));
@@ -1225,7 +1073,6 @@ impl SshSession {
     }
 
     /// ZMODEM support on the remote host (Unknown until the probe lands).
-    #[cfg(unix)]
     pub fn zmodem_support(&self) -> crate::terminal::zmodem::ZmodemSupport {
         crate::terminal::zmodem::ZmodemSupport::from_u8(
             self.zmodem_support
@@ -1293,12 +1140,16 @@ impl SshSession {
         }
     }
 
-    // ── ZMODEM (unix) ────────────────────────────────────────────────────
+    // ── ZMODEM ───────────────────────────────────────────────────────────
+    //
+    // Slot readers (support/cancel/bytes) are shared below with no platform
+    // difference. On Windows the engine entry points exist but refuse (the
+    // engine is unix-only — see terminal::zmodem), and the UI hides the
+    // menu items via `zmodem::platform_supports_zmodem()`.
 
     /// Sink for the ZMODEM engine: protocol frames go through the command
     /// channel as writes, landing in THIS session's shell channel only
     /// (broadcast mode never sees them).
-    #[cfg(unix)]
     fn make_zmodem_sink(&self) -> std::io::Result<crate::terminal::zmodem::SessionWriter> {
         let tx = self.cmd_tx.clone();
         Ok(crate::terminal::zmodem::SessionWriter::new(move |data| {
@@ -1314,9 +1165,14 @@ impl SshSession {
     /// Start a ZMODEM upload of `path` to the remote host. Arms the tap (all
     /// output diverts) and spawns the transfer engine, which types `rz\r`
     /// into the remote shell itself and runs the ZRQINIT → ZRINIT handshake.
-    #[cfg(unix)]
     pub fn start_zmodem_upload(&self, path: std::path::PathBuf) -> std::io::Result<()> {
         use crate::terminal::zmodem::{TransferRequest, ZmodemBridge};
+        if !crate::terminal::zmodem::platform_supports_zmodem() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "ZMODEM is not available on this platform",
+            ));
+        }
         self.cancel_zmodem();
         let sink = self.make_zmodem_sink()?;
         let mut tap = crate::terminal::zmodem::ZmodemTap::new();
@@ -1344,13 +1200,18 @@ impl SshSession {
     /// arm a passive tap, spawn a waiting bridge, then type `sz '<path>'`
     /// so the remote side announces itself and the tap triggers the engine
     /// on its first frame.
-    #[cfg(unix)]
     pub fn start_zmodem_download(
         &self,
         remote_path: &str,
         local_dir: std::path::PathBuf,
     ) -> std::io::Result<()> {
         use crate::terminal::zmodem::{shell_quote_single, TransferRequest, ZmodemBridge};
+        if !crate::terminal::zmodem::platform_supports_zmodem() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "ZMODEM is not available on this platform",
+            ));
+        }
         self.cancel_zmodem();
         let sink = self.make_zmodem_sink()?;
         *self
@@ -1373,7 +1234,6 @@ impl SshSession {
     }
 
     /// Abort any ZMODEM transfer on this session (no-op when idle).
-    #[cfg(unix)]
     pub fn cancel_zmodem(&self) {
         if let Ok(mut b) = self.zmodem_bridge.lock() {
             if let Some(bridge) = b.as_mut() {
@@ -1391,7 +1251,6 @@ impl SshSession {
     }
 
     /// Bytes transferred so far by the active bridge (0 when idle).
-    #[cfg(unix)]
     pub fn zmodem_bytes(&self) -> u64 {
         self.zmodem_bridge
             .lock()

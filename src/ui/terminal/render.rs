@@ -382,11 +382,8 @@ pub fn render_terminal_session(
     let mut ctx_broadcast = false;
     let mut ctx_record = false;
     let mut ctx_view_recordings = false;
-    #[cfg(unix)]
     let mut ctx_zmodem_upload = false;
-    #[cfg(unix)]
     let mut ctx_zmodem_download = false;
-    #[cfg(unix)]
     let mut ctx_zmodem_cancel = false;
     let mut ctx_split_h = false;
     let mut ctx_split_v = false;
@@ -445,11 +442,11 @@ pub fn render_terminal_session(
             ctx_view_recordings = true;
             ui.close_menu();
         }
-        // ZMODEM transfers (rz/sz) — unix-only like the PTY/rzsz layer.
-        // Send/receive grey out when the capability probe found neither
-        // sz nor rz on the host (Unknown/Available stay enabled).
-        #[cfg(unix)]
-        {
+        // ZMODEM transfers (rz/sz) — the whole group hides on platforms
+        // without the engine (see terminal::zmodem); on unix the items
+        // grey out when the capability probe found neither sz nor rz on
+        // the host (Unknown/Available stay enabled).
+        if crate::terminal::zmodem::platform_supports_zmodem() {
             ui.separator();
             let support = session.kind.zmodem_support();
             let zmodem_ok =
@@ -535,11 +532,8 @@ pub fn render_terminal_session(
     if ctx_broadcast { action = Some(PaneAction::ToggleBroadcast); }
     if ctx_record    { action = Some(PaneAction::ToggleRecording); }
     if ctx_view_recordings { action = Some(PaneAction::ViewHostRecordings); }
-    #[cfg(unix)]
     if ctx_zmodem_upload   { action = Some(PaneAction::ZmodemUpload); }
-    #[cfg(unix)]
     if ctx_zmodem_download { action = Some(PaneAction::ZmodemDownload); }
-    #[cfg(unix)]
     if ctx_zmodem_cancel   { action = Some(PaneAction::ZmodemCancel); }
     if ctx_close   { action = Some(PaneAction::ClosePane); }
 

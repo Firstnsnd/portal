@@ -721,27 +721,31 @@ impl PortalApp {
         }
         ui.label(egui::RichText::new(lang.t("restore_sessions_desc")).color(theme.fg_dim).size(FONT_SM));
 
-        ui.add_space(SPACE_LG);
-        ui.separator();
-        ui.add_space(SPACE_SM);
-
-        ui.label(egui::RichText::new(lang.t("zmodem_download_dir")).color(theme.fg_primary).size(14.0).strong());
-        ui.add_space(SPACE_XS);
-        ui.horizontal(|ui| {
-            ui.label(widgets::field_label(lang.t("zmodem_download_dir"), theme));
+        // ZMODEM download directory — only where the transfer engine exists
+        // (see terminal::zmodem); the section vanishes elsewhere.
+        if crate::terminal::zmodem::platform_supports_zmodem() {
+            ui.add_space(SPACE_LG);
+            ui.separator();
             ui.add_space(SPACE_SM);
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut self.zmodem_download_dir)
-                    .hint_text(egui::RichText::new("~/Downloads").color(theme.hint_color()).italics())
-                    .desired_width(300.0)
-                    .font(egui::FontId::proportional(13.0))
-                    .text_color(theme.fg_primary)
-            );
-            if resp.changed() || resp.lost_focus() {
-                *changed = true;
-            }
-        });
-        ui.label(egui::RichText::new(lang.t("zmodem_download_dir_desc")).color(theme.fg_dim).size(FONT_SM));
+
+            ui.label(egui::RichText::new(lang.t("zmodem_download_dir")).color(theme.fg_primary).size(14.0).strong());
+            ui.add_space(SPACE_XS);
+            ui.horizontal(|ui| {
+                ui.label(widgets::field_label(lang.t("zmodem_download_dir"), theme));
+                ui.add_space(SPACE_SM);
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut self.zmodem_download_dir)
+                        .hint_text(egui::RichText::new("~/Downloads").color(theme.hint_color()).italics())
+                        .desired_width(300.0)
+                        .font(egui::FontId::proportional(13.0))
+                        .text_color(theme.fg_primary)
+                );
+                if resp.changed() || resp.lost_focus() {
+                    *changed = true;
+                }
+            });
+            ui.label(egui::RichText::new(lang.t("zmodem_download_dir_desc")).color(theme.fg_dim).size(FONT_SM));
+        }
 
         ui.add_space(SPACE_LG);
         ui.separator();
