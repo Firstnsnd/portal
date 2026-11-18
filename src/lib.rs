@@ -39,6 +39,7 @@
 pub mod terminal;
 pub mod config;
 pub mod secret_store;
+pub mod opener;
 pub mod ssh;
 pub mod sftp;
 pub mod repaint;

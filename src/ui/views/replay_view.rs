@@ -795,12 +795,7 @@ pub fn render_replay_view(
     // ── Management bar / batch / rename ──
     if open_folder {
         let dir = crate::terminal::cast::recordings_dir();
-        #[cfg(target_os = "macos")]
-        let _ = std::process::Command::new("open").arg(&dir).spawn();
-        #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("explorer").arg(&dir).spawn();
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+        let _ = crate::opener::open_folder(&dir);
     }
     if enter_select {
         window.replay_select_mode = true;
@@ -872,26 +867,10 @@ pub fn render_replay_view(
     }
 }
 
-/// Reveal a recording file in the OS file manager (Finder on macOS,
-/// Explorer with the file selected on Windows, xdg-open of the parent
-/// directory elsewhere).
+/// Reveal a recording file in the OS file manager (selects it where the OS
+/// supports that; opens the parent directory elsewhere).
 fn reveal_in_file_manager(path: &std::path::Path) {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let _ = std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path.display()))
-            .spawn();
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        if let Some(parent) = path.parent() {
-            let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
-        }
-    }
+    let _ = crate::opener::reveal_path(path);
 }
 
 /// Filter chip button (speed-selector visual: accent when selected, dim

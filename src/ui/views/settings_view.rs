@@ -396,12 +396,7 @@ impl PortalApp {
         ui.horizontal(|ui| {
             let dir = portal::terminal::cast::recordings_dir();
             if ui.button(lang.t("replay_open_folder")).clicked() {
-                #[cfg(target_os = "macos")]
-                let _ = std::process::Command::new("open").arg(&dir).spawn();
-                #[cfg(target_os = "windows")]
-                let _ = std::process::Command::new("explorer").arg(&dir).spawn();
-                #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-                let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+                let _ = portal::opener::open_folder(&dir);
             }
             let mut count = 0usize;
             let mut total: u64 = 0;

@@ -333,7 +333,7 @@ pub fn render_terminal_session(
             }
         }
         if let Some(url) = clicked_url {
-            let _ = std::process::Command::new("open").arg(&url).spawn();
+            let _ = crate::opener::open_url(&url);
         } else if session.selection.has_selection() {
             session.selection.clear();
         }

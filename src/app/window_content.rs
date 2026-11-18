@@ -557,15 +557,14 @@ impl PortalApp {
                 }
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
-                    if ui.add(widgets::primary_button(
-                        self.language.t("open_auth_settings"), &self.theme,
-                    )).clicked() {
-                        #[cfg(target_os = "macos")]
-                        {
-                            let _ = std::process::Command::new("open")
-                                .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
-                                .spawn();
-                        }
+                    // macOS deep-links the TCC pane; platforms without an
+                    // authorization surface don't render a dead button.
+                    if crate::opener::has_privacy_settings()
+                        && ui.add(widgets::primary_button(
+                            self.language.t("open_auth_settings"), &self.theme,
+                        )).clicked()
+                    {
+                        let _ = crate::opener::open_privacy_settings();
                     }
                     if ui.add(widgets::secondary_button(
                         self.language.t("retry"), &self.theme,

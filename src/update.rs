@@ -222,105 +222,49 @@ pub fn download_to_path(
     Ok(())
 }
 
-/// Reveal a downloaded installer. macOS: open the `.dmg`. Linux: extract the
-/// `.tar.gz` and open the resulting directory. Returns the revealed path.
-#[cfg(target_os = "macos")]
-pub fn reveal_downloaded(
-    _asset_name: &str,
-    archive_path: &std::path::Path,
-) -> Result<std::path::PathBuf, String> {
-    std::process::Command::new("open")
-        .arg(archive_path)
-        .status()
-        .map_err(|e| format!("failed to open installer: {e}"))?;
-    Ok(archive_path.to_path_buf())
-}
-
-/// Windows: the asset is the NSIS setup.exe — launch it directly (its own
-/// UAC prompt covers elevation). CREATE_NO_WINDOW keeps the `cmd` shim from
-/// flashing a console.
-#[cfg(target_os = "windows")]
-pub fn reveal_downloaded(
-    _asset_name: &str,
-    archive_path: &std::path::Path,
-) -> Result<std::path::PathBuf, String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    std::process::Command::new("cmd")
-        .args(["/C", "start", "", &archive_path.to_string_lossy()])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status()
-        .map_err(|e| format!("failed to launch installer: {e}"))?;
-    Ok(archive_path.to_path_buf())
-}
-
-/// See `reveal_downloaded` on macOS above.
-#[cfg(target_os = "linux")]
+/// Reveal a downloaded asset. Archives (`.tar.gz`) are extracted next to the
+/// download and the resulting directory is opened; single-file installers
+/// (`.dmg`, `setup.exe`) are handed straight to the OS default handler —
+/// the NSIS installer's own UAC prompt covers elevation on Windows.
+/// Returns the revealed path.
 pub fn reveal_downloaded(
     asset_name: &str,
     archive_path: &std::path::Path,
 ) -> Result<std::path::PathBuf, String> {
-    let downloads_dir = dirs::download_dir().unwrap_or_else(std::env::temp_dir);
-    let dir_name = asset_name.trim_end_matches(".tar.gz").to_string();
-    let extracted = downloads_dir.join(&dir_name);
+    if asset_name.ends_with(".tar.gz") {
+        let downloads_dir = dirs::download_dir().unwrap_or_else(std::env::temp_dir);
+        let dir_name = asset_name.trim_end_matches(".tar.gz").to_string();
+        let extracted = downloads_dir.join(&dir_name);
 
-    let status = std::process::Command::new("tar")
-        .arg("-xzf")
-        .arg(archive_path)
-        .arg("-C")
-        .arg(&downloads_dir)
-        .status()
-        .map_err(|e| format!("failed to extract archive: {e}"))?;
-    if !status.success() {
-        return Err("archive extraction failed".to_string());
-    }
+        let status = std::process::Command::new("tar")
+            .arg("-xzf")
+            .arg(archive_path)
+            .arg("-C")
+            .arg(&downloads_dir)
+            .status()
+            .map_err(|e| format!("failed to extract archive: {e}"))?;
+        if !status.success() {
+            return Err("archive extraction failed".to_string());
+        }
 
-    let target = if extracted.is_dir() {
-        extracted
+        let target = if extracted.is_dir() {
+            extracted
+        } else {
+            downloads_dir
+        };
+        crate::opener::open_folder(&target)?;
+        Ok(target)
     } else {
-        downloads_dir
-    };
-    let status = std::process::Command::new("xdg-open")
-        .arg(&target)
-        .status()
-        .map_err(|e| format!("failed to open folder: {e}"))?;
-    if !status.success() {
-        return Err("failed to open folder".to_string());
+        crate::opener::open_path(archive_path)?;
+        Ok(archive_path.to_path_buf())
     }
-    Ok(target)
 }
 
 /// Open an already-revealed path again (used by the "Open" button after a
 /// download completes). Returns the path on success.
 pub fn open_revealed(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    // Windows: `cmd /C start` (empty first arg = window title, not the path);
-    // CREATE_NO_WINDOW keeps the shim console from flashing.
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let status = std::process::Command::new("cmd")
-            .args(["/C", "start", "", &path.to_string_lossy()])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status()
-            .map_err(|e| e.to_string())?;
-        if !status.success() {
-            return Err("failed to open".to_string());
-        }
-        return Ok(path.to_path_buf());
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        #[cfg(target_os = "macos")]
-        let mut cmd = std::process::Command::new("open");
-        #[cfg(not(target_os = "macos"))]
-        let mut cmd = std::process::Command::new("xdg-open");
-        let status = cmd.arg(path).status().map_err(|e| e.to_string())?;
-        if !status.success() {
-            return Err("failed to open folder".to_string());
-        }
-        Ok(path.to_path_buf())
-    }
+    crate::opener::open_path(path)?;
+    Ok(path.to_path_buf())
 }
 
 /// Download `url` (for `version`) into the Downloads dir and reveal it.

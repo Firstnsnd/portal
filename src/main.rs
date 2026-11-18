@@ -9,6 +9,7 @@ mod integration;
 mod ipc;
 mod llm;
 mod repaint;
+mod opener;
 mod secret_store;
 mod sftp;
 mod ssh;
