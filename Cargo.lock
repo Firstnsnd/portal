@@ -4118,7 +4118,7 @@ dependencies = [
 
 [[package]]
 name = "portal"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "arboard",
  "chrono",
