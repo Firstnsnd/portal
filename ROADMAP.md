@@ -54,10 +54,13 @@
 - [x] **凭据安全存储** — `secret_store` trait: macOS `security` CLI、Windows Credential Manager (CredWriteW)、Linux Secret Service (keyring + vendored libdbus)
 - [x] **单实例 IPC** — Unix socket / Windows 命名管道 (`\\.\pipe\portal-{user}`)
 - [x] **文件管理器右键集成** — Finder Quick Actions / Nautilus/Dolphin / Explorer 上下文菜单 (HKCU 注册表)
+- [x] **ssh-agent 登录** — `ssh/agent` facade: unix 走 `SSH_AUTH_SOCK`, Windows 先试 OpenSSH agent 命名管道、回退 Pageant (PuTTY)
 
 ### 刻意延期 (Windows)
-- [ ] **ZMODEM** — rzsz crate 依赖 nix, 仅 Unix; Windows 需要独立的 ZMODEM 实现
-- [ ] **ssh-agent / Pageant** — russh 的 `AgentClient::connect_env` 是 unix-gated; 接入 Pageant 命名管道传输是一个独立工作项
+- [ ] **ZMODEM** — rzsz crate 依赖 nix, 仅 Unix; 已通过 `terminal/zmodem` facade 把 UI 门控切到运行时 `platform_supports_zmodem()`, Windows 落地仍需独立的 ZMODEM 实现
+
+### 平台模块约定
+每个面向平台的功能走「抽象接口 + 每平台一个实现文件」: `mod.rs` 只放共享类型和一行 `pub use` 分派, 平台实现在同级 `macos.rs`/`windows.rs`/`linux.rs`(或 `unix.rs`)。范本: `secret_store/`、`opener/`、`integration/`、`file_security/`、`platform_hooks/`、`ssh/agent/`、`terminal/zmodem/`、`terminal/session/`、`sftp/local/`、`ui/fonts/`、`terminal/unix_pty/`。共享代码里不再出现 cfg 平台分支。
 
 ---
 
