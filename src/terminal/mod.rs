@@ -43,21 +43,37 @@ pub struct PtySize {
 /// is on PATH and falls back to Windows PowerShell 5.1, which ships with
 /// every Windows install.
 pub fn default_shell_path() -> String {
-    if cfg!(windows) {
-        const FALLBACK: &str = "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-        let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
-        let fallback = FALLBACK.replace("%SystemRoot%", &system_root);
-        let pwsh = "pwsh.exe";
-        let on_path = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-            .any(|dir| dir.join(pwsh).is_file());
-        if on_path {
-            pwsh.to_string()
-        } else {
-            fallback
-        }
-    } else {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+    #[cfg(windows)]
+    {
+        default_shell_windows()
     }
+    #[cfg(not(windows))]
+    {
+        default_shell_unix()
+    }
+}
+
+/// Windows: pwsh (PowerShell 7) from PATH, else Windows PowerShell 5.1,
+/// which ships with every Windows install.
+#[cfg(windows)]
+fn default_shell_windows() -> String {
+    const FALLBACK: &str = "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    let fallback = FALLBACK.replace("%SystemRoot%", &system_root);
+    let pwsh = "pwsh.exe";
+    let on_path = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .any(|dir| dir.join(pwsh).is_file());
+    if on_path {
+        pwsh.to_string()
+    } else {
+        fallback
+    }
+}
+
+/// Unix: the user's login shell, else zsh.
+#[cfg(not(windows))]
+fn default_shell_unix() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
 }
 
 impl PtySize {
@@ -103,8 +119,12 @@ impl std::error::Error for Error {}
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// PTY trait for platform-specific implementations
+///
+/// Transports are `Send`: the session hands each PTY to its background
+/// reader thread (Windows carries raw handles and asserts `Send` itself,
+/// mirroring ConPTY handle semantics).
 #[allow(dead_code)]
-pub trait Pty {
+pub trait Pty: Send {
     /// Spawn a new PTY with the given command and arguments
     fn spawn(command: &str, args: &[&str], size: PtySize) -> Result<Self>
     where
@@ -147,6 +167,23 @@ pub trait Pty {
     /// Get the current shell process name (e.g., "bash", "zsh", "fish")
     /// Returns None if unable to determine the shell name
     fn get_shell_name(&self) -> Option<String> {
+        None
+    }
+
+    /// Raw descriptor of the PTY master side, when the transport exposes one
+    /// (unix). The session reader polls it for readability (zero-CPU idle)
+    /// and dups it for a private write handle. Transports without one
+    /// (Windows ConPTY) return `None`; their readers poll [`Pty::try_read`]
+    /// on a short interval instead.
+    fn poll_descriptor(&self) -> Option<i32> {
+        None
+    }
+
+    /// OS process id of the spawned child shell, when known (unix). Lets the
+    /// session's background shell-name detection grab the pid under a brief
+    /// lock and then run its `ps`/`pgrep` scan unlocked, so the scan never
+    /// stalls PTY writes. `None` where the transport has no such handle.
+    fn child_pid(&self) -> Option<u32> {
         None
     }
 }

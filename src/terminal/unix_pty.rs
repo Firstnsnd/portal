@@ -112,6 +112,31 @@ pub fn write_all_pty(fd: RawFd, mut data: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+/// Safe wrapper for writing to a raw fd
+/// The fd is duplicated and must be closed when dropped
+pub struct PtyWriter {
+    pub fd: RawFd,
+}
+
+impl PtyWriter {
+    pub fn write(&self, data: &[u8]) -> io::Result<()> {
+        // The master fd is non-blocking (shared O_NONBLOCK across all dups of
+        // the open file description), so a naive write_all drops keystrokes
+        // with WouldBlock whenever the PTY input queue fills. Route through
+        // the poll-retry helper instead.
+        write_all_pty(self.fd, data)
+    }
+}
+
+impl Drop for PtyWriter {
+    fn drop(&mut self) {
+        // Close the duplicated file descriptor
+        unsafe {
+            libc::close(self.fd);
+        }
+    }
+}
+
 /// Unix PTY implementation
 pub struct UnixPty {
     /// Master file descriptor for the PTY
@@ -450,15 +475,17 @@ impl Pty for UnixPty {
         }
         detect_shell_name(self.child_pid)
     }
-}
 
-impl UnixPty {
-    /// The forked child's pid. Cheap accessor so callers can run the
-    /// subprocess-based shell detection ([`detect_shell_name`]) WITHOUT
+    fn poll_descriptor(&self) -> Option<i32> {
+        Some(self.master.as_raw_fd())
+    }
+
+    /// The forked child's pid, exposed through the trait so callers can run
+    /// the subprocess-based shell detection ([`detect_shell_name`]) WITHOUT
     /// holding the PTY mutex — the scan spawns `ps`/`pgrep` and takes
     /// 5–30 ms, which must not block PTY writes.
-    pub fn child_pid(&self) -> i32 {
-        self.child_pid
+    fn child_pid(&self) -> Option<u32> {
+        Some(self.child_pid as u32)
     }
 }
 
