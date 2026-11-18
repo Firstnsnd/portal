@@ -1,0 +1,11 @@
+# Per-target build configuration.
+
+# Statically link the MSVC C runtime (vcruntime140/ucrt) into the exe.
+# Default MSVC builds link the CRT dynamically, so the exe dies on machines
+# without the VC++ Redistributable ("找不到 VCRUNTIME140.dll"). Static CRT
+# makes the Windows artifacts self-contained — no redist prerequisite.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -24,11 +24,13 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc aarch64-pc-windows-msvc
 
-      # Both release architectures, so the ARM64 leg's first compile is
-      # not saved for tag day. Deps resolve once; the second check is
+      # The x86_64 leg LINKS, not just checks: .cargo/config.toml builds
+      # this target with a static CRT (crt-static) so the shipped exe has
+      # no VC++ Redistributable prerequisite — and only a real link
+      # exercises that flag. Deps resolve once; the second target below is
       # incremental.
-      - name: cargo check (x86_64-pc-windows-msvc)
-        run: cargo check --target x86_64-pc-windows-msvc
+      - name: cargo build (x86_64-pc-windows-msvc)
+        run: cargo build --target x86_64-pc-windows-msvc
 
       - name: cargo check (aarch64-pc-windows-msvc)
         run: cargo check --target aarch64-pc-windows-msvc
