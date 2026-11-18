@@ -19,12 +19,6 @@ use super::session::SshClient;
 /// auth task forever.
 pub const MAX_KBDINT_ROUNDS: usize = 20;
 
-/// Cap on how many ssh-agent keys one login may offer. Mirrors OpenSSH's
-/// `IdentitiesOnly`-style restraint: each rejected key burns one of the
-/// server's MaxAuthTries, so a keychain with dozens of identities must not
-/// lock the account out on its own.
-pub const MAX_AGENT_KEYS: usize = 6;
-
 /// How `check_server_key` treats host keys.
 ///
 /// * `Learn` — production behavior: known keys pass, unknown keys are
@@ -129,7 +123,7 @@ pub async fn authenticate(
                 .map_err(|e| format!("Auth error: {}", e))?
         }
         ResolvedAuth::Agent => {
-            match agent_authenticate(handle, username).await {
+            match super::agent::authenticate(handle, username).await {
                 Ok(true) => return Ok(()),
                 // Every offered key was rejected (or the agent has none):
                 // fall back to keyboard-interactive so 2FA-only servers
@@ -218,68 +212,8 @@ async fn keyboard_interactive(
     Err("Too many authentication rounds".to_string())
 }
 
-/// ssh-agent authentication (OpenSSH-style): ask the local agent for its
-/// identities and offer each one to the server, letting the agent produce
-/// the signatures. First accepted key wins.
-///
-/// Returns `Ok(true)` when a key authenticated, `Ok(false)` when every key
-/// was rejected (caller decides on fallback), `Err` when the agent itself
-/// is unreachable or errors (missing SSH_AUTH_SOCK, dead socket, protocol
-/// failure) — those are environment problems, not auth rejections.
-#[cfg(unix)]
-async fn agent_authenticate(
-    handle: &mut russh::client::Handle<SshClient>,
-    username: &str,
-) -> Result<bool, String> {
-    use russh::keys::agent::client::AgentClient;
-
-    let mut agent = AgentClient::connect_env()
-        .await
-        .map_err(|e| format!("ssh-agent unavailable: {}", e))?;
-
-    let keys = agent
-        .request_identities()
-        .await
-        .map_err(|e| format!("ssh-agent key listing failed: {}", e))?;
-    log::info!("ssh-agent: {} key(s) offered for {}", keys.len(), username);
-    if keys.is_empty() {
-        log::warn!(
-            "ssh-agent holds no keys — run ssh-add, or check SSH_AUTH_SOCK \
-             if you expected identities"
-        );
-    }
-
-    // RSA keys sign with the server-negotiated hash (same as the direct path).
-    let rsa_hash = handle
-        .best_supported_rsa_hash()
-        .await
-        .ok()
-        .flatten()
-        .flatten();
-
-    for key in keys.into_iter().take(MAX_AGENT_KEYS) {
-        match handle
-            .authenticate_publickey_with(username, key, rsa_hash, &mut agent)
-            .await
-        {
-            Ok(russh::client::AuthResult::Success) => return Ok(true),
-            Ok(_) => continue, // rejected — try the next identity
-            Err(e) => return Err(format!("ssh-agent auth error: {}", e)),
-        }
-    }
-    Ok(false)
-}
-
-/// Windows: russh 0.57's `connect_env` is unix-gated (SSH_AUTH_SOCK is a
-/// unix convention; Pageant would need its own transport). Surface a clear
-/// environment error — callers treat it exactly like an unreachable agent.
-#[cfg(windows)]
-async fn agent_authenticate(
-    _handle: &mut russh::client::Handle<SshClient>,
-    _username: &str,
-) -> Result<bool, String> {
-    Err("ssh-agent is not supported on Windows yet".to_string())
-}
+/// ssh-agent authentication lives in [`super::agent`]: per-OS transports
+/// (unix socket / Windows OpenSSH pipe + Pageant) behind one shared loop.
 
 /// Connect and authenticate an SSH session, returning the handle.
 /// Shared by SshSession, test_connection, and SFTP.

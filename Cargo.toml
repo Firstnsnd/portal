@@ -63,6 +63,9 @@ signal-hook = "0.3"
 rzsz = "=0.1.4"
 
 [target.'cfg(windows)'.dependencies]
+# Pageant (PuTTY agent) stream for the ssh-agent facade's Windows transport.
+# Same version as russh's own pin — one copy in the tree.
+pageant = "0.2"
 # ConPTY local terminals. Pinned to 0.62: the dep tree already carries
 # windows 0.62 (via rfd/arboard), so this adds no second copy.
 windows = { version = "0.62", features = [

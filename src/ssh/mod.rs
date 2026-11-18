@@ -3,6 +3,7 @@
 mod auth;
 mod auth_prompt;
 mod session;
+pub mod agent;
 pub mod capability;
 pub mod port_forward;
 pub mod proxy;

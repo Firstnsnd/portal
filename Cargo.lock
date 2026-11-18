@@ -4133,6 +4133,7 @@ dependencies = [
  "libc",
  "log",
  "objc",
+ "pageant",
  "rand 0.8.5",
  "rfd",
  "russh",
