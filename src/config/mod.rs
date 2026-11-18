@@ -1158,13 +1158,10 @@ pub(crate) fn write_private_file(path: &Path, contents: &str) {
     use std::io::Write;
     match std::fs::File::create(path) {
         Ok(file) => {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                // File::create preserves the mode of an existing file, so an
-                // old world-readable copy is tightened here too.
-                let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
-            }
+            // Owner-only mode (0600 on unix); File::create preserves the
+            // mode of an existing file, so an old world-readable copy is
+            // tightened here too.
+            crate::file_security::restrict_to_owner(&file);
             let mut file = file;
             if let Err(e) = file.write_all(contents.as_bytes()) {
                 log::warn!("Failed to write {}: {}", path.display(), e);

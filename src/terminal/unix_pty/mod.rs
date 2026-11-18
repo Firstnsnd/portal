@@ -1,4 +1,17 @@
 //! Unix PTY implementation using pty crate
+//!
+//! The macOS/Linux split for child-process name detection lives in sibling
+//! modules behind [`pid_executable_name`]:
+
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod linux;
+
+#[cfg(target_os = "macos")]
+pub use macos::pid_executable_name;
+#[cfg(all(unix, not(target_os = "macos")))]
+pub use linux::pid_executable_name;
 
 use super::{Error, Pty, PtySize, Result};
 use std::fs::File;
@@ -497,40 +510,10 @@ impl Pty for UnixPty {
 /// callable without holding the PTY mutex. Callers on the UI path run this on
 /// a background thread (see `RealPtySession::get_shell_name`).
 pub fn detect_shell_name(child_pid: i32) -> Option<String> {
-    // 1. Direct PTY child process name (ps first, then platform fallback).
-    let direct_name =
-        if let Some(name) = ps_comm(child_pid as u32) {
-            Some(name)
-        } else {
-            // macOS: fall back to proc_pidpath if ps failed.
-            #[cfg(target_os = "macos")]
-            {
-                use std::path::PathBuf;
-                (|| {
-                    unsafe {
-                        let mut path: Vec<u8> = vec![0; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
-                        if libc::proc_pidpath(
-                            child_pid,
-                            path.as_mut_ptr() as *mut libc::c_void,
-                            path.len() as u32,
-                        ) > 0 {
-                            let null_pos = path.iter().position(|&b| b == 0).unwrap_or(path.len());
-                            let path_str = std::str::from_utf8(&path[..null_pos]).ok()?;
-                            PathBuf::from(path_str)
-                                .file_name()
-                                .and_then(|name| name.to_str())
-                                .map(|s| s.to_string())
-                        } else {
-                            None
-                        }
-                    }
-                })()
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                None
-            }
-        }?;
+    // 1. Direct PTY child process name (ps first, then the per-platform
+    //    fallback — macOS proc_pidpath when ps can't answer).
+    let direct_name = ps_comm(child_pid as u32)
+        .or_else(|| pid_executable_name(child_pid))?;
 
     // 2. Scan direct children for a nested known interactive shell.
     //    Handles "zsh → user ran `bash`" — the visible shell is the

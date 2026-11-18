@@ -1,6 +1,19 @@
 //! # Local File Browser
 //!
 //! Synchronous local filesystem browser implementation.
+//!
+//! Per-OS differences (permission bits, the hidden-file convention) live in
+//! sibling modules behind [`entry_permissions`] / [`is_hidden`]:
+
+#[cfg(unix)]
+mod unix;
+#[cfg(windows)]
+mod windows;
+
+#[cfg(unix)]
+pub use unix::{entry_permissions, is_hidden};
+#[cfg(windows)]
+pub use windows::{entry_permissions, is_hidden};
 
 use crate::sftp::types::{SftpEntry, SftpEntryKind};
 
@@ -40,6 +53,11 @@ impl LocalBrowser {
             for dir_entry in read_dir.flatten() {
                 let name = dir_entry.file_name().to_string_lossy().to_string();
                 let meta = dir_entry.metadata().ok();
+                // Hidden entries are dropped here (not at render time) so the
+                // per-OS predicate has the metadata it needs.
+                if !self.show_hidden_files && is_hidden(&name, meta.as_ref()) {
+                    continue;
+                }
                 let kind = match meta.as_ref().map(|m| m.file_type()) {
                     Some(ft) if ft.is_dir() => SftpEntryKind::Directory,
                     Some(ft) if ft.is_symlink() => SftpEntryKind::Symlink,
@@ -48,13 +66,7 @@ impl LocalBrowser {
                 };
                 let size = meta.as_ref().map(|m| m.len());
                 let modified = meta.as_ref().and_then(|m| m.modified().ok());
-                #[cfg(unix)]
-                let permissions = {
-                    use std::os::unix::fs::PermissionsExt;
-                    meta.as_ref().map(|m| m.permissions().mode())
-                };
-                #[cfg(not(unix))]
-                let permissions = None;
+                let permissions = entry_permissions(meta.as_ref());
                 entries.push(SftpEntry {
                     name,
                     kind,
@@ -151,21 +163,16 @@ impl LocalBrowser {
         Ok(())
     }
 
-    /// Toggle visibility of hidden files (files starting with .).
+    /// Toggle visibility of hidden files (dotfiles on unix, the Win32
+    /// hidden attribute on Windows) and re-read the directory.
     pub fn toggle_hidden_files(&mut self) {
         self.show_hidden_files = !self.show_hidden_files;
-        self.selection.clear();
+        self.refresh();
     }
 
-    /// Get filtered entries (hides dotfiles if show_hidden_files is false).
+    /// Entries for the panel. The hidden filter is applied by [`Self::refresh`]
+    /// (it needs per-OS metadata), so this is the full current listing.
     pub fn filtered_entries(&self) -> Vec<SftpEntry> {
-        if self.show_hidden_files {
-            self.entries.clone()
-        } else {
-            self.entries.iter()
-                .filter(|e| !e.name.starts_with('.'))
-                .cloned()
-                .collect()
-        }
+        self.entries.clone()
     }
 }

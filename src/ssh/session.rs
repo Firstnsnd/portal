@@ -1296,13 +1296,15 @@ pub async fn test_connection(
 /// This is useful when a server's host key has changed.
 /// Returns Ok(lines_removed) on success or Err(message) on failure.
 pub fn remove_known_hosts_key(host: &str, port: u16) -> Result<usize, String> {
-    use std::env;
     use std::fs::File;
     use std::io::{BufRead, BufReader, Write};
 
-    // Get the known_hosts file path
-    let home = env::var("HOME").map_err(|_| "Failed to get HOME directory".to_string())?;
-    let known_hosts_path = format!("{}/.ssh/known_hosts", home);
+    // Resolve the known_hosts path via dirs::home_dir rather than $HOME —
+    // HOME is normally unset on Windows (USERPROFILE is the equivalent),
+    // and dirs handles both.
+    let home = dirs::home_dir()
+        .ok_or_else(|| "Failed to get home directory".to_string())?;
+    let known_hosts_path = home.join(".ssh").join("known_hosts");
 
     // Read the existing known_hosts file
     let file = File::open(&known_hosts_path);

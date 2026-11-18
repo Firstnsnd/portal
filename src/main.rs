@@ -5,11 +5,13 @@
 
 mod app;
 mod config;
+mod file_security;
 mod integration;
 mod ipc;
 mod llm;
 mod repaint;
 mod opener;
+mod platform_hooks;
 mod secret_store;
 mod sftp;
 mod ssh;
@@ -342,55 +344,11 @@ fn main() -> eframe::Result<()> {
         ipc::start_server();
     }
 
-    // Set up signal handler for clean PTY cleanup on exit
-    // This prevents PTY resource leaks when the app is terminated
-    #[cfg(unix)]
-    {
-        use std::sync::atomic::{AtomicBool, Ordering};
-
-        // Flag to track if we've already cleaned up
-        static CLEANUP_DONE: AtomicBool = AtomicBool::new(false);
-
-        // Spawn a dedicated cleanup thread that waits for signals
-        std::thread::spawn(|| {
-            use signal_hook::consts::signal::*;
-            use signal_hook::iterator::Signals;
-
-            let signals = Signals::new([SIGTERM, SIGINT, SIGHUP]).ok();
-
-            if let Some(mut sig) = signals {
-                if sig.forever().next().is_some() {
-                    if !CLEANUP_DONE.swap(true, Ordering::SeqCst) {
-                        // SIGKILL exactly the PTY children we spawned. The
-                        // previous handler replaced the process with
-                        // `pkill -9 -f "/bin/zsh -l"`, which matches every
-                        // login shell on the machine by command line and took
-                        // the user's own Terminal / VS Code shells with it.
-                        crate::terminal::kill_registered_children();
-                    }
-                    // process::exit skips Drop — unlink the IPC channel here
-                    // (a stale socket file is also tolerated: the next launch
-                    // removes it before rebinding).
-                    crate::ipc::cleanup();
-                    // Exit after cleanup
-                    std::process::exit(0);
-                }
-            }
-        });
-    }
-
-    // Set macOS activation policy to Regular so the app appears in Dock
-    #[cfg(target_os = "macos")]
-    {
-        use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
-        use cocoa::base::{id, YES};
-
-        unsafe {
-            let app: id = NSApp();
-            app.setActivationPolicy_(NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular);
-            app.activateIgnoringOtherApps_(YES);
-        }
-    }
+    // Platform startup hooks: PTY-cleanup signal handling (unix) and GUI
+    // presence (macOS Dock policy). Per-OS implementations in
+    // platform_hooks/{unix,macos,windows}.rs.
+    crate::platform_hooks::install_signal_cleanup();
+    crate::platform_hooks::activate_gui();
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1400.0, 900.0])
