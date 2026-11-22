@@ -1398,11 +1398,19 @@ impl PortalApp {
                     }
                 }
                 PaneAction::SendSelectionToAi => {
+                    // Owned before `window` borrows self.windows mutably.
+                    let composer_id = self.windows[window_idx].ai_composer_id();
                     let window = &mut self.windows[window_idx];
-                    if let Some(session) = window.tabs[active].sessions.get(idx) {
+                    if let Some(session) = window.tabs[active].sessions.get_mut(idx) {
                         if let Some(text) =
                             crate::ui::terminal::render::selected_text_of(session)
                         {
+                            // The selection was consumed into the composer
+                            // draft — clear it so the terminal doesn't keep a
+                            // highlighted selection while the AI input owns
+                            // keyboard focus (the two input states are
+                            // mutually exclusive).
+                            session.selection.clear();
                             let tab = &mut window.tabs[active];
                             {
                                 let mut ai = tab.ai_chat.lock().unwrap();
@@ -1417,6 +1425,12 @@ impl PortalApp {
                             // The AI drawer and tools drawer share the
                             // right-hand rail — same exclusion as orb click.
                             tab.tools_drawer_open = false;
+                            // Focus follows the text: hand the keyboard to
+                            // the composer so the user can immediately type
+                            // the question around it. Next frame the panes
+                            // see the composer holding focus and stand down
+                            // from their per-frame re-claim.
+                            ctx.memory_mut(|mem| mem.request_focus(composer_id));
                         }
                     }
                 }
@@ -1501,6 +1515,8 @@ impl PortalApp {
         }
 
         // ── AI orb (one per tab) + pending command execution ──
+        // Owned before `tab` borrows the window mutably (see ai_composer_id).
+        let composer_id = self.windows[window_idx].ai_composer_id();
         let tab = &mut self.windows[window_idx].tabs[active];
         let prev_offset = tab.ai_chat.lock().map(|s| s.orb_offset).unwrap_or_default();
         // Hide the orb while the drawer is open (it overlaps the drawer area and
@@ -1524,6 +1540,11 @@ impl PortalApp {
             // The AI drawer and tools drawer share the right-hand rail —
             // opening the AI drawer dismisses the tools drawer.
             tab.tools_drawer_open = false;
+            // Opening the drawer means the user wants to chat: the composer
+            // takes keyboard focus so the first keystroke lands in it, not
+            // in the terminal behind it (the panes stand down while it
+            // holds focus — see render_terminal_session).
+            ctx.memory_mut(|mem| mem.request_focus(composer_id));
         }
 
         // Execute a confirmed AI command in the focused terminal (single frame

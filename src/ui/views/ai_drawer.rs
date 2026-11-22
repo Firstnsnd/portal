@@ -123,7 +123,7 @@ pub fn render_ai_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut Wi
                         draw_empty_state(ui, theme, lang);
                     }
                     for msg in &st.messages {
-                        draw_bubble(ui, msg, theme, lang, &mut run_wanted, &mut composer_wanted);
+                        draw_bubble(ui, msg, theme, lang, composer_id, &mut run_wanted, &mut composer_wanted);
                     }
                     if let Some(buf) = &st.streaming {
                         if buf.text.is_empty() {
@@ -366,12 +366,15 @@ fn draw_error(
 
 /// Render a completed message bubble. Assistant replies show "Run" buttons under
 /// fenced code blocks (writing the chosen command into `run_wanted`); any
-/// bubble's right-click menu offers copy / add-to-composer (`composer_wanted`).
+/// bubble's right-click menu offers copy / add-to-composer (`composer_wanted`)
+/// and, over a live label selection, send-selection-to-AI (which also focuses
+/// `composer_id`).
 fn draw_bubble(
     ui: &mut egui::Ui,
     msg: &ChatMessage,
     theme: &crate::ui::theme::ThemeColors,
     lang: crate::ui::Language,
+    composer_id: egui::Id,
     run_wanted: &mut Option<String>,
     composer_wanted: &mut Option<String>,
 ) {
@@ -439,10 +442,12 @@ fn draw_bubble(
                                     |ui, block| {
                                         code_block(ui, theme, lang, block, run_wanted);
                                     },
-                                    |ui| message_menu(ui, lang, &msg.content, composer_wanted),
+                                    |ui| {
+                                        message_menu(ui, lang, &msg.content, composer_id, composer_wanted)
+                                    },
                                 );
                             } else {
-                                draw_sent_message(ui, &msg.content, theme, wrap_w, lang, composer_wanted);
+                                draw_sent_message(ui, &msg.content, theme, wrap_w, lang, composer_id, composer_wanted);
                             }
                         });
                     });
@@ -480,6 +485,7 @@ fn draw_sent_message(
     theme: &crate::ui::theme::ThemeColors,
     max_w: f32,
     lang: crate::ui::Language,
+    composer_id: egui::Id,
     composer_wanted: &mut Option<String>,
 ) {
     let font_id = egui::FontId::proportional(tk::FONT_BASE);
@@ -503,19 +509,48 @@ fn draw_sent_message(
         egui::Label::new(egui::WidgetText::Galley(galley)).selectable(true),
     );
     resp.context_menu(|ui| {
-        message_menu(ui, lang, content, composer_wanted);
+        message_menu(ui, lang, content, composer_id, composer_wanted);
     });
 }
 
+/// Text currently selected in the drawer's selectable labels, if any.
+///
+/// egui owns label selection (`LabelSelectionState`) but keeps the selected
+/// text private; what it does do is push the live selection to the OS
+/// clipboard every frame (egui-winit applies `PlatformOutput::copied_text`).
+/// So `has_selection` + a clipboard read IS the selected text. Returns `None`
+/// when no label selection is live (then copy / add-to-input keep acting on
+/// the whole message).
+fn selected_label_text(ctx: &egui::Context) -> Option<String> {
+    if !egui::text_selection::LabelSelectionState::load(ctx).has_selection() {
+        return None;
+    }
+    let text = arboard::Clipboard::new().ok()?.get_text().ok()?;
+    let text = text.trim().to_owned();
+    (!text.is_empty()).then_some(text)
+}
+
 /// Right-click menu shared by every chat bubble (and every selectable span in
-/// it): copy the whole message to the clipboard, or push it into the composer
-/// as a draft.
+/// it): with a live label selection, "send to AI" pushes just the selected
+/// fragment into the composer (parity with the terminal's
+/// send-selection-to-AI) and focuses it; copy / add-to-input always act on
+/// the whole message.
 fn message_menu(
     ui: &mut egui::Ui,
     lang: crate::ui::Language,
     content: &str,
+    composer_id: egui::Id,
     composer_wanted: &mut Option<String>,
 ) {
+    if let Some(selection) = selected_label_text(ui.ctx()) {
+        if ui.button(lang.t("send_to_ai")).clicked() {
+            *composer_wanted = Some(selection);
+            // Focus follows the send, like the terminal path: the composer
+            // takes keyboard focus and the panes stand down for it.
+            ui.ctx().memory_mut(|mem| mem.request_focus(composer_id));
+            ui.close_menu();
+        }
+    }
     if ui.button(lang.t("copy")).clicked() {
         if let Ok(mut clipboard) = arboard::Clipboard::new() {
             let _ = clipboard.set_text(content.to_owned());
@@ -842,6 +877,7 @@ mod layout_tests {
                                 msg,
                                 &theme,
                                 crate::ui::Language::English,
+                                egui::Id::new("test_composer"),
                                 &mut run_wanted,
                                 &mut composer_wanted,
                             );
@@ -896,6 +932,7 @@ mod layout_tests {
                         &ChatMessage::user(text.to_string()),
                         &theme,
                         crate::ui::Language::English,
+                        egui::Id::new("test_composer"),
                         &mut run_wanted,
                         &mut composer_wanted,
                     );
@@ -1041,6 +1078,7 @@ mod layout_tests {
                         &ChatMessage::user(long.clone()),
                         &theme,
                         crate::ui::Language::English,
+                        egui::Id::new("test_composer"),
                         &mut run_wanted,
                         &mut composer_wanted,
                     );
