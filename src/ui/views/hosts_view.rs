@@ -390,7 +390,8 @@ pub fn render_hosts_view(
                             host.name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).rect.width());
                         let mut badge_x = rect.min.x + 46.0 + name_w + 8.0;
                         badge_x += forward_badge(ui, window, host, badge_x, rect.min.y + 18.0, cx.theme);
-                        sftp_badge(ui, cx, host, badge_x, rect.min.y + 18.0);
+                        badge_x += sftp_badge(ui, cx, host, badge_x, rect.min.y + 18.0);
+                        protected_badge(ui, host, badge_x, rect.min.y + 18.0, cx.theme);
                         record_badge(ui, host, rect, cx.theme);
                         let detail = if host.username.is_empty() {
                             format!("{}:{}", host.host, host.port)
@@ -492,7 +493,10 @@ pub fn render_hosts_view(
                             );
                             let name_w = ui.fonts(|f| f.layout_no_wrap(
                                 host.name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).rect.width());
-                            forward_badge(ui, window, host, rect.min.x + 46.0 + name_w + 8.0, rect.min.y + 18.0, cx.theme);
+                            let mut badge_x = rect.min.x + 46.0 + name_w + 8.0;
+                            badge_x += forward_badge(ui, window, host, badge_x, rect.min.y + 18.0, cx.theme);
+                            badge_x += sftp_badge(ui, cx, host, badge_x, rect.min.y + 18.0);
+                            protected_badge(ui, host, badge_x, rect.min.y + 18.0, cx.theme);
                             record_badge(ui, host, rect, cx.theme);
                             let detail = if host.username.is_empty() {
                                 format!("{}:{}", host.host, host.port)
@@ -611,9 +615,10 @@ pub fn render_hosts_view(
         }
     }
     if let Some(idx) = edit_host_index {
+        // Route through the app layer: protected hosts must clear the owner
+        // gate before the drawer (which shows credentials) opens.
         if idx < cx.hosts.len() {
-            let host = cx.hosts[idx].clone();
-            window.add_host_dialog.open_edit(idx, &host);
+            actions.request_edit_host = Some(idx);
         }
     }
     if let Some(host) = connect_history_host {
@@ -702,14 +707,21 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             // Duplicate button (edit mode only): switch the
                             // drawer into add mode prefilled with this host's
                             // values, so only user/credential need changing.
+                            // A protected host routes through the app layer's
+                            // owner gate (the drawer has no ViewActions
+                            // channel — it stashes a request instead).
                             if let Some(idx) = window.add_host_dialog.edit_index {
                                 if ui.add(
                                     egui::Button::new(egui::RichText::new(cx.language.t("duplicate")).size(FONT_BASE))
                                         .frame(false)
                                 ).on_hover_text(cx.language.t("duplicate"))
                                 .clicked() {
-                                    if let Some(host) = cx.hosts.get(idx).cloned() {
-                                        window.add_host_dialog.open_duplicate(&host, cx.language.t("duplicate_suffix"));
+                                    if let Some(host) = cx.hosts.get(idx) {
+                                        if host.protected {
+                                            window.add_host_dialog.duplicate_gate_request = Some(idx);
+                                        } else if let Some(host) = cx.hosts.get(idx).cloned() {
+                                            window.add_host_dialog.open_duplicate(&host, cx.language.t("duplicate_suffix"));
+                                        }
                                     }
                                 }
                             }
@@ -918,6 +930,14 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             ui.add_space(widgets::SPACING_FIELD);
                             ui.checkbox(&mut window.add_host_dialog.auto_record, cx.language.t("record_this_host"));
                             ui.label(egui::RichText::new(cx.language.t("record_this_host_desc"))
+                                .color(cx.theme.fg_dim)
+                                .size(11.0));
+                            ui.add_space(widgets::SPACING_FIELD);
+
+                            // Owner verification gate
+                            ui.add_space(widgets::SPACING_FIELD);
+                            ui.checkbox(&mut window.add_host_dialog.protected, cx.language.t("protect_this_host"));
+                            ui.label(egui::RichText::new(cx.language.t("protect_this_host_desc"))
                                 .color(cx.theme.fg_dim)
                                 .size(11.0));
                             ui.add_space(widgets::SPACING_FIELD);
@@ -1383,6 +1403,7 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
 
         entry.agent_forwarding = window.add_host_dialog.agent_forwarding;
         entry.auto_record = window.add_host_dialog.auto_record;
+        entry.protected = window.add_host_dialog.protected;
         entry.jump_host = window.add_host_dialog.jump_host.clone();
         entry.port_forwards = window.add_host_dialog.port_forwards.clone();
         entry.proxy = window.add_host_dialog.proxy_kind.map(|kind| crate::config::ProxyConfig {
@@ -1494,6 +1515,21 @@ fn sftp_badge(
     ui.fonts(|f| f.layout_no_wrap(
         text.to_string(), egui::FontId::proportional(9.0), egui::Color32::WHITE,
     ).rect.width()) + 8.0
+}
+
+/// Lock glyph after the host name when the host is protected (connecting,
+/// editing, or viewing it requires local owner verification).
+fn protected_badge(ui: &egui::Ui, host: &HostEntry, x: f32, y: f32, theme: &crate::ui::theme::ThemeColors) {
+    if !host.protected {
+        return;
+    }
+    ui.painter().text(
+        egui::pos2(x, y),
+        egui::Align2::LEFT_CENTER,
+        "\u{1F512}",
+        egui::FontId::proportional(10.0),
+        theme.warning,
+    );
 }
 
 /// Paint a "\u{25cf} REC" badge at the row's right edge when the host is

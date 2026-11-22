@@ -4,7 +4,6 @@
 
 // Session and terminal types
 pub mod session;
-pub use session::TerminalSession;
 
 // Dialog types
 pub mod dialogs;

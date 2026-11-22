@@ -402,6 +402,9 @@ pub struct AppWindow {
     pub host_filter: HostFilter,
     pub confirm_delete_host: Option<usize>,
     pub notifications: Vec<crate::ssh::AppNotification>,
+    /// Protected-host owner-verification prompt + parked action (one gated
+    /// action at a time per window; the grace cache is global on `PortalApp`).
+    pub owner_gate: crate::ui::state::owner_gate::OwnerGate,
 }
 
 impl AppWindow {
@@ -510,6 +513,7 @@ impl AppWindow {
             host_filter: HostFilter::default(),
             confirm_delete_host: None,
             notifications: Vec::new(),
+            owner_gate: crate::ui::state::owner_gate::OwnerGate::default(),
         }
     }
 }

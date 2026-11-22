@@ -35,6 +35,13 @@ pub struct ViewActions {
     pub delete_host: Option<usize>,
     /// Request to delete a credential (id)
     pub delete_credential: Option<String>,
+    /// Request to open the edit drawer for a host — routed through the app
+    /// layer because protected hosts must clear the owner gate first.
+    pub request_edit_host: Option<usize>,
+    /// Request to connect the SFTP left panel to a host (index into hosts)
+    pub connect_sftp_left: Option<usize>,
+    /// Request to connect the SFTP right panel to a host (index into hosts)
+    pub connect_sftp_right: Option<usize>,
 }
 
 /// Shared context passed to window view methods.

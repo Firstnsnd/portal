@@ -40,6 +40,7 @@ pub mod terminal;
 pub mod config;
 pub mod file_security;
 pub mod secret_store;
+pub mod local_auth;
 pub mod opener;
 pub mod ssh;
 pub mod sftp;

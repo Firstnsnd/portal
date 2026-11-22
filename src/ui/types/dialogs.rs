@@ -69,6 +69,13 @@ pub struct AddHostDialog {
     pub agent_forwarding: bool,
     /// Record this host's sessions from their first byte.
     pub auto_record: bool,
+    /// Connecting/editing/viewing this host requires local owner
+    /// verification (see `app::owner_gate`).
+    pub protected: bool,
+    /// Set by the drawer's Duplicate button when the host is protected —
+    /// duplication must go through the owner gate, which the drawer (no
+    /// ViewActions channel) cannot do itself. Consumed by the app layer.
+    pub duplicate_gate_request: Option<usize>,
     pub test_conn_state: TestConnState,
     pub test_conn_result: TestConnResult,
     /// Show "Remove old key" button when host key verification fails
@@ -121,6 +128,8 @@ impl Default for AddHostDialog {
             startup_commands: String::new(),
             agent_forwarding: false,
             auto_record: false,
+            protected: false,
+            duplicate_gate_request: None,
             test_conn_state: TestConnState::Idle,
             test_conn_result: None,
             show_remove_key_button: false,
@@ -183,6 +192,8 @@ impl AddHostDialog {
         self.startup_commands.clear();
         self.agent_forwarding = false;
         self.auto_record = false;
+        self.protected = false;
+        self.duplicate_gate_request = None;
         self.test_conn_state = TestConnState::Idle;
         self.test_conn_result = None;
         self.show_remove_key_button = false;
@@ -236,6 +247,7 @@ impl AddHostDialog {
         self.startup_commands = host.startup_commands.join("\n");
         self.agent_forwarding = host.agent_forwarding;
         self.auto_record = host.auto_record;
+        self.protected = host.protected;
         self.jump_host = host.jump_host.clone();
         // Proxy config: host/port/username live in hosts.json; the password
         // stays in the keychain and is not echoed back into the form.
@@ -508,6 +520,7 @@ mod duplicate_host_tests {
             jump_host: None,
             port_forwards: Vec::new(),
             proxy: None,
+            protected: false,
         }
     }
 

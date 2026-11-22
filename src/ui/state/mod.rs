@@ -5,3 +5,4 @@
 //! state (e.g. an in-flight chat reply).
 
 pub mod ai_chat;
+pub mod owner_gate;

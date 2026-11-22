@@ -49,7 +49,8 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libfontconfig1-dev
+          # libpam0g-dev: local_auth/linux.rs links PAM for owner verification
+          sudo apt-get install -y libxkbcommon-dev libfontconfig1-dev libpam0g-dev
 
       - name: cargo check (all targets)
         run: cargo check --all-targets

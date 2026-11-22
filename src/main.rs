@@ -9,6 +9,7 @@ mod file_security;
 mod integration;
 mod ipc;
 mod llm;
+mod local_auth;
 mod repaint;
 mod opener;
 mod platform_hooks;
@@ -55,6 +56,13 @@ impl eframe::App for PortalApp {
         // Debounced session-state save (at most one write per 20s window).
         self.maybe_save_sessions();
         self.harvest_host_capabilities();
+
+        // Protected-host owner verification: poll in-flight checks for every
+        // window. Must live here, not in render_window_content — a hidden
+        // root window never renders but its gates still need to settle.
+        for wi in 0..self.windows.len() {
+            self.poll_owner_gate(wi);
+        }
 
         // Handle "open here" requests (from CLI at startup, or forwarded from
         // a second instance over the IPC channel).

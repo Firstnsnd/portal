@@ -4121,6 +4121,7 @@ name = "portal"
 version = "0.19.4"
 dependencies = [
  "arboard",
+ "block",
  "chrono",
  "cocoa",
  "criterion",

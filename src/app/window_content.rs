@@ -402,6 +402,17 @@ impl PortalApp {
             );
             self.windows[window_idx].render_drawers(ctx, &mut cx);
         }
+        // The host drawer's Duplicate button stashes its request here when
+        // the host is protected (the drawer has no ViewActions channel).
+        {
+            let dup = self.windows[window_idx]
+                .add_host_dialog
+                .duplicate_gate_request
+                .take();
+            if let Some(idx) = dup {
+                self.gate_duplicate_host(window_idx, idx);
+            }
+        }
 
         // ── Central Panel ──
         let current_view = self.windows[window_idx].current_view;
@@ -517,6 +528,9 @@ impl PortalApp {
             self.render_update_dialog(ctx);
             self.render_cwd_permission_dialog(ctx);
         }
+        // The owner-verification dialog is per window: whichever window
+        // requested the gated action shows the prompt for it.
+        self.render_owner_gate_dialog(ctx, window_idx);
 
         result
     }
@@ -773,13 +787,11 @@ impl PortalApp {
                 }
             }
             TabBarAction::ReconnectTab(ti) => {
-                let window = &mut self.windows[window_idx];
-                let si = window.tabs[ti].focused_session;
-                // Only SSH sessions support reconnection; Local sessions have no
-                // connection concept and must never reach reconnect_ssh.
-                if matches!(&window.tabs[ti].sessions[si].kind, SessionKind::Ssh(_, _, _)) {
-                    window.tabs[ti].sessions[si].reconnect_ssh(&self.runtime, None);
-                }
+                let si = self.windows[window_idx].tabs[ti].focused_session;
+                // Only SSH sessions support reconnection; Local sessions have
+                // no connection concept and must never reach reconnect_ssh
+                // (enforced inside gate_reconnect → reconnect_session).
+                self.gate_reconnect(window_idx, ti, si, false);
             }
             TabBarAction::DetachTab(ti) => {
                 if self.windows[window_idx].tabs.len() > 1 {
@@ -1409,35 +1421,16 @@ impl PortalApp {
                     }
                 }
                 PaneAction::RemoveHostKey => {
-                    let window = &mut self.windows[window_idx];
-                    let host_opt = match &window.tabs[active].sessions.get(idx).map(|s| &s.kind) {
-                        Some(SessionKind::Ssh(_, host, _)) => Some(host.clone()),
-                        _ => None,
-                    };
-                    if let Some(host) = host_opt {
-                        let _ = crate::ssh::remove_known_hosts_key(&host.host, host.port);
-                        window.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
-                    }
+                    // Gate BEFORE dropping the known_hosts key: the entry must
+                    // survive until the owner verification has actually passed
+                    // (reconnect_session re-runs the removal after the gate).
+                    self.gate_reconnect(window_idx, active, idx, true);
                 }
                 PaneAction::Reconnect => {
-                    let window = &mut self.windows[window_idx];
-                    // Only SSH sessions support reconnection.
-                    if matches!(&window.tabs[active].sessions[idx].kind, SessionKind::Ssh(_, _, _)) {
-                        // An active ZMODEM transfer dies with the old connection —
-                        // say so instead of letting the chip vanish silently.
-                        #[cfg(unix)]
-                        if window.tabs[active].sessions[idx]
-                            .kind
-                            .zmodem_transfer()
-                            .is_some_and(|t| t.is_active())
-                        {
-                            window.recording_error = Some((
-                                self.language.t("zmodem_transfer_interrupted").to_string(),
-                                std::time::Instant::now(),
-                            ));
-                        }
-                        window.tabs[active].sessions[idx].reconnect_ssh(&self.runtime, None);
-                    }
+                    // Only SSH sessions support reconnection (enforced inside
+                    // reconnect_session). The ZMODEM-interrupt warning moved
+                    // with the reconnect body into reconnect_session.
+                    self.gate_reconnect(window_idx, active, idx, false);
                 }
             }
         }
@@ -1616,19 +1609,19 @@ impl PortalApp {
     }
 
     /// Handle actions returned from view rendering
-    fn handle_view_actions(&mut self, actions: ViewActions, _window_idx: usize, _ctx: &egui::Context) {
+    fn handle_view_actions(&mut self, actions: ViewActions, window_idx: usize, _ctx: &egui::Context) {
         if actions.add_local_tab {
             self.add_tab_local();
         }
         if let Some(cwd) = actions.open_terminal_at {
             // Open in the window the request came from, then raise it.
-            self.add_local_tab_to_window_in(_window_idx, Some(&cwd));
-            if let Some(w) = self.windows.get(_window_idx) {
+            self.add_local_tab_to_window_in(window_idx, Some(&cwd));
+            if let Some(w) = self.windows.get(window_idx) {
                 _ctx.send_viewport_cmd_to(w.viewport_id, egui::ViewportCommand::Focus);
             }
         }
         if let Some(host) = actions.connect_ssh {
-            self.add_tab_ssh(&host);
+            self.gate_connect_ssh(window_idx, &host);
         }
         if actions.clear_history {
             self.connection_history.clear();
@@ -1641,11 +1634,16 @@ impl PortalApp {
             config::save_credentials(&self.credentials_file, &self.credentials);
         }
         if let Some(idx) = actions.delete_host {
-            if idx < self.hosts.len() && !self.hosts[idx].is_local {
-                config::delete_host_credentials(&self.hosts[idx]);
-                self.hosts.remove(idx);
-                self.save_hosts();
-            }
+            self.gate_delete_host(window_idx, idx);
+        }
+        if let Some(idx) = actions.request_edit_host {
+            self.gate_open_host_edit(window_idx, idx);
+        }
+        if let Some(idx) = actions.connect_sftp_left {
+            self.gate_connect_sftp(window_idx, true, idx);
+        }
+        if let Some(idx) = actions.connect_sftp_right {
+            self.gate_connect_sftp(window_idx, false, idx);
         }
         if let Some(id) = &actions.delete_credential {
             self.credentials.retain(|c| c.id != **id);

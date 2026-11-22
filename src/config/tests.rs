@@ -31,6 +31,7 @@ mod tests {
             jump_host: None,
             port_forwards: vec![],
             proxy: None,
+            protected: false,
         };
 
         // Test JSON serialization

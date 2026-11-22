@@ -4,6 +4,7 @@
 
 #![allow(unexpected_cfgs)]
 
+mod owner_gate;
 mod session_restore;
 mod tab_management;
 mod window_content;
@@ -90,6 +91,9 @@ pub struct PortalApp {
         std::collections::HashMap<String, crate::ssh::capability::HostCapability>,
     /// When the debounced snapshot saver last wrote (or app start).
     pub last_session_save: std::time::Instant,
+    /// Process-wide owner-verification grace window (protected hosts). Shared
+    /// by all windows — sudo semantics, not per-window.
+    pub owner_verified: crate::ui::state::owner_gate::OwnerVerification,
 }
 
 /// Categories shown in the Settings page's left-hand navigation.
@@ -291,6 +295,7 @@ impl PortalApp {
             sessions_dirty: false,
             host_sftp_support: std::collections::HashMap::new(),
             last_session_save: std::time::Instant::now(),
+            owner_verified: crate::ui::state::owner_gate::OwnerVerification::default(),
         }
     }
 

@@ -19,9 +19,7 @@ use crate::ui::pane_view::{ViewActions, WindowContext};
 use crate::ui::pane::AppWindow;
 use crate::ui::types::sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpErrorDialog, SftpPanel};
 use crate::ui::views::sftp::editor::{EditorOutput, execute_editor_save, open_editor_in_side, render_embedded_editor};
-use crate::ui::types::TerminalSession;
 use crate::sftp::{SftpConnectionState, SftpEntryKind};
-use crate::config;
 use crate::ui::widgets;
 use crate::ui::tokens::{self, DIALOG_WIDTH_SM};
 
@@ -1070,40 +1068,6 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
 
     ui.allocate_rect(available, egui::Sense::hover());
 
-    // ── Connect to host if selected (left panel) ──
-    if let Some(idx) = left_connect_host {
-        let host = &cx.hosts[idx];
-        let username = TerminalSession::get_effective_username(&host.username);
-        let auth = config::resolve_auth(host, cx.credentials);
-        let proxy = config::resolve_proxy(host);
-        window.sftp_browser_left = Some(crate::sftp::SftpBrowser::connect(
-            cx.runtime,
-            host.host.clone(),
-            host.port,
-            username,
-            auth,
-            host.name.clone(),
-            proxy,
-        ));
-    }
-
-    // ── Connect to host if selected (right panel) ──
-    if let Some(idx) = connect_host {
-        let host = &cx.hosts[idx];
-        let username = TerminalSession::get_effective_username(&host.username);
-        let auth = config::resolve_auth(host, cx.credentials);
-        let proxy = config::resolve_proxy(host);
-        window.sftp_browser = Some(crate::sftp::SftpBrowser::connect(
-            cx.runtime,
-            host.host.clone(),
-            host.port,
-            username,
-            auth,
-            host.name.clone(),
-            proxy,
-        ));
-    }
-
     // ── Apply deferred local panel actions ──
     if let Some(name) = local_left_navigate_to {
         if name == ".." {
@@ -1808,7 +1772,15 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         }
     }
 
-    ViewActions { open_terminal_at, ..Default::default() }
+    // Panel connects are routed through the app layer: protected hosts must
+    // clear the owner gate first, and the (unchanged) connect body now lives
+    // in PortalApp::gate_connect_sftp.
+    ViewActions {
+        open_terminal_at,
+        connect_sftp_left: left_connect_host.filter(|i| *i < cx.hosts.len()),
+        connect_sftp_right: connect_host.filter(|i| *i < cx.hosts.len()),
+        ..Default::default()
+    }
 }
 
 /// Apply one embedded editor's output to its half: close on demand, or

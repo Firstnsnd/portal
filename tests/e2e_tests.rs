@@ -263,6 +263,7 @@ mod e2e_tests {
                     }
                 ],
                 proxy: None,
+                protected: false,
             },
         ];
 

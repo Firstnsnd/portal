@@ -349,6 +349,10 @@ pub struct HostEntry {
     /// Connect to this host through a proxy (None = direct).
     #[serde(default)]
     pub proxy: Option<ProxyConfig>,
+    /// Connecting, editing, or viewing this host requires verifying the
+    /// local computer owner (Touch ID on macOS, account password elsewhere).
+    #[serde(default)]
+    pub protected: bool,
 }
 
 fn default_port() -> u16 {
@@ -373,6 +377,7 @@ impl HostEntry {
             jump_host: None,
             port_forwards: Vec::new(),
             proxy: None,
+            protected: false,
         }
     }
 
@@ -393,6 +398,7 @@ impl HostEntry {
             jump_host: None,
             port_forwards: Vec::new(),
             proxy: None,
+            protected: false,
         }
     }
 }
