@@ -387,12 +387,28 @@ mod ssh_integration_tests {
     }
 
     /// Test: Connection history can be saved and loaded
+    ///
+    /// `append_history`/`load_history` hardcode the real history path, so the
+    /// user's actual history.json is backed up first and restored on drop —
+    /// even mid-panic. The previous version deleted the file outright,
+    /// silently wiping real connection history on every `cargo test` run and
+    /// leaving the fixture record behind (reported 2026-11-24).
     #[test]
     fn test_connection_history() {
         use portal::config::{ConnectionRecord, append_history, load_history, history_file_path};
 
-        // Clear any existing history
-        let _ = std::fs::remove_file(history_file_path());
+        struct RestoreHistory(Vec<u8>);
+        impl Drop for RestoreHistory {
+            fn drop(&mut self) {
+                if self.0.is_empty() {
+                    // No file before the test — remove the test's leftovers.
+                    let _ = std::fs::remove_file(history_file_path());
+                } else {
+                    let _ = std::fs::write(history_file_path(), &self.0);
+                }
+            }
+        }
+        let _restore = RestoreHistory(std::fs::read(history_file_path()).unwrap_or_default());
 
         let record = ConnectionRecord {
             host_name: "Test Server".to_string(),
