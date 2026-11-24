@@ -81,7 +81,8 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libfontconfig1-dev
+          # libpam0g-dev: local_auth/linux.rs links PAM for owner verification
+          sudo apt-get install -y libxkbcommon-dev libfontconfig1-dev libpam0g-dev
 
       - name: Build release
         run: cargo build --release
@@ -126,11 +127,21 @@ jobs:
       - name: Install NSIS
         # Unconditional: makensis's presence on the windows-2025 image is
         # uncertain (actions/runner-images#11754); choco is idempotent.
+        # --fail-on-unfound turns a flaky chocolatey feed (a 504 during the
+        # v0.19.5 run printed "Unable to find package 'nsis'" yet exited 0,
+        # leaving the step green) into a hard failure here instead of a
+        # mystery makensis-not-found in the packaging step.
         # choco adds the install dir to the MACHINE path, which later steps
-        # of this job never re-read — publish it into the job's PATH.
+        # of this job never re-read — publish it into the job's PATH after
+        # asserting the binary actually landed.
         run: |
-          choco install nsis -y --no-progress
-          Add-Content $env:GITHUB_PATH "${env:ProgramFiles(x86)}\NSIS"
+          choco install nsis -y --no-progress --fail-on-unfound
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $nsisDir = "${env:ProgramFiles(x86)}\NSIS"
+          if (-not (Test-Path "$nsisDir\makensis.exe")) {
+            throw "makensis.exe not found in $nsisDir after choco install"
+          }
+          Add-Content $env:GITHUB_PATH $nsisDir
 
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
