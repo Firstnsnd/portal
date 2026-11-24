@@ -344,6 +344,7 @@ pub fn t(key: &str) -> &'static str {
         "owner_verify_reason_delete" => "验证你是本机拥有者后，才能删除此受保护主机",
         "owner_verify_reason_sftp" => "验证你是本机拥有者后，才能将文件面板连接到此受保护主机",
         "owner_verify_reason_reconnect" => "验证你是本机拥有者后，才能重新连接此受保护主机",
+        "owner_verify_reason_keychain" => "验证你是本机拥有者后，才能管理钥匙串凭据",
         _ => "???",
     }
 }
@@ -351,6 +352,8 @@ pub fn t(key: &str) -> &'static str {
 pub fn tf(key: &str, arg: &str) -> String {
     match key {
         "delete_confirm" => format!("删除 \"{}\"？", arg),
+        "delete_credential_bound_warning" => format!("该凭据仍被以下主机使用：{}。删除后这些主机的已保存登录将失效", arg),
+        "credential_bound_hint" => format!("被 {} 台主机使用——编辑会影响它们的已保存登录", arg),
         "delete_file_confirm" => format!("将永久删除 \"{}\"", arg),
         "delete_items_confirm" => format!("将永久删除 {} 个项目", arg),
         "n_selected" => format!("已选择 {} 项", arg),

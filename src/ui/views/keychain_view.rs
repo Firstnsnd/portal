@@ -18,6 +18,10 @@ pub fn render_keychain_view(
     _ui: &mut egui::Ui,
     cx: &mut WindowContext,
 ) -> ViewActions {
+    // Drawer-open requests are routed through the app layer, which runs
+    // the owner gate before any keychain operation proceeds.
+    let mut new_credential_requested = false;
+    let mut edit_credential_request: Option<String> = None;
     // Top navigation bar
     egui::TopBottomPanel::top("keychain_nav_bar")
         .frame(egui::Frame {
@@ -34,7 +38,7 @@ pub fn render_keychain_view(
                     .strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(widgets::text_button(cx.language.t("new_credential"), cx.theme.accent)).clicked() {
-                        window.credential_dialog.open_new();
+                        new_credential_requested = true;
                     }
                 });
             });
@@ -191,7 +195,7 @@ pub fn render_keychain_view(
                             }
 
                             if resp.clicked() {
-                                window.credential_dialog.open_edit(cred);
+                                edit_credential_request = Some(cred.id.clone());
                             }
                         }
 
@@ -207,6 +211,13 @@ pub fn render_keychain_view(
             .find(|c| c.id == *delete_id)
             .map(|c| c.name.clone())
             .unwrap_or_default();
+        // Isolation transparency: list the hosts still bound to this
+        // credential — deletion unbinds them all, so their saved logins
+        // stop working until a new credential is assigned.
+        let bound_hosts: Vec<String> = cx.hosts.iter()
+            .filter(|h| h.credential_id.as_ref() == Some(delete_id))
+            .map(|h| h.name.clone())
+            .collect();
         let mut open = true;
         egui::Window::new("delete_credential")
             .open(&mut open)
@@ -225,6 +236,12 @@ pub fn render_keychain_view(
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new(cx.language.tf("delete_confirm", &cred_name)).color(cx.theme.fg_primary).size(FONT_BASE));
                 ui.add_space(SPACE_XS);
+                if !bound_hosts.is_empty() {
+                    ui.label(egui::RichText::new(
+                        cx.language.tf("delete_credential_bound_warning", &bound_hosts.join(", ")),
+                    ).color(cx.theme.red).size(FONT_SM));
+                    ui.add_space(SPACE_XS);
+                }
                 ui.label(egui::RichText::new(cx.language.t("confirm_delete")).color(cx.theme.fg_dim).size(FONT_SM));
                 ui.add_space(SPACE_LG);
 
@@ -246,16 +263,20 @@ pub fn render_keychain_view(
         }
     }
 
-    if let Some(id) = credential_to_delete {
-        cx.credentials.retain(|c| c.id != id);
-        let actions = ViewActions {
-            delete_credential: Some(id),
-            ..Default::default()
-        };
-        return actions;
+    // The view only REQUESTS the deletion — the credential survives until
+    // the app layer's owner gate has actually passed (verification may be
+    // declined), so it must not be retained here.
+    let mut actions = ViewActions::default();
+    if new_credential_requested {
+        actions.new_credential = true;
     }
-
-    ViewActions::default()
+    if let Some(id) = edit_credential_request {
+        actions.edit_credential = Some(id);
+    }
+    if let Some(id) = credential_to_delete {
+        actions.delete_credential = Some(id);
+    }
+    actions
 }
 
 /// Render the add/edit credential drawer (shadcn/ui style)
@@ -327,6 +348,20 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                     egui::Frame::none()
                         .inner_margin(egui::Margin::symmetric(widgets::FORM_LEFT_MARGIN, 0.0))
                         .show(ui, |ui| {
+                            // Sharing transparency: editing a bound credential
+                            // changes the saved login for every host that uses it.
+                            if let Some(edit_id) = &window.credential_dialog.edit_id {
+                                let bound = cx.hosts.iter()
+                                    .filter(|h| h.credential_id.as_ref() == Some(edit_id))
+                                    .count();
+                                if bound > 0 {
+                                    ui.label(egui::RichText::new(
+                                        cx.language.tf("credential_bound_hint", &bound.to_string()),
+                                    ).size(11.0).color(cx.theme.fg_dim));
+                                    ui.add_space(widgets::SPACING_FIELD);
+                                }
+                            }
+
                             // Credential type selector
                             ui.vertical(|ui| {
                                 widgets::form_label(ui, cx.language.t("credential_type"), true, cx.theme);
@@ -505,7 +540,17 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                             window.credential_dialog.error = msg.clone();
                             window.notifications.push(crate::ssh::AppNotification::warning(msg));
                         } else {
+                        // Writing the credential store (entry + OS keychain
+                        // secrets) is a keychain operation: park the save
+                        // behind owner verification. The app layer consumes
+                        // gate_request, runs the gate, and on success re-arms
+                        // gate_granted so the save body below re-runs.
                         window.credential_dialog.error.clear();
+                        window.credential_dialog.gate_request = true;
+                        }
+                    }
+                    if window.credential_dialog.gate_granted {
+                        window.credential_dialog.gate_granted = false;
 
                         use crate::config::{Credential, store_credential_secret};
                         use uuid::Uuid;
@@ -606,9 +651,13 @@ pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx:
                                 }
                             }
                         }
+                        // Persist immediately: nothing else saves
+                        // credentials.json for the drawer path, and a missed
+                        // save would leave hosts' credential_ids dangling
+                        // after a restart.
+                        crate::config::save_credentials(cx.credentials_file, cx.credentials);
                         window.credential_dialog.open = false;
                         window.credential_dialog.edit_id = None;
-                        }
                     }
                     ui.add_space(8.0);
                     if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {

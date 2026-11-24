@@ -326,6 +326,7 @@ pub fn t(key: &str) -> &'static str {
         "owner_verify_reason_delete" => "Verifica que eres el propietario de este equipo para eliminar este host protegido",
         "owner_verify_reason_sftp" => "Verifica que eres el propietario de este equipo para conectar el panel de archivos a este host protegido",
         "owner_verify_reason_reconnect" => "Verifica que eres el propietario de este equipo para reconectar este host protegido",
+        "owner_verify_reason_keychain" => "Verifica que eres el propietario de este equipo para gestionar las credenciales del llavero",
         _ => "???",
     }
 }
@@ -333,6 +334,8 @@ pub fn t(key: &str) -> &'static str {
 pub fn tf(key: &str, arg: &str) -> String {
     match key {
         "delete_confirm" => format!("¿Eliminar \"{}\"?", arg),
+        "delete_credential_bound_warning" => format!("Aún usado por: {}. Al eliminarlo, los inicios de sesión guardados de estos hosts quedan sin credencial", arg),
+        "credential_bound_hint" => format!("Usado por {} host(s) — editarlo cambia su inicio de sesión guardado", arg),
         "delete_file_confirm" => format!("¿Eliminar permanentemente \"{}\"?", arg),
         "delete_items_confirm" => format!("¿Eliminar permanentemente {} elementos?", arg),
         "n_selected" => format!("{} seleccionados", arg),

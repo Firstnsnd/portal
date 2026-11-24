@@ -326,6 +326,7 @@ pub fn t(key: &str) -> &'static str {
         "owner_verify_reason_delete" => "この保護されたホストを削除するには、このコンピュータの所有者であることを確認してください",
         "owner_verify_reason_sftp" => "ファイルパネルをこの保護されたホストに接続するには、このコンピュータの所有者であることを確認してください",
         "owner_verify_reason_reconnect" => "この保護されたホストに再接続するには、このコンピュータの所有者であることを確認してください",
+        "owner_verify_reason_keychain" => "キーチェーンの認証情報を管理するには、このコンピュータの所有者であることを確認してください",
         _ => "???",
     }
 }
@@ -333,6 +334,8 @@ pub fn t(key: &str) -> &'static str {
 pub fn tf(key: &str, arg: &str) -> String {
     match key {
         "delete_confirm" => format!("「{}」を削除しますか？", arg),
+        "delete_credential_bound_warning" => format!("次のホストがまだ使用中：{}。削除するとこれらのホストの保存済みログインが無効になります", arg),
+        "credential_bound_hint" => format!("{} 台のホストで使用中——編集するとそれらの保存済みログインに影響します", arg),
         "delete_file_confirm" => format!("\"{}\" を完全に削除します", arg),
         "delete_items_confirm" => format!("{}件を完全に削除します", arg),
         "n_selected" => format!("{}件選択中", arg),

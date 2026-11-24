@@ -1275,6 +1275,14 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
         }
     }
 
+    // A parked save whose owner verification passed re-runs itself — the
+    // user's Save click already happened; don't make them click again.
+    let gate_granted = window.add_host_dialog.save_gate_granted;
+    if gate_granted {
+        window.add_host_dialog.save_gate_granted = false;
+        save_clicked = true;
+    }
+
     // Handle save
     if save_clicked {
         let name = window.add_host_dialog.name.trim().to_owned();
@@ -1314,20 +1322,62 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
             return;
         }
 
+        // Writing an inline credential or a typed proxy password touches the
+        // system keychain — every keychain operation clears the owner gate
+        // (same 5-minute grace window as protected-host actions). The save is
+        // parked; the app layer re-runs it via gate_granted once verified.
+        let touches_keychain =
+            matches!(window.add_host_dialog.credential_mode, CredentialMode::Inline)
+            || (window.add_host_dialog.proxy_kind.is_some()
+                && !window.add_host_dialog.proxy_password.is_empty());
+        if touches_keychain && !gate_granted {
+            window.add_host_dialog.save_gate_request = true;
+            return;
+        }
+
+        // Isolation: the credential currently bound to THIS host and shared
+        // with nobody. If the save stops using it (mode switch to None or
+        // Existing, empty inline password) it is deleted rather than
+        // stranded; if the save replaces its content, it is updated in place
+        // instead of accumulating a new orphan entry per edit.
+        let own_cid = window
+            .add_host_dialog
+            .edit_index
+            .and_then(|idx| cx.hosts.get(idx))
+            .and_then(|h| h.credential_id.clone())
+            .filter(|cid| {
+                cx.hosts.iter()
+                    .filter(|h| h.credential_id.as_deref() == Some(cid.as_str()))
+                    .count()
+                    <= 1
+            });
+
         let credential_id = match window.add_host_dialog.credential_mode {
             CredentialMode::None => None,
             CredentialMode::Existing => window.add_host_dialog.selected_credential_id.clone(),
             CredentialMode::Inline => {
+                // Reuse: clear the old entry's secrets first — the new save
+                // may use a different name ("(password)" → "(key)") or
+                // secret kinds under the same credential id.
+                if let Some(cid) = &own_cid {
+                    if let Some(old) = cx.credentials.iter().find(|c| &c.id == cid) {
+                        crate::config::delete_credential_secrets(&old.id, &old.name);
+                    }
+                }
                 let cred = match window.add_host_dialog.auth_method {
                     AuthMethodChoice::Password => {
                         let pw = window.add_host_dialog.password.clone();
                         if pw.is_empty() {
                             None
                         } else {
-                            let cred = crate::config::Credential::new_password(
+                            let mut cred = crate::config::Credential::new_password(
                                 format!("{} (password)", name),
                                 window.add_host_dialog.username.trim().to_owned(),
                             );
+                            // Keep this host's own credential id stable.
+                            if let Some(cid) = &own_cid {
+                                cred.id = cid.clone();
+                            }
                             crate::config::store_credential_secret(&cred.id, &cred.name, "password", &pw);
                             Some(cred)
                         }
@@ -1359,6 +1409,9 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             false,
                             has_passphrase,
                         );
+                        if let Some(cid) = &own_cid {
+                            cred.id = cid.clone();
+                        }
                         if !key_content.is_empty() {
                             crate::config::store_credential_secret(&cred.id, &cred.name, "privatekey", &key_content);
                             if let crate::config::CredentialType::SshKey { ref mut key_in_keychain, .. } = cred.credential_type {
@@ -1370,22 +1423,53 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                         }
                         Some(cred)
                     }
-                    AuthMethodChoice::Agent => Some(crate::config::Credential::new_agent(
-                        format!("{} (agent)", name),
-                        window.add_host_dialog.username.trim().to_owned(),
-                    )),
+                    AuthMethodChoice::Agent => {
+                        let mut cred = crate::config::Credential::new_agent(
+                            format!("{} (agent)", name),
+                            window.add_host_dialog.username.trim().to_owned(),
+                        );
+                        if let Some(cid) = &own_cid {
+                            cred.id = cid.clone();
+                        }
+                        Some(cred)
+                    }
                 };
 
                 if let Some(cred) = cred {
                     let id = cred.id.clone();
-                    cx.credentials.push(cred);
-                    // Note: save_credentials will be handled by the caller
+                    match own_cid {
+                        // In-place replace keeps the binding id stable — a
+                        // fresh credential per edit would orphan the old one.
+                        Some(_) => {
+                            let mut cred = cred;
+                            if let Some(slot) = cx.credentials.iter_mut().find(|c| c.id == id) {
+                                cred.created_at = slot.created_at;
+                                *slot = cred;
+                            } else {
+                                cx.credentials.push(cred);
+                            }
+                        }
+                        None => cx.credentials.push(cred),
+                    }
                     Some(id)
                 } else {
                     None
                 }
             }
         };
+
+        // The previously-owned credential is no longer bound (mode switch to
+        // None/Existing, or an empty inline password) — delete it instead of
+        // stranding it on the Keychain page. The reuse path above keeps the
+        // same id, so it never reaches this.
+        if let Some(old) = &own_cid {
+            if credential_id.as_deref() != Some(old.as_str()) {
+                if let Some(cred) = cx.credentials.iter().find(|c| &c.id == old) {
+                    crate::config::delete_credential_secrets(&cred.id, &cred.name);
+                }
+                cx.credentials.retain(|c| &c.id != old);
+            }
+        }
 
         let mut entry = HostEntry::new_ssh(
             name,
@@ -1453,7 +1537,11 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
         // Persist immediately (the caller path through ViewActions is
         // unreliable here because the drawer renders alongside the page,
         // not inside the view-routing switch that collects ViewActions).
+        // Credentials are saved too — the inline branch creates/updates
+        // credential entries, and a missed save would leave hosts'
+        // credential_ids dangling after a restart.
         crate::config::save_hosts(cx.hosts_file, cx.hosts);
+        crate::config::save_credentials(cx.credentials_file, cx.credentials);
         window.add_host_dialog.reset();
     }
 }

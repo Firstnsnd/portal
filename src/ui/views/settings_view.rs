@@ -110,7 +110,7 @@ impl PortalApp {
         crate::config::save_settings(&settings);
     }
 
-    pub fn show_settings_view(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+    pub fn show_settings_view(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, window_idx: usize) {
         let theme = self.theme.clone();
         let lang = self.language;
         let mut changed = false;
@@ -191,7 +191,7 @@ impl PortalApp {
                                         self.render_terminal_section(ui, &theme, lang, &mut changed);
                                     }
                                     SettingsSection::Ai => {
-                                        self.render_ai_section(ui, &theme, lang, &mut changed);
+                                        self.render_ai_section(ui, &theme, lang, &mut changed, window_idx);
                                     }
                                     SettingsSection::Shortcuts => {
                                         self.render_shortcuts_section(ctx, ui, &theme, lang, &mut changed);
@@ -450,6 +450,7 @@ impl PortalApp {
         theme: &crate::ui::theme::ThemeColors,
         lang: crate::ui::i18n::Language,
         changed: &mut bool,
+        window_idx: usize,
     ) {
         ui.label(egui::RichText::new(lang.t("llm")).color(theme.fg_primary).size(14.0).strong());
         ui.add_space(SPACE_XS);
@@ -533,14 +534,14 @@ impl PortalApp {
                     .min_size(egui::vec2(52.0, 26.0)),
             ).clicked();
             if save_clicked && !self.llm_key_draft.trim().is_empty() {
-                let backend = match self.llm_config.backend {
-                    crate::llm::types::LlmBackend::OpenAiCompatible => "openai",
-                    crate::llm::types::LlmBackend::Anthropic => "anthropic",
-                };
-                if crate::config::store_llm_api_key(backend, self.llm_key_draft.trim()) {
-                    self.llm_config.has_api_key = true;
-                    self.llm_key_draft.clear();
-                    *changed = true;
+                // Storing the AI API key writes the OS keychain — owner-gated
+                // like every other keychain operation.
+                if self.owner_gate_or_request(
+                    window_idx,
+                    crate::ui::state::owner_gate::PendingOwnerAction::SaveLlmKey,
+                    "owner_verify_reason_keychain",
+                ) {
+                    self.store_llm_key_from_draft();
                 }
             }
             let _ = resp;
@@ -548,18 +549,43 @@ impl PortalApp {
 
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(lang.t("llm_api_key_desc")).color(theme.fg_dim).size(FONT_SM));
-            if self.llm_config.has_api_key
-                && ui.add(egui::Button::new(egui::RichText::new(lang.t("llm_api_key_clear")).color(theme.fg_dim).size(FONT_SM)).frame(false)).clicked()
+            let clear_clicked = self.llm_config.has_api_key
+                && ui.add(egui::Button::new(egui::RichText::new(lang.t("llm_api_key_clear")).color(theme.fg_dim).size(FONT_SM)).frame(false)).clicked();
+            if clear_clicked
+                && self.owner_gate_or_request(
+                    window_idx,
+                    crate::ui::state::owner_gate::PendingOwnerAction::ClearLlmKey,
+                    "owner_verify_reason_keychain",
+                )
             {
-                let backend = match self.llm_config.backend {
-                    crate::llm::types::LlmBackend::OpenAiCompatible => "openai",
-                    crate::llm::types::LlmBackend::Anthropic => "anthropic",
-                };
-                crate::config::delete_llm_api_key(backend);
-                self.llm_config.has_api_key = false;
-                *changed = true;
+                self.clear_llm_key_now();
             }
         });
+    }
+
+    /// The keychain write behind the AI API-key save button — shared by the
+    /// immediate (already-verified) path and the gate dispatch.
+    pub(crate) fn store_llm_key_from_draft(&mut self) {
+        let backend = match self.llm_config.backend {
+            crate::llm::types::LlmBackend::OpenAiCompatible => "openai",
+            crate::llm::types::LlmBackend::Anthropic => "anthropic",
+        };
+        if crate::config::store_llm_api_key(backend, self.llm_key_draft.trim()) {
+            self.llm_config.has_api_key = true;
+            self.llm_key_draft.clear();
+            self.save_settings_to_disk();
+        }
+    }
+
+    /// The keychain delete behind the AI API-key clear button.
+    pub(crate) fn clear_llm_key_now(&mut self) {
+        let backend = match self.llm_config.backend {
+            crate::llm::types::LlmBackend::OpenAiCompatible => "openai",
+            crate::llm::types::LlmBackend::Anthropic => "anthropic",
+        };
+        crate::config::delete_llm_api_key(backend);
+        self.llm_config.has_api_key = false;
+        self.save_settings_to_disk();
     }
 
     /// Shortcuts section: per-binding recorders + reset-to-defaults.

@@ -596,6 +596,7 @@ mod tests {
             &mut snippets,
             &mut history,
             &hosts_file,
+            &hosts_file,
             &theme,
             Language::English,
             &runtime,

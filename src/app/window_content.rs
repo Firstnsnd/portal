@@ -393,6 +393,7 @@ impl PortalApp {
                 &mut self.snippets,
                 &mut self.connection_history,
                 &self.hosts_file,
+                &self.credentials_file,
                 &self.theme,
                 self.language,
                 &self.runtime,
@@ -412,6 +413,24 @@ impl PortalApp {
             if let Some(idx) = dup {
                 self.gate_duplicate_host(window_idx, idx);
             }
+        }
+        // Keychain-writing saves park themselves on their dialogs (the
+        // drawers render outside the ViewActions routing): the credential
+        // drawer's Save, and the host drawer's Save when it stores an
+        // inline credential or a proxy password. The owner gate decides —
+        // verified already, or prompt now — and re-arms the granted flag
+        // so the drawer re-runs its save next frame.
+        let cred_save_request = std::mem::take(
+            &mut self.windows[window_idx].credential_dialog.gate_request,
+        );
+        let host_save_request = std::mem::take(
+            &mut self.windows[window_idx].add_host_dialog.save_gate_request,
+        );
+        if cred_save_request {
+            self.gate_credential_save(window_idx);
+        }
+        if host_save_request {
+            self.gate_host_keychain_save(window_idx);
         }
 
         // ── Central Panel ──
@@ -437,6 +456,7 @@ impl PortalApp {
                                 &mut self.snippets,
                                 &mut self.connection_history,
                                 &self.hosts_file,
+                                &self.credentials_file,
                                 &self.theme,
                                 self.language,
                                 &self.runtime,
@@ -457,6 +477,7 @@ impl PortalApp {
                                 &mut self.snippets,
                                 &mut self.connection_history,
                                 &self.hosts_file,
+                                &self.credentials_file,
                                 &self.theme,
                                 self.language,
                                 &self.runtime,
@@ -476,6 +497,7 @@ impl PortalApp {
                                 &mut self.snippets,
                                 &mut self.connection_history,
                                 &self.hosts_file,
+                                &self.credentials_file,
                                 &self.theme,
                                 self.language,
                                 &self.runtime,
@@ -488,7 +510,7 @@ impl PortalApp {
                         self.handle_view_actions(view_actions, window_idx, ctx);
                     }
                     AppView::Settings => {
-                        self.show_settings_view(ctx, ui);
+                        self.show_settings_view(ctx, ui, window_idx);
                     }
                     AppView::Snippets => {
                         let view_actions = {
@@ -498,6 +520,7 @@ impl PortalApp {
                                 &mut self.snippets,
                                 &mut self.connection_history,
                                 &self.hosts_file,
+                                &self.credentials_file,
                                 &self.theme,
                                 self.language,
                                 &self.runtime,
@@ -1666,10 +1689,15 @@ impl PortalApp {
         if let Some(idx) = actions.connect_sftp_right {
             self.gate_connect_sftp(window_idx, false, idx);
         }
+        if actions.new_credential {
+            self.gate_keychain_new(window_idx);
+        }
+        if let Some(id) = actions.edit_credential {
+            self.gate_keychain_edit(window_idx, id);
+        }
         if let Some(id) = &actions.delete_credential {
-            self.credentials.retain(|c| c.id != **id);
-            config::delete_credential_secrets(id, id.as_str());
-            config::save_credentials(&self.credentials_file, &self.credentials);
+            // Gated + unbinds referencing hosts (delete_credential_everywhere).
+            self.gate_delete_credential(window_idx, id.clone());
         }
     }
 }

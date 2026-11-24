@@ -76,6 +76,14 @@ pub struct AddHostDialog {
     /// duplication must go through the owner gate, which the drawer (no
     /// ViewActions channel) cannot do itself. Consumed by the app layer.
     pub duplicate_gate_request: Option<usize>,
+    /// Set by the drawer's Save when it would write keychain secrets
+    /// (inline credential / typed proxy password): keychain operations must
+    /// clear the owner gate first. Consumed by the app layer each frame.
+    pub save_gate_request: bool,
+    /// Owner verification passed for a parked save — the drawer re-runs its
+    /// save body next frame and clears this. Cleared by every drawer open
+    /// so a stale grant can never bypass the gate on a later save.
+    pub save_gate_granted: bool,
     pub test_conn_state: TestConnState,
     pub test_conn_result: TestConnResult,
     /// Show "Remove old key" button when host key verification fails
@@ -130,6 +138,8 @@ impl Default for AddHostDialog {
             auto_record: false,
             protected: false,
             duplicate_gate_request: None,
+            save_gate_request: false,
+            save_gate_granted: false,
             test_conn_state: TestConnState::Idle,
             test_conn_result: None,
             show_remove_key_button: false,
@@ -194,6 +204,8 @@ impl AddHostDialog {
         self.auto_record = false;
         self.protected = false;
         self.duplicate_gate_request = None;
+        self.save_gate_request = false;
+        self.save_gate_granted = false;
         self.test_conn_state = TestConnState::Idle;
         self.test_conn_result = None;
         self.show_remove_key_button = false;
@@ -238,6 +250,11 @@ impl AddHostDialog {
 
     /// Shared prefill used by open_edit and open_duplicate.
     fn fill_from_host(&mut self, host: &HostEntry) {
+        // Unlike open_new (full reset), the edit/duplicate prefill keeps
+        // most form state — but a parked/stale gate grant from an earlier
+        // save must never carry over and bypass the keychain gate.
+        self.save_gate_request = false;
+        self.save_gate_granted = false;
         self.name = host.name.clone();
         self.host = host.host.clone();
         self.port = host.port.to_string();
@@ -325,6 +342,13 @@ pub struct CredentialDialog {
     pub key_source: KeySourceChoice,
     pub key_passphrase: String,
     pub error: String,
+    /// Set by the drawer's Save (after field validation): writing the
+    /// credential store is a keychain operation, so the save parks behind
+    /// owner verification. Consumed by the app layer each frame.
+    pub gate_request: bool,
+    /// Owner verification passed for a parked save — the drawer re-runs its
+    /// save body next frame and clears this. Cleared on every drawer open.
+    pub gate_granted: bool,
 }
 
 impl Default for CredentialDialog {
@@ -342,6 +366,8 @@ impl Default for CredentialDialog {
             key_source: KeySourceChoice::LocalFile,
             key_passphrase: String::new(),
             error: String::new(),
+            gate_request: false,
+            gate_granted: false,
         }
     }
 }
@@ -358,6 +384,10 @@ impl CredentialDialog {
 
     pub fn open_edit(&mut self, cred: &crate::config::Credential) {
         self.open = true;
+        // A stale grant from an earlier save must never carry over and
+        // bypass the keychain gate (open_new resets the whole struct).
+        self.gate_request = false;
+        self.gate_granted = false;
         self.edit_id = Some(cred.id.clone());
         self.name = cred.name.clone();
         self.error.clear();

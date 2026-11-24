@@ -326,6 +326,7 @@ pub fn t(key: &str) -> &'static str {
         "owner_verify_reason_delete" => "보호된 호스트를 삭제하려면 이 컴퓨터의 소유자임을 확인하세요",
         "owner_verify_reason_sftp" => "파일 패널을 보호된 호스트에 연결하려면 이 컴퓨터의 소유자임을 확인하세요",
         "owner_verify_reason_reconnect" => "보호된 호스트에 다시 연결하려면 이 컴퓨터의 소유자임을 확인하세요",
+        "owner_verify_reason_keychain" => "키체인 자격 증명을 관리하려면 이 컴퓨터의 소유자임을 확인하세요",
         _ => "???",
     }
 }
@@ -333,6 +334,8 @@ pub fn t(key: &str) -> &'static str {
 pub fn tf(key: &str, arg: &str) -> String {
     match key {
         "delete_confirm" => format!("\"{}\"을(를) 삭제하시겠습니까?", arg),
+        "delete_credential_bound_warning" => format!("다음 호스트에서 아직 사용 중: {}. 삭제하면 이 호스트들의 저장된 로그인이 무효화됩니다", arg),
+        "credential_bound_hint" => format!("{}개 호스트에서 사용 중——편집하면 해당 호스트의 저장된 로그인에 영향을 줍니다", arg),
         "delete_file_confirm" => format!("\"{}\"이(가) 영구 삭제됩니다", arg),
         "delete_items_confirm" => format!("{}개 항목을 영구 삭제합니다", arg),
         "n_selected" => format!("{}개 선택됨", arg),

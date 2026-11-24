@@ -326,6 +326,7 @@ pub fn t(key: &str) -> &'static str {
         "owner_verify_reason_delete" => "Vérifiez que vous êtes le propriétaire de cet ordinateur pour supprimer cet hôte protégé",
         "owner_verify_reason_sftp" => "Vérifiez que vous êtes le propriétaire de cet ordinateur pour connecter le panneau de fichiers à cet hôte protégé",
         "owner_verify_reason_reconnect" => "Vérifiez que vous êtes le propriétaire de cet ordinateur pour reconnecter cet hôte protégé",
+        "owner_verify_reason_keychain" => "Vérifiez que vous êtes le propriétaire de cet ordinateur pour gérer les identifiants du trousseau",
         _ => "???",
     }
 }
@@ -333,6 +334,8 @@ pub fn t(key: &str) -> &'static str {
 pub fn tf(key: &str, arg: &str) -> String {
     match key {
         "delete_confirm" => format!("Supprimer \"{}\" ?", arg),
+        "delete_credential_bound_warning" => format!("Encore utilisé par : {}. Le supprimer invalide les connexions enregistrées de ces hôtes", arg),
+        "credential_bound_hint" => format!("Utilisé par {} hôte(s) — le modifier change leur connexion enregistrée", arg),
         "delete_file_confirm" => format!("Supprimer définitivement \"{}\" ?", arg),
         "delete_items_confirm" => format!("Supprimer définitivement {} éléments ?", arg),
         "n_selected" => format!("{} sélectionnés", arg),

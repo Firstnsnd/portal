@@ -92,10 +92,27 @@ impl super::PortalApp {
                 "owner_verify_reason_delete",
             )
         {
-            let host = self.hosts.remove(index);
-            config::delete_host_credentials(&host);
-            self.save_hosts();
+            self.delete_host_at(index);
         }
+    }
+
+    /// The host deletion body (gate helper + dispatch). Removing a host also
+    /// removes a credential that ONLY it referenced — leaving it behind would
+    /// strand a keychain entry no host uses, exactly the cross-host drift the
+    /// per-host isolation rule forbids. Shared credentials survive.
+    fn delete_host_at(&mut self, index: usize) {
+        let host = self.hosts.remove(index);
+        config::delete_host_credentials(&host);
+        if let Some(cid) = &host.credential_id {
+            if !self.hosts.iter().any(|h| h.credential_id.as_ref() == Some(cid)) {
+                if let Some(cred) = self.credentials.iter().find(|c| &c.id == cid) {
+                    config::delete_credential_secrets(&cred.id, &cred.name);
+                }
+                self.credentials.retain(|c| &c.id != cid);
+                config::save_credentials(&self.credentials_file, &self.credentials);
+            }
+        }
+        self.save_hosts();
     }
 
     /// Gate an SFTP panel connect (`left` = left browser, else right).
@@ -138,6 +155,111 @@ impl super::PortalApp {
             )
         {
             self.reconnect_session(window_idx, tab, session, remove_known_key);
+        }
+    }
+
+    // ── Keychain operations ────────────────────────────────────────────
+    // The credential store outlives any single host: one credential can
+    // back several hosts, so an unverified edit or delete there can
+    // silently change other hosts' logins. Every keychain operation —
+    // opening the drawers, saving, deleting, and keychain-writing host
+    // saves — clears the same owner gate as protected-host actions and
+    // shares their sudo-style grace window.
+
+    /// Gate opening the new-credential drawer (Keychain page button).
+    pub(crate) fn gate_keychain_new(&mut self, window_idx: usize) {
+        if self.owner_gate_or_request(
+            window_idx,
+            PendingOwnerAction::KeychainNew,
+            "owner_verify_reason_keychain",
+        ) {
+            if let Some(w) = self.windows.get_mut(window_idx) {
+                w.credential_dialog.open_new();
+            }
+        }
+    }
+
+    /// Gate opening the edit drawer for a credential.
+    pub(crate) fn gate_keychain_edit(&mut self, window_idx: usize, id: String) {
+        if self.owner_gate_or_request(
+            window_idx,
+            PendingOwnerAction::KeychainEdit { id: id.clone() },
+            "owner_verify_reason_keychain",
+        ) {
+            self.open_credential_drawer(window_idx, &id);
+        }
+    }
+
+    fn open_credential_drawer(&mut self, window_idx: usize, id: &str) {
+        if let (Some(w), Some(cred)) = (
+            self.windows.get_mut(window_idx),
+            self.credentials.iter().find(|c| c.id == id),
+        ) {
+            w.credential_dialog.open_edit(cred);
+        }
+    }
+
+    /// Gate deleting a credential: keychain secrets, the stored entry, and
+    /// every host binding. The unbind is part of deletion — a dangling
+    /// credential_id would fall back to legacy auth (None) and break the
+    /// host's login silently.
+    pub(crate) fn gate_delete_credential(&mut self, window_idx: usize, id: String) {
+        if self.owner_gate_or_request(
+            window_idx,
+            PendingOwnerAction::DeleteCredential { id: id.clone() },
+            "owner_verify_reason_keychain",
+        ) {
+            self.delete_credential_everywhere(&id);
+        }
+    }
+
+    /// The credential deletion body (gate helper + dispatch).
+    fn delete_credential_everywhere(&mut self, id: &str) {
+        if let Some(cred) = self.credentials.iter().find(|c| c.id == id) {
+            config::delete_credential_secrets(&cred.id, &cred.name);
+        }
+        self.credentials.retain(|c| c.id != id);
+        let mut unbound = false;
+        for host in &mut self.hosts {
+            if host.credential_id.as_deref() == Some(id) {
+                host.credential_id = None;
+                unbound = true;
+            }
+        }
+        if unbound {
+            self.save_hosts();
+        }
+        config::save_credentials(&self.credentials_file, &self.credentials);
+    }
+
+    /// Gate the credential drawer's Save (writes credentials.json + OS
+    /// keychain secrets). The drawer parks the validated save in
+    /// `gate_request`; once verification passes, `gate_granted` makes the
+    /// drawer re-run its save body next frame.
+    pub(crate) fn gate_credential_save(&mut self, window_idx: usize) {
+        if self.owner_gate_or_request(
+            window_idx,
+            PendingOwnerAction::SaveCredential,
+            "owner_verify_reason_keychain",
+        ) {
+            if let Some(w) = self.windows.get_mut(window_idx) {
+                w.credential_dialog.gate_granted = true;
+            }
+        }
+    }
+
+    /// Gate the host drawer's save when it writes keychain secrets (inline
+    /// credential / typed proxy password). Same parked-save handshake as
+    /// [`Self::gate_credential_save`], on `add_host_dialog`.
+    pub(crate) fn gate_host_keychain_save(&mut self, window_idx: usize) {
+        if self.owner_gate_or_request(
+            window_idx,
+            PendingOwnerAction::SaveHostKeychain,
+            "owner_verify_reason_keychain",
+        ) {
+            if let Some(w) = self.windows.get_mut(window_idx) {
+                w.add_host_dialog.save_gate_granted = true;
+            }
         }
     }
 
@@ -288,9 +410,7 @@ impl super::PortalApp {
             PendingOwnerAction::DeleteHost { index, name } => {
                 if self.hosts.get(index).is_some_and(|h| h.name == name) && !self.hosts[index].is_local
                 {
-                    let host = self.hosts.remove(index);
-                    config::delete_host_credentials(&host);
-                    self.save_hosts();
+                    self.delete_host_at(index);
                 }
             }
             PendingOwnerAction::ConnectSftp { left, host } => {
@@ -299,6 +419,31 @@ impl super::PortalApp {
             PendingOwnerAction::Reconnect { tab, session, remove_known_key } => {
                 self.reconnect_session(window_idx, tab, session, remove_known_key);
             }
+            PendingOwnerAction::KeychainNew => {
+                if let Some(w) = self.windows.get_mut(window_idx) {
+                    w.credential_dialog.open_new();
+                }
+            }
+            PendingOwnerAction::KeychainEdit { id } => {
+                self.open_credential_drawer(window_idx, &id);
+            }
+            PendingOwnerAction::DeleteCredential { id } => {
+                self.delete_credential_everywhere(&id);
+            }
+            PendingOwnerAction::SaveCredential => {
+                // Re-arm the drawer's save; it re-runs its own save body
+                // (drawer state lives on the window) next frame.
+                if let Some(w) = self.windows.get_mut(window_idx) {
+                    w.credential_dialog.gate_granted = true;
+                }
+            }
+            PendingOwnerAction::SaveHostKeychain => {
+                if let Some(w) = self.windows.get_mut(window_idx) {
+                    w.add_host_dialog.save_gate_granted = true;
+                }
+            }
+            PendingOwnerAction::SaveLlmKey => self.store_llm_key_from_draft(),
+            PendingOwnerAction::ClearLlmKey => self.clear_llm_key_now(),
         }
     }
 

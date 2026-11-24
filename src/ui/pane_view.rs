@@ -33,8 +33,15 @@ pub struct ViewActions {
     pub save_credentials: bool,
     /// Request to delete a host (index into hosts)
     pub delete_host: Option<usize>,
-    /// Request to delete a credential (id)
+    /// Request to delete a credential (id) — routed through the app layer:
+    /// keychain operations must clear the owner gate first, and the delete
+    /// body also unbinds every host that referenced the credential.
     pub delete_credential: Option<String>,
+    /// Request to open the new-credential drawer — owner-gated at the app
+    /// layer (all keychain operations require identity verification).
+    pub new_credential: bool,
+    /// Request to open the edit drawer for a credential (id) — owner-gated.
+    pub edit_credential: Option<String>,
     /// Request to open the edit drawer for a host — routed through the app
     /// layer because protected hosts must clear the owner gate first.
     pub request_edit_host: Option<usize>,
@@ -63,6 +70,11 @@ pub struct WindowContext<'a> {
 
     // File paths
     pub hosts_file: &'a PathBuf,
+    /// Credential store path — the credential drawer and host drawer save
+    /// credentials.json directly (the `save_credentials` ViewAction has no
+    /// sender for the drawer paths, which would drop every credential edit
+    /// on restart).
+    pub credentials_file: &'a PathBuf,
 
     // Settings and theme
     pub theme: &'a ThemeColors,
@@ -87,6 +99,7 @@ impl<'a> WindowContext<'a> {
         snippets: &'a mut Vec<Snippet>,
         connection_history: &'a mut Vec<ConnectionRecord>,
         hosts_file: &'a PathBuf,
+        credentials_file: &'a PathBuf,
         theme: &'a ThemeColors,
         language: Language,
         runtime: &'a tokio::runtime::Runtime,
@@ -104,6 +117,7 @@ impl<'a> WindowContext<'a> {
             connection_history,
             host_sftp_support,
             hosts_file,
+            credentials_file,
             theme,
             language,
             runtime,

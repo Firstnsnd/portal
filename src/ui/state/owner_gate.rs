@@ -76,6 +76,28 @@ pub enum PendingOwnerAction {
         session: usize,
         remove_known_key: bool,
     },
+    /// Open the new-credential drawer (Keychain page "+ New credential").
+    /// Every keychain operation clears the owner gate — one credential can
+    /// back several hosts, so an unverified edit can silently change other
+    /// hosts' logins.
+    KeychainNew,
+    /// Open the edit drawer for the credential with this id.
+    KeychainEdit { id: String },
+    /// The delete-credential body: keychain secrets, the stored entry, and
+    /// every host binding (dangling credential_ids would break logins).
+    DeleteCredential { id: String },
+    /// The credential drawer's save body. The drawer state lives on the
+    /// window, so dispatch just re-arms `credential_dialog.gate_granted`
+    /// and the drawer re-runs its own save next frame.
+    SaveCredential,
+    /// The host drawer's save body when it writes keychain secrets (inline
+    /// credential / typed proxy password). Same handshake, on
+    /// `add_host_dialog.save_gate_granted`.
+    SaveHostKeychain,
+    /// Store the AI API key from the settings draft (OS keychain write).
+    SaveLlmKey,
+    /// Remove the stored AI API key (OS keychain delete).
+    ClearLlmKey,
 }
 
 /// Per-window gate state (lives on `AppWindow`): one parked action, the
