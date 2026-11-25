@@ -98,6 +98,9 @@ pub enum PendingOwnerAction {
     SaveLlmKey,
     /// Remove the stored AI API key (OS keychain delete).
     ClearLlmKey,
+    /// Switch the sidebar view to the Keychain page — the door to the
+    /// credential store clears the owner gate at entry.
+    OpenKeychainView,
 }
 
 /// Per-window gate state (lives on `AppWindow`): one parked action, the

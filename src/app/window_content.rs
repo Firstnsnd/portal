@@ -214,7 +214,15 @@ impl PortalApp {
         if let Some(clicked_view) = crate::ui::views::nav_panel::show_nav_panel(
             ctx, current_view, &self.theme, &self.language, nav_id
         ) {
-            self.windows[window_idx].current_view = clicked_view;
+            // The Keychain page is the door to the credential store:
+            // entering it clears the owner gate (operations inside then run
+            // within the same sudo-style grace window). Re-clicking the
+            // already-open page must not re-prompt.
+            if clicked_view == AppView::Keychain && current_view != AppView::Keychain {
+                self.gate_open_keychain_view(window_idx);
+            } else {
+                self.windows[window_idx].current_view = clicked_view;
+            }
         }
 
         // ── Poll session notifications ──

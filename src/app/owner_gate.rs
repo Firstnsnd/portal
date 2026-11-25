@@ -16,6 +16,7 @@
 use crate::config::{self, HostEntry};
 use crate::ssh::AppNotification;
 use crate::ui::state::owner_gate::{GatePrompt, PendingOwnerAction};
+use crate::ui::types::dialogs::AppView;
 use crate::ui::types::session::{SessionKind, TerminalSession};
 
 impl super::PortalApp {
@@ -155,6 +156,22 @@ impl super::PortalApp {
             )
         {
             self.reconnect_session(window_idx, tab, session, remove_known_key);
+        }
+    }
+
+    /// Gate ENTERING the Keychain page (left sidebar). The page is the door
+    /// to the credential store: one verification at entry covers browsing
+    /// and all operations inside for the grace window; the per-operation
+    /// gates only re-fire after the window has expired.
+    pub(crate) fn gate_open_keychain_view(&mut self, window_idx: usize) {
+        if self.owner_gate_or_request(
+            window_idx,
+            PendingOwnerAction::OpenKeychainView,
+            "owner_verify_reason_keychain",
+        ) {
+            if let Some(w) = self.windows.get_mut(window_idx) {
+                w.current_view = AppView::Keychain;
+            }
         }
     }
 
@@ -444,6 +461,11 @@ impl super::PortalApp {
             }
             PendingOwnerAction::SaveLlmKey => self.store_llm_key_from_draft(),
             PendingOwnerAction::ClearLlmKey => self.clear_llm_key_now(),
+            PendingOwnerAction::OpenKeychainView => {
+                if let Some(w) = self.windows.get_mut(window_idx) {
+                    w.current_view = AppView::Keychain;
+                }
+            }
         }
     }
 
