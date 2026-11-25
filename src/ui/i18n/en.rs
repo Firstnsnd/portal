@@ -354,8 +354,14 @@ pub fn t(key: &str) -> &'static str {
 pub fn tf(key: &str, arg: &str) -> String {
     match key {
         "delete_confirm" => format!("Delete \"{}\"?", arg),
-        "delete_credential_bound_warning" => format!("Still used by: {}. Deleting it unbinds these hosts' saved logins.", arg),
-        "credential_bound_hint" => format!("Used by {} host(s) — editing it changes their saved login.", arg),
+        "delete_credential_bound_warning" => format!(
+            "Still used by: {}. Deleting it unbinds these hosts' saved logins.",
+            arg
+        ),
+        "credential_bound_hint" => format!(
+            "Used by {} host(s) — editing it changes their saved login.",
+            arg
+        ),
         "delete_file_confirm" => format!("Permanently delete \"{}\"?", arg),
         "delete_items_confirm" => format!("Permanently delete {} items?", arg),
         "n_selected" => format!("{} selected", arg),

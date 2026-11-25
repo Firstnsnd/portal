@@ -39,7 +39,11 @@ impl ShellIntegration for ExplorerIntegration {
 /// (registry key name, menu label, portal flag)
 const ACTIONS: [(&str, &str, &str); 2] = [
     ("PortalTabHere", "New Portal Tab Here", "--open-tab"),
-    ("PortalWindowHere", "New Portal Window Here", "--open-window"),
+    (
+        "PortalWindowHere",
+        "New Portal Window Here",
+        "--open-window",
+    ),
 ];
 
 const DIRECTORY_SHELL: &str = r"Directory\shell";
@@ -53,7 +57,10 @@ fn command_value(bin: &str, flag: &str) -> String {
 
 /// All registry key paths one action occupies (install + uninstall).
 fn key_paths(key: &str) -> [String; 2] {
-    [format!("{DIRECTORY_SHELL}\\{key}"), format!("{BACKGROUND_SHELL}\\{key}")]
+    [
+        format!("{DIRECTORY_SHELL}\\{key}"),
+        format!("{BACKGROUND_SHELL}\\{key}"),
+    ]
 }
 
 fn install() -> Result<(), String> {

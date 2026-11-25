@@ -6,8 +6,8 @@
 
 #[allow(clippy::module_inception)]
 mod tests {
-    use crate::terminal::{TerminalGrid, TerminalCell, CellAttrs};
-    use crate::ui::terminal::selection::{find_word_boundaries_in_row, find_word_boundaries};
+    use crate::terminal::{CellAttrs, TerminalCell, TerminalGrid};
+    use crate::ui::terminal::selection::{find_word_boundaries, find_word_boundaries_in_row};
 
     fn create_test_grid(cols: usize, rows: usize) -> TerminalGrid {
         TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024)
@@ -40,8 +40,8 @@ mod tests {
     fn test_word_selection_ascii_word() {
         let row = create_test_row("hello world test", 20);
         let (start, end) = find_word_boundaries_in_row(&row, 20, 6); // Click on 'w' in "world"
-        assert_eq!(start, 6);  // Start of "world"
-        assert_eq!(end, 10);   // End of "world" (inclusive)
+        assert_eq!(start, 6); // Start of "world"
+        assert_eq!(end, 10); // End of "world" (inclusive)
     }
 
     #[test]
@@ -214,8 +214,14 @@ mod tests {
             name: "Two-Factor Authentication".into(),
             instructions: "Enter code".into(),
             prompts: vec![
-                AuthPromptField { prompt: "Login:".into(), echo: true },
-                AuthPromptField { prompt: "OTP:".into(), echo: false },
+                AuthPromptField {
+                    prompt: "Login:".into(),
+                    echo: true,
+                },
+                AuthPromptField {
+                    prompt: "OTP:".into(),
+                    echo: false,
+                },
             ],
         }
     }
@@ -263,9 +269,18 @@ mod tests {
                 name: "t".into(),
                 instructions: String::new(),
                 prompts: vec![
-                    AuthPromptField { prompt: "a".into(), echo: true },
-                    AuthPromptField { prompt: "b".into(), echo: true },
-                    AuthPromptField { prompt: "c".into(), echo: false },
+                    AuthPromptField {
+                        prompt: "a".into(),
+                        echo: true,
+                    },
+                    AuthPromptField {
+                        prompt: "b".into(),
+                        echo: true,
+                    },
+                    AuthPromptField {
+                        prompt: "c".into(),
+                        echo: false,
+                    },
                 ],
             },
         );

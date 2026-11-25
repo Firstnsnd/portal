@@ -100,10 +100,22 @@ pub fn parse_remote(output: &str, snap: &mut MetricsSnapshot) -> Option<SystemMe
     let mut section = "";
     for line in output.lines() {
         let line = line.trim();
-        if line == "=M=" { section = "M"; continue; }
-        if line == "=N=" { section = "N"; continue; }
-        if line == "=L=" { section = "L"; continue; }
-        if line == "=C=" { section = "C"; continue; }
+        if line == "=M=" {
+            section = "M";
+            continue;
+        }
+        if line == "=N=" {
+            section = "N";
+            continue;
+        }
+        if line == "=L=" {
+            section = "L";
+            continue;
+        }
+        if line == "=C=" {
+            section = "C";
+            continue;
+        }
 
         match section {
             "M" => {
@@ -136,7 +148,8 @@ pub fn parse_remote(output: &str, snap: &mut MetricsSnapshot) -> Option<SystemMe
             }
             "C" => {
                 if line.starts_with("cpu ") {
-                    let vals: Vec<u64> = line.split_whitespace()
+                    let vals: Vec<u64> = line
+                        .split_whitespace()
                         .skip(1)
                         .filter_map(|s| s.parse().ok())
                         .collect();
@@ -182,9 +195,7 @@ pub fn parse_remote(output: &str, snap: &mut MetricsSnapshot) -> Option<SystemMe
 }
 
 fn parse_kb_value(line: &str) -> Option<u64> {
-    line.split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
+    line.split_whitespace().nth(1).and_then(|s| s.parse().ok())
 }
 
 fn delta_rate(current: Option<u64>, prev: Option<u64>) -> u64 {

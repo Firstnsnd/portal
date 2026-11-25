@@ -8,8 +8,7 @@ use super::{install_cjk_fallback, push_font};
 /// the first readable system CJK font as the fallback for both families.
 pub fn install_platform_fonts(fonts: &mut egui::FontDefinitions) {
     // Consolas: the stock terminal monospace, always present.
-    let system_root =
-        std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
     push_font(
         fonts,
         "Consolas",

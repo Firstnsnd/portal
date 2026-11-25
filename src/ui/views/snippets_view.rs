@@ -5,11 +5,11 @@
 use eframe::egui;
 
 // These types are defined in pane_view.rs
-use crate::ui::pane_view::{WindowContext, ViewActions};
-use crate::ui::pane::AppWindow;
-use crate::ui::theme::ThemeColors;
-use crate::ui::i18n::Language;
 use crate::config::Snippet;
+use crate::ui::i18n::Language;
+use crate::ui::pane::AppWindow;
+use crate::ui::pane_view::{ViewActions, WindowContext};
+use crate::ui::theme::ThemeColors;
 use crate::ui::tokens::*;
 use crate::ui::widgets;
 
@@ -32,16 +32,23 @@ pub fn render_snippets_view(
         })
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(cx.language.t("snippets"))
-                    .color(cx.theme.fg_dim)
-                    .size(FONT_BASE)
-                    .strong());
+                ui.label(
+                    egui::RichText::new(cx.language.t("snippets"))
+                        .color(cx.theme.fg_dim)
+                        .size(FONT_BASE)
+                        .strong(),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(widgets::text_button(
-                        cx.language.t("new_snippet"),
-                        cx.theme.accent
-                    )).clicked() {
-                        window.snippet_view_state.open_new(cx.language.t("snippet_default_group"));
+                    if ui
+                        .add(widgets::text_button(
+                            cx.language.t("new_snippet"),
+                            cx.theme.accent,
+                        ))
+                        .clicked()
+                    {
+                        window
+                            .snippet_view_state
+                            .open_new(cx.language.t("snippet_default_group"));
                     }
                 });
             });
@@ -66,7 +73,8 @@ pub fn render_snippets_view(
                         ui.add_space(ui.available_width() - 110.0);
 
                         // Collect groups
-                        let mut all_groups: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+                        let mut all_groups: std::collections::BTreeSet<String> =
+                            std::collections::BTreeSet::new();
                         for snippet in cx.snippets.iter() {
                             if !snippet.group.is_empty() {
                                 all_groups.insert(snippet.group.clone());
@@ -81,16 +89,34 @@ pub fn render_snippets_view(
                         };
 
                         egui::ComboBox::from_id_salt("snippet_group_filter")
-                            .selected_text(egui::RichText::new(group_label).color(cx.theme.accent).size(FONT_MD))
+                            .selected_text(
+                                egui::RichText::new(group_label)
+                                    .color(cx.theme.accent)
+                                    .size(FONT_MD),
+                            )
                             .width(90.0)
                             .show_ui(ui, |ui| {
                                 widgets::style_dropdown(ui, cx.theme);
-                                if widgets::dropdown_item(ui, cx.theme, cx.language.t("snippet_default_group"), window.snippet_view_state.group_filter.is_empty()).clicked() {
+                                if widgets::dropdown_item(
+                                    ui,
+                                    cx.theme,
+                                    cx.language.t("snippet_default_group"),
+                                    window.snippet_view_state.group_filter.is_empty(),
+                                )
+                                .clicked()
+                                {
                                     window.snippet_view_state.group_filter.clear();
                                     ui.close_menu();
                                 }
                                 for group in &all_groups {
-                                    if widgets::dropdown_item(ui, cx.theme, group.clone(), window.snippet_view_state.group_filter == *group).clicked() {
+                                    if widgets::dropdown_item(
+                                        ui,
+                                        cx.theme,
+                                        group.clone(),
+                                        window.snippet_view_state.group_filter == *group,
+                                    )
+                                    .clicked()
+                                    {
                                         window.snippet_view_state.group_filter = group.clone();
                                         ui.close_menu();
                                     }
@@ -100,15 +126,22 @@ pub fn render_snippets_view(
                         ui.add_space(SPACE_SM);
 
                         if !window.snippet_view_state.group_filter.is_empty()
-                            && ui.add(widgets::text_button(cx.language.t("clear_history"), cx.theme.accent)).clicked() {
-                                window.snippet_view_state.group_filter.clear();
-                            }
+                            && ui
+                                .add(widgets::text_button(
+                                    cx.language.t("clear_history"),
+                                    cx.theme.accent,
+                                ))
+                                .clicked()
+                        {
+                            window.snippet_view_state.group_filter.clear();
+                        }
                     });
 
                     ui.add_space(SPACE_MD);
 
                     // Filter snippets
-                    let filtered_snippets: Vec<Snippet> = cx.snippets
+                    let filtered_snippets: Vec<Snippet> = cx
+                        .snippets
                         .iter()
                         .filter(|s| {
                             if window.snippet_view_state.group_filter.is_empty() {
@@ -122,40 +155,59 @@ pub fn render_snippets_view(
                     if filtered_snippets.is_empty() {
                         ui.add_space(SPACE_2XL);
                         ui.vertical_centered(|ui| {
-                            ui.label(egui::RichText::new("\u{26A1}").size(SPACE_2XL).color(cx.theme.fg_dim));
+                            ui.label(
+                                egui::RichText::new("\u{26A1}")
+                                    .size(SPACE_2XL)
+                                    .color(cx.theme.fg_dim),
+                            );
                             ui.add_space(SPACE_MD);
-                            ui.label(egui::RichText::new(cx.language.t("no_snippets")).color(cx.theme.fg_dim).size(FONT_BASE));
+                            ui.label(
+                                egui::RichText::new(cx.language.t("no_snippets"))
+                                    .color(cx.theme.fg_dim)
+                                    .size(FONT_BASE),
+                            );
                         });
                     } else {
                         // Group snippets
-                        let mut groups: std::collections::BTreeMap<String, Vec<Snippet>> = std::collections::BTreeMap::new();
+                        let mut groups: std::collections::BTreeMap<String, Vec<Snippet>> =
+                            std::collections::BTreeMap::new();
                         for snippet in filtered_snippets {
-                            groups.entry(snippet.group.clone()).or_default().push(snippet);
+                            groups
+                                .entry(snippet.group.clone())
+                                .or_default()
+                                .push(snippet);
                         }
 
                         for (group_name, snippets_in_group) in &groups {
                             ui.horizontal(|ui| {
                                 ui.add_space(24.0);
-                                ui.label(egui::RichText::new(group_name.to_uppercase())
-                                    .color(cx.theme.fg_dim)
-                                    .size(10.0)
-                                    .strong());
+                                ui.label(
+                                    egui::RichText::new(group_name.to_uppercase())
+                                        .color(cx.theme.fg_dim)
+                                        .size(10.0)
+                                        .strong(),
+                                );
                             });
                             ui.add_space(4.0);
 
                             for snippet in snippets_in_group {
                                 let row_h = 58.0;
                                 let width = ui.available_width();
-                                let (rect, resp): (egui::Rect, egui::Response) = ui.allocate_exact_size(
-                                    egui::vec2(width, row_h),
-                                    egui::Sense::click(),
-                                );
+                                let (rect, resp): (egui::Rect, egui::Response) = ui
+                                    .allocate_exact_size(
+                                        egui::vec2(width, row_h),
+                                        egui::Sense::click(),
+                                    );
                                 let hovered = resp.hovered();
 
                                 if hovered {
                                     ui.painter().rect_filled(
-                                        egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - 1.0), rect.max),
-                                        0.0, cx.theme.hover_shadow,
+                                        egui::Rect::from_min_max(
+                                            egui::pos2(rect.min.x, rect.max.y - 1.0),
+                                            rect.max,
+                                        ),
+                                        0.0,
+                                        cx.theme.hover_shadow,
                                     );
                                     ui.painter().rect_filled(rect, 0.0, cx.theme.hover_bg);
                                 }
@@ -197,10 +249,24 @@ pub fn render_snippets_view(
                                         egui::pos2(visible_right - 40.0, rect.min.y + 26.0),
                                         egui::vec2(56.0, 22.0),
                                     );
-                                    let over_btn = pointer_pos.is_some_and(|p| btn_rect.contains(p));
-                                    let btn_bg = if over_btn { cx.theme.accent } else { cx.theme.bg_elevated };
-                                    let btn_text_color = if over_btn { cx.theme.bg_primary } else { cx.theme.accent };
-                                    ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, cx.theme.accent));
+                                    let over_btn =
+                                        pointer_pos.is_some_and(|p| btn_rect.contains(p));
+                                    let btn_bg = if over_btn {
+                                        cx.theme.accent
+                                    } else {
+                                        cx.theme.bg_elevated
+                                    };
+                                    let btn_text_color = if over_btn {
+                                        cx.theme.bg_primary
+                                    } else {
+                                        cx.theme.accent
+                                    };
+                                    ui.painter().rect(
+                                        btn_rect,
+                                        4.0,
+                                        btn_bg,
+                                        egui::Stroke::new(1.0, cx.theme.accent),
+                                    );
                                     ui.painter().text(
                                         btn_rect.center(),
                                         egui::Align2::CENTER_CENTER,
@@ -214,7 +280,7 @@ pub fn render_snippets_view(
                                             snippet.id.clone(),
                                             &snippet.name,
                                             &snippet.command,
-                                            &snippet.group
+                                            &snippet.group,
                                         );
                                     }
                                 }
@@ -228,7 +294,9 @@ pub fn render_snippets_view(
 
     // Delete confirmation dialog
     if let Some(delete_id) = &window.snippet_view_state.confirm_delete.clone() {
-        let snippet_name = cx.snippets.iter()
+        let snippet_name = cx
+            .snippets
+            .iter()
             .find(|s| s.id == *delete_id)
             .map(|s| s.name.clone())
             .unwrap_or_default();
@@ -243,22 +311,45 @@ pub fn render_snippets_view(
             .frame(widgets::dialog_frame(cx.theme))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("\u{26A0}").size(18.0).color(cx.theme.red));
+                    ui.label(
+                        egui::RichText::new("\u{26A0}")
+                            .size(18.0)
+                            .color(cx.theme.red),
+                    );
                     ui.add_space(SPACE_XS);
-                    ui.label(egui::RichText::new(cx.language.t("delete")).size(15.0).color(cx.theme.fg_primary).strong());
+                    ui.label(
+                        egui::RichText::new(cx.language.t("delete"))
+                            .size(15.0)
+                            .color(cx.theme.fg_primary)
+                            .strong(),
+                    );
                 });
                 ui.add_space(10.0);
-                ui.label(egui::RichText::new(cx.language.tf("delete_confirm", &snippet_name)).color(cx.theme.fg_primary).size(FONT_BASE));
+                ui.label(
+                    egui::RichText::new(cx.language.tf("delete_confirm", &snippet_name))
+                        .color(cx.theme.fg_primary)
+                        .size(FONT_BASE),
+                );
                 ui.add_space(SPACE_XS);
-                ui.label(egui::RichText::new(cx.language.t("confirm_delete")).color(cx.theme.fg_dim).size(FONT_SM));
+                ui.label(
+                    egui::RichText::new(cx.language.t("confirm_delete"))
+                        .color(cx.theme.fg_dim)
+                        .size(FONT_SM),
+                );
                 ui.add_space(SPACE_LG);
 
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(widgets::danger_button(cx.language.t("delete"), cx.theme)).clicked() {
+                        if ui
+                            .add(widgets::danger_button(cx.language.t("delete"), cx.theme))
+                            .clicked()
+                        {
                             snippet_to_delete = Some(delete_id.clone());
                         }
-                        if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                        if ui
+                            .add(widgets::secondary_button(cx.language.t("cancel"), cx.theme))
+                            .clicked()
+                        {
                             window.snippet_view_state.confirm_delete = None;
                         }
                     });
@@ -304,34 +395,57 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                 .exact_height(56.0)
                 .frame(egui::Frame {
                     fill: cx.theme.bg_elevated,
-                    inner_margin: egui::Margin { left: 24.0, right: 16.0, top: 16.0, bottom: 16.0 },
+                    inner_margin: egui::Margin {
+                        left: 24.0,
+                        right: 16.0,
+                        top: 16.0,
+                        bottom: 16.0,
+                    },
                     ..Default::default()
                 })
                 .show_inside(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(
-                            if is_editing { cx.language.t("edit_snippet") } else { cx.language.t("new_snippet") }
-                        ).size(16.0).strong().color(cx.theme.fg_primary));
+                        ui.label(
+                            egui::RichText::new(if is_editing {
+                                cx.language.t("edit_snippet")
+                            } else {
+                                cx.language.t("new_snippet")
+                            })
+                            .size(16.0)
+                            .strong()
+                            .color(cx.theme.fg_primary),
+                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 2.0;
                             // Close button
-                            if ui.add(
-                                egui::Button::new(egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim))
-                                    .frame(false)
-                            ).clicked() {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim),
+                                    )
+                                    .frame(false),
+                                )
+                                .clicked()
+                            {
                                 window.snippet_view_state.open = false;
                                 window.snippet_view_state.editing = None;
                             }
                             // Delete button (edit mode only)
                             if is_editing
-                                && ui.add(
-                                    egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
-                                        .frame(false)
-                                ).on_hover_text(cx.language.t("delete"))
-                                .clicked() {
-                                    window.snippet_view_state.confirm_delete = window.snippet_view_state.editing.clone();
-                                    window.snippet_view_state.open = false;
-                                }
+                                && ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new("\u{1F5D1}").size(FONT_BASE),
+                                        )
+                                        .frame(false),
+                                    )
+                                    .on_hover_text(cx.language.t("delete"))
+                                    .clicked()
+                            {
+                                window.snippet_view_state.confirm_delete =
+                                    window.snippet_view_state.editing.clone();
+                                window.snippet_view_state.open = false;
+                            }
                         });
                     });
                 });
@@ -355,31 +469,48 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                             // Name + Group in same row
                             widgets::form_field_2col(
                                 ui,
-                                cx.language.t("name"), true,
+                                cx.language.t("name"),
+                                true,
                                 &mut window.snippet_view_state.new_name,
-                                cx.language.t("snippet_name_hint"), 170.0,
-                                cx.language.t("group"), false,
+                                cx.language.t("snippet_name_hint"),
+                                170.0,
+                                cx.language.t("group"),
+                                false,
                                 &mut window.snippet_view_state.new_group,
-                                cx.language.t("snippet_default_group"), 120.0,
-                                cx.theme
+                                cx.language.t("snippet_default_group"),
+                                120.0,
+                                cx.theme,
                             );
                             ui.add_space(widgets::SPACING_FIELD);
 
                             // Command (required) - multiline
-                            widgets::form_field_textarea(ui, cx.language.t("command"), true,
+                            widgets::form_field_textarea(
+                                ui,
+                                cx.language.t("command"),
+                                true,
                                 &mut window.snippet_view_state.new_command,
-                                cx.language.t("command_hint"), 80.0, cx.theme);
+                                cx.language.t("command_hint"),
+                                80.0,
+                                cx.theme,
+                            );
 
                             // Error message (missing required fields)
                             if !window.snippet_view_state.error.is_empty() {
                                 ui.add_space(widgets::SPACING_FIELD);
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new("\u{26A0}").size(14.0).color(cx.theme.red));
+                                    ui.label(
+                                        egui::RichText::new("\u{26A0}")
+                                            .size(14.0)
+                                            .color(cx.theme.red),
+                                    );
                                     ui.add_space(4.0);
-                                    ui.label(egui::RichText::new(&window.snippet_view_state.error).color(cx.theme.red).size(12.0));
+                                    ui.label(
+                                        egui::RichText::new(&window.snippet_view_state.error)
+                                            .color(cx.theme.red)
+                                            .size(12.0),
+                                    );
                                 });
                             }
-
                         });
                 });
 
@@ -392,7 +523,10 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                     // Always route a Save click into the handler so a submit
                     // with missing required fields can be surfaced as a toast —
                     // a `can_save`-guarded click silently swallowed the feedback.
-                    if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() {
+                    if ui
+                        .add(widgets::primary_button(cx.language.t("save"), cx.theme))
+                        .clicked()
+                    {
                         // Required-field validation (name + command are both
                         // marked required in the form).
                         let mut missing: Vec<&'static str> = Vec::new();
@@ -405,44 +539,52 @@ pub fn render_snippet_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &m
                         if !missing.is_empty() {
                             let msg = cx.language.tf("required_fields_error", &missing.join(", "));
                             window.snippet_view_state.error = msg.clone();
-                            window.notifications.push(crate::ssh::AppNotification::warning(msg));
+                            window
+                                .notifications
+                                .push(crate::ssh::AppNotification::warning(msg));
                             // Skip the save below.
                         } else {
-                        let group = if window.snippet_view_state.new_group.trim().is_empty() {
-                            cx.language.t("snippet_default_group").to_string()
-                        } else {
-                            window.snippet_view_state.new_group.trim().to_string()
-                        };
-
-                        if let Some(edit_id) = &window.snippet_view_state.editing {
-                            if let Some(snippet) = cx.snippets.iter_mut().find(|s| s.id == *edit_id) {
-                                snippet.name = window.snippet_view_state.new_name.trim().to_string();
-                                snippet.command = window.snippet_view_state.new_command.clone();
-                                snippet.group = group;
-                            }
-                        } else {
-                            let snippet = Snippet {
-                                id: Uuid::new_v4().to_string(),
-                                name: window.snippet_view_state.new_name.trim().to_string(),
-                                command: window.snippet_view_state.new_command.clone(),
-                                group,
+                            let group = if window.snippet_view_state.new_group.trim().is_empty() {
+                                cx.language.t("snippet_default_group").to_string()
+                            } else {
+                                window.snippet_view_state.new_group.trim().to_string()
                             };
-                            cx.snippets.push(snippet);
-                        }
-                        // Persist immediately: the drawer did not previously
-                        // signal the top level to save, so edited/added snippets
-                        // lived only in memory and were lost on the next process
-                        // restart (e.g. after an in-place upgrade).
-                        crate::config::save_snippets(
-                            &crate::config::snippets_file_path(),
-                            cx.snippets,
-                        );
-                        window.snippet_view_state.open = false;
-                        window.snippet_view_state.editing = None;
+
+                            if let Some(edit_id) = &window.snippet_view_state.editing {
+                                if let Some(snippet) =
+                                    cx.snippets.iter_mut().find(|s| s.id == *edit_id)
+                                {
+                                    snippet.name =
+                                        window.snippet_view_state.new_name.trim().to_string();
+                                    snippet.command = window.snippet_view_state.new_command.clone();
+                                    snippet.group = group;
+                                }
+                            } else {
+                                let snippet = Snippet {
+                                    id: Uuid::new_v4().to_string(),
+                                    name: window.snippet_view_state.new_name.trim().to_string(),
+                                    command: window.snippet_view_state.new_command.clone(),
+                                    group,
+                                };
+                                cx.snippets.push(snippet);
+                            }
+                            // Persist immediately: the drawer did not previously
+                            // signal the top level to save, so edited/added snippets
+                            // lived only in memory and were lost on the next process
+                            // restart (e.g. after an in-place upgrade).
+                            crate::config::save_snippets(
+                                &crate::config::snippets_file_path(),
+                                cx.snippets,
+                            );
+                            window.snippet_view_state.open = false;
+                            window.snippet_view_state.editing = None;
                         }
                     }
                     ui.add_space(8.0);
-                    if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                    if ui
+                        .add(widgets::secondary_button(cx.language.t("cancel"), cx.theme))
+                        .clicked()
+                    {
                         window.snippet_view_state.open = false;
                         window.snippet_view_state.editing = None;
                     }
@@ -468,48 +610,76 @@ pub fn render_snippet_list(
             if snippets.is_empty() {
                 ui.add_space(SPACE_2XL);
                 ui.vertical_centered(|ui| {
-                    ui.label(egui::RichText::new("\u{26A1}").size(SPACE_2XL).color(theme.fg_dim));
+                    ui.label(
+                        egui::RichText::new("\u{26A1}")
+                            .size(SPACE_2XL)
+                            .color(theme.fg_dim),
+                    );
                     ui.add_space(SPACE_MD);
-                    ui.label(egui::RichText::new(language.t("no_snippets")).color(theme.fg_dim).size(FONT_BASE));
+                    ui.label(
+                        egui::RichText::new(language.t("no_snippets"))
+                            .color(theme.fg_dim)
+                            .size(FONT_BASE),
+                    );
                 });
             } else {
-                let mut groups: std::collections::BTreeMap<String, Vec<&Snippet>> = std::collections::BTreeMap::new();
+                let mut groups: std::collections::BTreeMap<String, Vec<&Snippet>> =
+                    std::collections::BTreeMap::new();
                 for snippet in snippets.iter() {
-                    groups.entry(snippet.group.clone()).or_default().push(snippet);
+                    groups
+                        .entry(snippet.group.clone())
+                        .or_default()
+                        .push(snippet);
                 }
                 for (group_name, snippets_in_group) in &groups {
                     ui.horizontal(|ui| {
                         ui.add_space(8.0);
-                        ui.label(egui::RichText::new(group_name.to_uppercase())
-                            .color(theme.fg_dim).size(10.0).strong());
+                        ui.label(
+                            egui::RichText::new(group_name.to_uppercase())
+                                .color(theme.fg_dim)
+                                .size(10.0)
+                                .strong(),
+                        );
                     });
                     ui.add_space(4.0);
                     for snippet in snippets_in_group {
                         let row_h = 50.0;
                         let width = ui.available_width();
-                        let (rect, resp) = ui.allocate_exact_size(
-                            egui::vec2(width, row_h), egui::Sense::click());
+                        let (rect, resp) =
+                            ui.allocate_exact_size(egui::vec2(width, row_h), egui::Sense::click());
                         if resp.hovered() {
                             // Same hover treatment as the hosts/snippets lists:
                             // square hover_bg fill with a 1px bottom shadow line.
                             ui.painter().rect_filled(
-                                egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - 1.0), rect.max),
-                                0.0, theme.hover_shadow,
+                                egui::Rect::from_min_max(
+                                    egui::pos2(rect.min.x, rect.max.y - 1.0),
+                                    rect.max,
+                                ),
+                                0.0,
+                                theme.hover_shadow,
                             );
                             ui.painter().rect_filled(rect, 0.0, theme.hover_bg);
                         }
                         ui.painter().text(
                             egui::pos2(rect.min.x + 12.0, rect.min.y + 16.0),
-                            egui::Align2::LEFT_CENTER, &snippet.name,
-                            egui::FontId::proportional(13.0), theme.fg_primary);
+                            egui::Align2::LEFT_CENTER,
+                            &snippet.name,
+                            egui::FontId::proportional(13.0),
+                            theme.fg_primary,
+                        );
                         let preview = if snippet.command.len() > 50 {
                             format!("{}...", &snippet.command[..50])
-                        } else { snippet.command.clone() };
+                        } else {
+                            snippet.command.clone()
+                        };
                         let preview = preview.replace('\n', " \\ ");
                         ui.painter().text(
                             egui::pos2(rect.min.x + 12.0, rect.min.y + 34.0),
-                            egui::Align2::LEFT_CENTER, &preview,
-                            egui::FontId::monospace(10.0), theme.fg_dim);
+                            egui::Align2::LEFT_CENTER,
+                            &preview,
+                            egui::FontId::monospace(10.0),
+                            theme.fg_dim,
+                        );
                         if resp.clicked() {
                             on_select(&snippet.command);
                         }

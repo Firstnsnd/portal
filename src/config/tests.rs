@@ -136,6 +136,42 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_config_files_are_quarantined_not_silently_discarded() {
+        // The load path must not treat a corrupt file as "no data": the file
+        // is renamed .bad so the next save cannot destroy the original.
+        let dir = tempfile::tempdir().unwrap();
+
+        let cred_path = dir.path().join("credentials.json");
+        std::fs::write(&cred_path, "{not json").unwrap();
+        assert!(load_credentials(&cred_path).is_empty());
+        assert!(!cred_path.exists(), "corrupt file must be renamed");
+        assert!(dir.path().join("credentials.bad").exists());
+
+        let hosts_path = dir.path().join("hosts.json");
+        std::fs::write(&hosts_path, "[{broken").unwrap();
+        let hosts = load_hosts(&hosts_path);
+        assert_eq!(hosts.len(), 1);
+        assert!(hosts[0].is_local);
+        assert!(!hosts_path.exists());
+        assert!(dir.path().join("hosts.bad").exists());
+
+        let snippets_path = dir.path().join("snippets.json");
+        std::fs::write(&snippets_path, "nope").unwrap();
+        assert!(load_snippets(&snippets_path).is_empty());
+        assert!(dir.path().join("snippets.bad").exists());
+    }
+
+    #[test]
+    fn valid_config_files_are_left_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials.json");
+        std::fs::write(&path, "[]").unwrap();
+        assert!(load_credentials(&path).is_empty());
+        assert!(path.exists(), "a valid file must not be touched");
+        assert!(!dir.path().join("credentials.bad").exists());
+    }
+
+    #[test]
     fn test_save_and_load_snippets() {
         let (_temp_file, path) = create_temp_file();
 

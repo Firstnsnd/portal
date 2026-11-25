@@ -12,8 +12,8 @@ use std::ptr;
 use windows::core::{HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Foundation::ERROR_NOT_FOUND;
 use windows::Win32::Security::Credentials::{
-    CredDeleteW, CredFree, CredReadW, CredWriteW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
-    CREDENTIALW,
+    CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE,
+    CRED_TYPE_GENERIC,
 };
 
 pub struct CredentialManager;
@@ -45,7 +45,14 @@ impl super::SecretStore for CredentialManager {
         let name_w = wide(&target_name(service, account));
         let mut cred_ptr: *mut CREDENTIALW = ptr::null_mut();
 
-        match unsafe { CredReadW(PCWSTR::from_raw(name_w.as_ptr()), CRED_TYPE_GENERIC, None, &mut cred_ptr) } {
+        match unsafe {
+            CredReadW(
+                PCWSTR::from_raw(name_w.as_ptr()),
+                CRED_TYPE_GENERIC,
+                None,
+                &mut cred_ptr,
+            )
+        } {
             Err(e) if e.code() == HRESULT::from_win32(ERROR_NOT_FOUND.0) => Ok(None),
             Err(e) => Err(format!("CredReadW failed: {e}")),
             Ok(()) => {
@@ -53,8 +60,12 @@ impl super::SecretStore for CredentialManager {
                 // CredReadW; CredentialBlob is CredentialBlobSize bytes of the
                 // UTF-8 we wrote. CredFree releases both struct and blob.
                 let cred = unsafe { &*cred_ptr };
-                let bytes =
-                    unsafe { std::slice::from_raw_parts(cred.CredentialBlob, cred.CredentialBlobSize as usize) };
+                let bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        cred.CredentialBlob,
+                        cred.CredentialBlobSize as usize,
+                    )
+                };
                 let secret = String::from_utf8_lossy(bytes).into_owned();
                 unsafe { CredFree(cred_ptr as *const core::ffi::c_void) };
                 Ok(Some(secret))

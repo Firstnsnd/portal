@@ -1,7 +1,5 @@
 //! Linux backend: Nautilus scripts and a Dolphin/KDE service menu.
 
-use std::io::Write;
-
 use super::{home_dir, portal_bin, ShellIntegration};
 
 pub(crate) struct DesktopIntegration;
@@ -17,10 +15,15 @@ impl ShellIntegration for DesktopIntegration {
 
     fn uninstall(&self) -> Result<(), String> {
         let home = home_dir()?;
-        let _ = std::fs::remove_file(home.join(".local/share/nautilus/scripts/New Portal Tab Here"));
-        let _ = std::fs::remove_file(home.join(".local/share/nautilus/scripts/New Portal Window Here"));
-        let _ = std::fs::remove_file(home.join(".local/share/kio/servicemenus/portal_here.desktop"));
-        let _ = std::fs::remove_file(home.join(".local/share/kservices5/ServiceMenus/portal_here.desktop"));
+        let _ =
+            std::fs::remove_file(home.join(".local/share/nautilus/scripts/New Portal Tab Here"));
+        let _ =
+            std::fs::remove_file(home.join(".local/share/nautilus/scripts/New Portal Window Here"));
+        let _ =
+            std::fs::remove_file(home.join(".local/share/kio/servicemenus/portal_here.desktop"));
+        let _ = std::fs::remove_file(
+            home.join(".local/share/kservices5/ServiceMenus/portal_here.desktop"),
+        );
         Ok(())
     }
 
@@ -73,8 +76,12 @@ fi
 "#
         );
         let path = nautilus_dir.join(name);
-        let mut f = std::fs::File::create(&path).map_err(|e| format!("{}: {}", path.display(), e))?;
-        f.write_all(script.as_bytes()).map_err(|e| format!("{}: {}", path.display(), e))?;
+        // Atomic write: a crash mid-install leaves the previous script (still
+        // executable) in place instead of a truncated non-executable one.
+        crate::config::atomic_write_file_preserving_mode(&path, script.as_bytes())
+            .map_err(|e| format!("{}: {}", path.display(), e))?;
+        // Scripts must stay executable — chmod after the rename, since a fresh
+        // install gets the default (non-executable) mode.
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
@@ -109,8 +116,11 @@ fi
         kservices5.join("ServiceMenus")
     };
     std::fs::create_dir_all(&menu_dir).map_err(|e| format!("{}: {}", menu_dir.display(), e))?;
-    std::fs::write(menu_dir.join("portal_here.desktop"), desktop_entry)
-        .map_err(|e| format!("portal_here.desktop: {}", e))?;
+    crate::config::atomic_write_file_preserving_mode(
+        &menu_dir.join("portal_here.desktop"),
+        desktop_entry.as_bytes(),
+    )
+    .map_err(|e| format!("portal_here.desktop: {}", e))?;
 
     // Reload Nautilus' script list if it's running.
     let _ = std::process::Command::new("nautilus").arg("-q").output();

@@ -78,11 +78,13 @@ impl MockSshServer {
             auth_rejection_time: Duration::from_millis(1),
             auth_rejection_time_initial: Some(Duration::from_millis(1)),
             max_auth_attempts: 20,
-            methods: MethodSet::from(&[
-                MethodKind::Password,
-                MethodKind::PublicKey,
-                MethodKind::KeyboardInteractive,
-            ][..]),
+            methods: MethodSet::from(
+                &[
+                    MethodKind::Password,
+                    MethodKind::PublicKey,
+                    MethodKind::KeyboardInteractive,
+                ][..],
+            ),
             ..Default::default()
         };
 
@@ -170,7 +172,9 @@ fn advertise_kbdint() -> Auth {
     }
 }
 
-fn prompt_set(items: &[(&'static str, bool)]) -> std::borrow::Cow<'static, [(std::borrow::Cow<'static, str>, bool)]> {
+fn prompt_set(
+    items: &[(&'static str, bool)],
+) -> std::borrow::Cow<'static, [(std::borrow::Cow<'static, str>, bool)]> {
     items
         .iter()
         .map(|(text, echo)| ((*text).into(), *echo))
@@ -248,12 +252,9 @@ impl ServerHandler for MockHandler {
         _originator_port: u32,
         _session: &mut russh::server::Session,
     ) -> Result<bool, Self::Error> {
-        let upstream = tokio::net::TcpStream::connect((
-            host_to_connect,
-            port_to_connect as u16,
-        ))
-        .await
-        .map_err(russh::Error::IO)?;
+        let upstream = tokio::net::TcpStream::connect((host_to_connect, port_to_connect as u16))
+            .await
+            .map_err(russh::Error::IO)?;
 
         let mut tunnel = channel.into_stream();
         let mut upstream = upstream;

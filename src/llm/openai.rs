@@ -31,12 +31,16 @@ pub fn parse_sse(data: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     for line in data.lines() {
         let line = line.trim();
-        let Some(rest) = line.strip_prefix("data:") else { continue };
+        let Some(rest) = line.strip_prefix("data:") else {
+            continue;
+        };
         let rest = rest.trim();
         if rest == "[DONE]" {
             continue;
         }
-        let Ok(v) = serde_json::from_str::<Value>(rest) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(rest) else {
+            continue;
+        };
         // Standard shape: choices[0].delta.content
         if let Some(content) = v
             .pointer("/choices/0/delta/content")

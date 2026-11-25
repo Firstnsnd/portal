@@ -2,16 +2,17 @@ use eframe::egui;
 
 use crate::app::PortalApp;
 use crate::app::SettingsSection;
-use crate::ui::theme::ThemePreset;
+use crate::ui::fonts;
 use crate::ui::i18n::Language;
+use crate::ui::theme::ThemePreset;
 use crate::ui::tokens::*;
 use crate::ui::widgets;
-use crate::ui::fonts;
 
 impl PortalApp {
     pub fn apply_visuals(&self, ctx: &egui::Context) {
         // Use light or dark base visuals depending on theme
-        let is_light_theme = matches!(self.theme_preset,
+        let is_light_theme = matches!(
+            self.theme_preset,
             ThemePreset::SolarizedLight | ThemePreset::GitHubLight | ThemePreset::OneLight
         );
         let mut visuals = if is_light_theme {
@@ -110,7 +111,12 @@ impl PortalApp {
         crate::config::save_settings(&settings);
     }
 
-    pub fn show_settings_view(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, window_idx: usize) {
+    pub fn show_settings_view(
+        &mut self,
+        ctx: &egui::Context,
+        ui: &mut egui::Ui,
+        window_idx: usize,
+    ) {
         let theme = self.theme.clone();
         let lang = self.language;
         let mut changed = false;
@@ -148,9 +154,14 @@ impl PortalApp {
                     for (section, key) in sections {
                         let selected = self.settings_section == section;
                         let text = if selected {
-                            egui::RichText::new(lang.t(key)).color(theme.fg_primary).size(FONT_BASE).strong()
+                            egui::RichText::new(lang.t(key))
+                                .color(theme.fg_primary)
+                                .size(FONT_BASE)
+                                .strong()
                         } else {
-                            egui::RichText::new(lang.t(key)).color(theme.fg_dim).size(FONT_BASE)
+                            egui::RichText::new(lang.t(key))
+                                .color(theme.fg_dim)
+                                .size(FONT_BASE)
                         };
                         let resp = ui.add_sized(
                             [NAV_WIDTH - 16.0, 26.0],
@@ -185,16 +196,39 @@ impl PortalApp {
                                 ui.spacing_mut().item_spacing.y = 12.0;
                                 match self.settings_section {
                                     SettingsSection::Appearance => {
-                                        self.render_appearance_section(ctx, ui, &theme, lang, &mut changed);
+                                        self.render_appearance_section(
+                                            ctx,
+                                            ui,
+                                            &theme,
+                                            lang,
+                                            &mut changed,
+                                        );
                                     }
                                     SettingsSection::Terminal => {
-                                        self.render_terminal_section(ui, &theme, lang, &mut changed);
+                                        self.render_terminal_section(
+                                            ui,
+                                            &theme,
+                                            lang,
+                                            &mut changed,
+                                        );
                                     }
                                     SettingsSection::Ai => {
-                                        self.render_ai_section(ui, &theme, lang, &mut changed, window_idx);
+                                        self.render_ai_section(
+                                            ui,
+                                            &theme,
+                                            lang,
+                                            &mut changed,
+                                            window_idx,
+                                        );
                                     }
                                     SettingsSection::Shortcuts => {
-                                        self.render_shortcuts_section(ctx, ui, &theme, lang, &mut changed);
+                                        self.render_shortcuts_section(
+                                            ctx,
+                                            ui,
+                                            &theme,
+                                            lang,
+                                            &mut changed,
+                                        );
                                     }
                                     SettingsSection::General => {
                                         self.render_general_section(ui, &theme, lang, &mut changed);
@@ -220,7 +254,12 @@ impl PortalApp {
         lang: crate::ui::i18n::Language,
         changed: &mut bool,
     ) {
-        ui.label(egui::RichText::new(lang.t("font")).color(theme.fg_primary).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(lang.t("font"))
+                .color(theme.fg_primary)
+                .size(14.0)
+                .strong(),
+        );
         ui.add_space(SPACE_XS);
 
         ui.horizontal(|ui| {
@@ -229,7 +268,7 @@ impl PortalApp {
             let slider = ui.add(
                 egui::Slider::new(&mut self.font_size, 8.0..=32.0)
                     .step_by(1.0)
-                    .text("px")
+                    .text("px"),
             );
             if slider.changed() {
                 *changed = true;
@@ -241,10 +280,14 @@ impl PortalApp {
             ui.add_space(SPACE_SM);
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.custom_font_path)
-                    .hint_text(egui::RichText::new("/path/to/font.ttf").color(theme.hint_color()).italics())
+                    .hint_text(
+                        egui::RichText::new("/path/to/font.ttf")
+                            .color(theme.hint_color())
+                            .italics(),
+                    )
                     .desired_width(300.0)
                     .font(egui::FontId::proportional(13.0))
-                    .text_color(theme.fg_primary)
+                    .text_color(theme.fg_primary),
             );
             if resp.lost_focus() {
                 self.fonts_dirty = true;
@@ -256,11 +299,19 @@ impl PortalApp {
         ui.separator();
         ui.add_space(SPACE_SM);
 
-        ui.label(egui::RichText::new(lang.t("theme")).color(theme.fg_primary).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(lang.t("theme"))
+                .color(theme.fg_primary)
+                .size(14.0)
+                .strong(),
+        );
         ui.add_space(SPACE_XS);
 
         for preset in ThemePreset::all() {
-            if ui.selectable_value(&mut self.theme_preset, *preset, preset.label()).clicked() {
+            if ui
+                .selectable_value(&mut self.theme_preset, *preset, preset.label())
+                .clicked()
+            {
                 self.theme = self.theme_preset.colors();
                 self.apply_visuals(ctx);
                 *changed = true;
@@ -274,12 +325,24 @@ impl PortalApp {
         // ── Background image ──
         // The texture itself loads lazily in render_terminal_content when the
         // user returns to a terminal view; here we only edit the settings.
-        ui.label(egui::RichText::new(lang.t("terminal_background")).color(theme.fg_primary).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(lang.t("terminal_background"))
+                .color(theme.fg_primary)
+                .size(14.0)
+                .strong(),
+        );
         ui.add_space(SPACE_XS);
-        ui.label(egui::RichText::new(lang.t("terminal_background_desc")).color(theme.fg_dim).size(FONT_SM));
+        ui.label(
+            egui::RichText::new(lang.t("terminal_background_desc"))
+                .color(theme.fg_dim)
+                .size(FONT_SM),
+        );
 
         ui.horizontal(|ui| {
-            ui.label(widgets::field_label(lang.t("terminal_background_image"), theme));
+            ui.label(widgets::field_label(
+                lang.t("terminal_background_image"),
+                theme,
+            ));
             ui.add_space(SPACE_SM);
             if ui.button(lang.t("choose_image")).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
@@ -312,7 +375,11 @@ impl PortalApp {
                 egui::Slider::new(&mut self.terminal_background_opacity, 0.0..=1.0)
                     .custom_formatter(|v, _| format!("{}%", (v * 100.0).round() as i32))
                     .custom_parser(|s| {
-                        s.trim().trim_end_matches('%').parse::<f64>().ok().map(|v| v / 100.0)
+                        s.trim()
+                            .trim_end_matches('%')
+                            .parse::<f64>()
+                            .ok()
+                            .map(|v| v / 100.0)
                     }),
             );
             if slider.changed() {
@@ -329,7 +396,12 @@ impl PortalApp {
         lang: crate::ui::i18n::Language,
         changed: &mut bool,
     ) {
-        ui.label(egui::RichText::new(lang.t("terminal")).color(theme.fg_primary).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(lang.t("terminal"))
+                .color(theme.fg_primary)
+                .size(14.0)
+                .strong(),
+        );
         ui.add_space(SPACE_XS);
 
         ui.horizontal(|ui| {
@@ -338,7 +410,7 @@ impl PortalApp {
             let slider = ui.add(
                 egui::Slider::new(&mut self.scrollback_limit_mb, 10..=1000)
                     .step_by(10.0)
-                    .text("MB")
+                    .text("MB"),
             );
             if slider.changed() {
                 *changed = true;
@@ -347,10 +419,17 @@ impl PortalApp {
 
         // Auto-record: every new session records as asciicast from byte zero.
         ui.add_space(SPACE_SM);
-        if ui.checkbox(&mut self.auto_record_sessions, lang.t("auto_record")).changed() {
+        if ui
+            .checkbox(&mut self.auto_record_sessions, lang.t("auto_record"))
+            .changed()
+        {
             *changed = true;
         }
-        ui.label(egui::RichText::new(lang.t("auto_record_desc")).color(theme.fg_dim).size(FONT_SM));
+        ui.label(
+            egui::RichText::new(lang.t("auto_record_desc"))
+                .color(theme.fg_dim)
+                .size(FONT_SM),
+        );
 
         // Recordings: retention policy — the safety net for auto-record,
         // which otherwise accumulates .cast files forever.
@@ -358,7 +437,12 @@ impl PortalApp {
         ui.separator();
         ui.add_space(SPACE_SM);
 
-        ui.label(egui::RichText::new(lang.t("recordings_section")).color(theme.fg_primary).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(lang.t("recordings_section"))
+                .color(theme.fg_primary)
+                .size(14.0)
+                .strong(),
+        );
         ui.add_space(SPACE_XS);
 
         ui.horizontal(|ui| {
@@ -367,13 +451,17 @@ impl PortalApp {
             let slider = ui.add(
                 egui::Slider::new(&mut self.recordings_retention_days, 0..=365)
                     .step_by(1.0)
-                    .text(lang.t("unit_days"))
+                    .text(lang.t("unit_days")),
             );
             if slider.changed() {
                 *changed = true;
             }
         });
-        ui.label(egui::RichText::new(lang.t("recordings_retention_desc")).color(theme.fg_dim).size(FONT_SM));
+        ui.label(
+            egui::RichText::new(lang.t("recordings_retention_desc"))
+                .color(theme.fg_dim)
+                .size(FONT_SM),
+        );
 
         ui.add_space(SPACE_SM);
         ui.horizontal(|ui| {
@@ -382,13 +470,17 @@ impl PortalApp {
             let slider = ui.add(
                 egui::Slider::new(&mut self.recordings_max_total_mb, 0..=10240)
                     .step_by(100.0)
-                    .text("MB")
+                    .text("MB"),
             );
             if slider.changed() {
                 *changed = true;
             }
         });
-        ui.label(egui::RichText::new(lang.t("recordings_max_total_desc")).color(theme.fg_dim).size(FONT_SM));
+        ui.label(
+            egui::RichText::new(lang.t("recordings_max_total_desc"))
+                .color(theme.fg_dim)
+                .size(FONT_SM),
+        );
 
         // Current usage + a shortcut to the folder (the replay library is the
         // content manager; this is the policy page's reality check).
@@ -425,7 +517,12 @@ impl PortalApp {
         ui.separator();
         ui.add_space(SPACE_SM);
 
-        ui.label(egui::RichText::new("SSH").color(theme.fg_primary).size(14.0).strong());
+        ui.label(
+            egui::RichText::new("SSH")
+                .color(theme.fg_primary)
+                .size(14.0)
+                .strong(),
+        );
         ui.add_space(SPACE_XS);
 
         ui.horizontal(|ui| {
@@ -434,13 +531,17 @@ impl PortalApp {
             let slider = ui.add(
                 egui::Slider::new(&mut self.ssh_keepalive_interval, 0..=300)
                     .step_by(5.0)
-                    .text("s")
+                    .text("s"),
             );
             if slider.changed() {
                 *changed = true;
             }
         });
-        ui.label(egui::RichText::new(lang.t("ssh_keepalive_desc")).color(theme.fg_dim).size(FONT_SM));
+        ui.label(
+            egui::RichText::new(lang.t("ssh_keepalive_desc"))
+                .color(theme.fg_dim)
+                .size(FONT_SM),
+        );
     }
 
     /// AI section: LLM provider, base URL, model, and API key.
@@ -452,7 +553,12 @@ impl PortalApp {
         changed: &mut bool,
         window_idx: usize,
     ) {
-        ui.label(egui::RichText::new(lang.t("llm")).color(theme.fg_primary).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(lang.t("llm"))
+                .color(theme.fg_primary)
+                .size(14.0)
+                .strong(),
+        );
         ui.add_space(SPACE_XS);
 
         // Provider
@@ -466,16 +572,34 @@ impl PortalApp {
             };
             widgets::style_combo_button(ui, theme);
             egui::ComboBox::from_id_salt("llm_provider_combo")
-                .selected_text(egui::RichText::new(selected).color(theme.accent).size(FONT_MD))
+                .selected_text(
+                    egui::RichText::new(selected)
+                        .color(theme.accent)
+                        .size(FONT_MD),
+                )
                 .width(220.0)
                 .show_ui(ui, |ui| {
                     widgets::style_dropdown(ui, theme);
-                    if widgets::dropdown_item(ui, theme, lang.t("llm_provider_openai"), matches!(backend, crate::llm::types::LlmBackend::OpenAiCompatible)).clicked() {
+                    if widgets::dropdown_item(
+                        ui,
+                        theme,
+                        lang.t("llm_provider_openai"),
+                        matches!(backend, crate::llm::types::LlmBackend::OpenAiCompatible),
+                    )
+                    .clicked()
+                    {
                         self.llm_config.backend = crate::llm::types::LlmBackend::OpenAiCompatible;
                         *changed = true;
                         ui.close_menu();
                     }
-                    if widgets::dropdown_item(ui, theme, lang.t("llm_provider_anthropic"), matches!(backend, crate::llm::types::LlmBackend::Anthropic)).clicked() {
+                    if widgets::dropdown_item(
+                        ui,
+                        theme,
+                        lang.t("llm_provider_anthropic"),
+                        matches!(backend, crate::llm::types::LlmBackend::Anthropic),
+                    )
+                    .clicked()
+                    {
                         self.llm_config.backend = crate::llm::types::LlmBackend::Anthropic;
                         *changed = true;
                         ui.close_menu();
@@ -485,11 +609,12 @@ impl PortalApp {
 
         // Base URL — required for OpenAI-compatible, optional for Anthropic
         // (blank falls back to https://api.anthropic.com).
-        let base_url_hint: &str = if self.llm_config.backend == crate::llm::types::LlmBackend::OpenAiCompatible {
-            "https://api.openai.com/v1"
-        } else {
-            "https://api.anthropic.com"
-        };
+        let base_url_hint: &str =
+            if self.llm_config.backend == crate::llm::types::LlmBackend::OpenAiCompatible {
+                "https://api.openai.com/v1"
+            } else {
+                "https://api.anthropic.com"
+            };
         ui.horizontal(|ui| {
             ui.label(widgets::field_label(lang.t("llm_base_url"), theme));
             ui.add_space(SPACE_SM);
@@ -500,7 +625,9 @@ impl PortalApp {
                     .font(egui::FontId::proportional(FONT_BASE))
                     .text_color(theme.fg_primary),
             );
-            if resp.lost_focus() { *changed = true; }
+            if resp.lost_focus() {
+                *changed = true;
+            }
         });
 
         // Model
@@ -514,7 +641,9 @@ impl PortalApp {
                     .font(egui::FontId::proportional(FONT_BASE))
                     .text_color(theme.fg_primary),
             );
-            if resp.lost_focus() { *changed = true; }
+            if resp.lost_focus() {
+                *changed = true;
+            }
         });
 
         // API key (stored in keychain, never echoed back)
@@ -524,15 +653,25 @@ impl PortalApp {
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.llm_key_draft)
                     .password(true)
-                    .hint_text(if self.llm_config.has_api_key { "••••••••" } else { "" })
+                    .hint_text(if self.llm_config.has_api_key {
+                        "••••••••"
+                    } else {
+                        ""
+                    })
                     .desired_width(220.0)
                     .font(egui::FontId::proportional(FONT_BASE))
                     .text_color(theme.fg_primary),
             );
-            let save_clicked = ui.add(
-                egui::Button::new(egui::RichText::new(lang.t("llm_api_key_save")).color(theme.fg_primary).size(FONT_BASE))
+            let save_clicked = ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new(lang.t("llm_api_key_save"))
+                            .color(theme.fg_primary)
+                            .size(FONT_BASE),
+                    )
                     .min_size(egui::vec2(52.0, 26.0)),
-            ).clicked();
+                )
+                .clicked();
             if save_clicked && !self.llm_key_draft.trim().is_empty() {
                 // Storing the AI API key writes the OS keychain — owner-gated
                 // like every other keychain operation.
@@ -548,9 +687,22 @@ impl PortalApp {
         });
 
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(lang.t("llm_api_key_desc")).color(theme.fg_dim).size(FONT_SM));
+            ui.label(
+                egui::RichText::new(lang.t("llm_api_key_desc"))
+                    .color(theme.fg_dim)
+                    .size(FONT_SM),
+            );
             let clear_clicked = self.llm_config.has_api_key
-                && ui.add(egui::Button::new(egui::RichText::new(lang.t("llm_api_key_clear")).color(theme.fg_dim).size(FONT_SM)).frame(false)).clicked();
+                && ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new(lang.t("llm_api_key_clear"))
+                                .color(theme.fg_dim)
+                                .size(FONT_SM),
+                        )
+                        .frame(false),
+                    )
+                    .clicked();
             if clear_clicked
                 && self.owner_gate_or_request(
                     window_idx,
@@ -597,7 +749,12 @@ impl PortalApp {
         lang: crate::ui::i18n::Language,
         changed: &mut bool,
     ) {
-        ui.label(egui::RichText::new(lang.t("keyboard_shortcuts")).color(theme.fg_primary).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(lang.t("keyboard_shortcuts"))
+                .color(theme.fg_primary)
+                .size(14.0)
+                .strong(),
+        );
         ui.add_space(SPACE_SM);
 
         use crate::config::ShortcutAction;
@@ -621,25 +778,47 @@ impl PortalApp {
         let is_recording = self.recording_shortcut.is_some();
 
         for (action, label_key) in &actions {
-            let binding = self.shortcut_resolver.bindings().iter()
+            let binding = self
+                .shortcut_resolver
+                .bindings()
+                .iter()
                 .find(|b| b.action == *action)
                 .cloned();
-            let display = binding.as_ref()
+            let display = binding
+                .as_ref()
                 .map(ShortcutResolver::display_binding)
                 .unwrap_or_else(|| "—".to_string());
 
             let is_this_recording = self.recording_shortcut.as_ref() == Some(action);
 
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(lang.t(label_key)).color(theme.fg_primary).size(FONT_BASE));
+                ui.label(
+                    egui::RichText::new(lang.t(label_key))
+                        .color(theme.fg_primary)
+                        .size(FONT_BASE),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if is_this_recording {
-                        ui.label(egui::RichText::new(lang.t("press_key")).color(theme.accent).size(FONT_BASE).strong());
+                        ui.label(
+                            egui::RichText::new(lang.t("press_key"))
+                                .color(theme.accent)
+                                .size(FONT_BASE)
+                                .strong(),
+                        );
                     } else {
                         let edit_enabled = !is_recording;
-                        if ui.add_enabled(edit_enabled, egui::Button::new(
-                            egui::RichText::new(&display).color(theme.fg_dim).size(FONT_BASE)
-                        ).min_size(egui::vec2(80.0, 24.0))).clicked() {
+                        if ui
+                            .add_enabled(
+                                edit_enabled,
+                                egui::Button::new(
+                                    egui::RichText::new(&display)
+                                        .color(theme.fg_dim)
+                                        .size(FONT_BASE),
+                                )
+                                .min_size(egui::vec2(80.0, 24.0)),
+                            )
+                            .clicked()
+                        {
                             self.recording_shortcut = Some(action.clone());
                         }
                     }
@@ -652,11 +831,23 @@ impl PortalApp {
         if let Some(ref recording_action) = self.recording_shortcut.clone() {
             let captured = ctx.input(|i| {
                 for event in &i.events {
-                    if let egui::Event::Key { key, pressed: true, modifiers, .. } = event {
-                        if matches!(key,
-                            egui::Key::ArrowUp | egui::Key::ArrowDown |
-                            egui::Key::ArrowLeft | egui::Key::ArrowRight
-                        ) && !modifiers.command && !modifiers.ctrl && !modifiers.alt {
+                    if let egui::Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } = event
+                    {
+                        if matches!(
+                            key,
+                            egui::Key::ArrowUp
+                                | egui::Key::ArrowDown
+                                | egui::Key::ArrowLeft
+                                | egui::Key::ArrowRight
+                        ) && !modifiers.command
+                            && !modifiers.ctrl
+                            && !modifiers.alt
+                        {
                             continue;
                         }
                         if *key == egui::Key::Escape {
@@ -678,8 +869,11 @@ impl PortalApp {
 
             if let Some(result) = captured {
                 if let Some(new_binding) = result {
-                    let mut bindings: Vec<crate::config::KeyBinding> = self.shortcut_resolver.bindings().to_vec();
-                    if let Some(existing) = bindings.iter_mut().find(|b| b.action == *recording_action) {
+                    let mut bindings: Vec<crate::config::KeyBinding> =
+                        self.shortcut_resolver.bindings().to_vec();
+                    if let Some(existing) =
+                        bindings.iter_mut().find(|b| b.action == *recording_action)
+                    {
                         existing.key = new_binding.key;
                         existing.ctrl = new_binding.ctrl;
                         existing.alt = new_binding.alt;
@@ -694,12 +888,20 @@ impl PortalApp {
         }
 
         ui.add_space(SPACE_MD);
-        if ui.add(
-            egui::Button::new(egui::RichText::new(lang.t("reset_defaults")).color(theme.fg_dim).size(FONT_BASE))
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new(lang.t("reset_defaults"))
+                        .color(theme.fg_dim)
+                        .size(FONT_BASE),
+                )
                 .rounding(6.0)
-                .min_size(egui::vec2(140.0, 30.0))
-        ).clicked() {
-            self.shortcut_resolver.update_bindings(crate::config::default_shortcuts());
+                .min_size(egui::vec2(140.0, 30.0)),
+            )
+            .clicked()
+        {
+            self.shortcut_resolver
+                .update_bindings(crate::config::default_shortcuts());
             *changed = true;
         }
     }
@@ -712,10 +914,18 @@ impl PortalApp {
         lang: crate::ui::i18n::Language,
         changed: &mut bool,
     ) {
-        ui.label(egui::RichText::new(lang.t("language_label")).color(theme.fg_primary).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(lang.t("language_label"))
+                .color(theme.fg_primary)
+                .size(14.0)
+                .strong(),
+        );
         ui.add_space(SPACE_XS);
         for lang_opt in Language::all() {
-            if ui.selectable_value(&mut self.language, *lang_opt, lang_opt.label()).clicked() {
+            if ui
+                .selectable_value(&mut self.language, *lang_opt, lang_opt.label())
+                .clicked()
+            {
                 *changed = true;
             }
         }
@@ -724,7 +934,12 @@ impl PortalApp {
         ui.separator();
         ui.add_space(SPACE_SM);
 
-        ui.label(egui::RichText::new(lang.t("updates")).color(theme.fg_primary).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(lang.t("updates"))
+                .color(theme.fg_primary)
+                .size(14.0)
+                .strong(),
+        );
         ui.add_space(SPACE_XS);
         let check = ui.checkbox(&mut self.check_for_updates, lang.t("check_for_updates"));
         if check.changed() {
@@ -733,19 +948,32 @@ impl PortalApp {
                 self.next_update_check = std::time::Instant::now();
             }
         }
-        ui.label(egui::RichText::new(lang.t("check_for_updates_desc")).color(theme.fg_dim).size(FONT_SM));
+        ui.label(
+            egui::RichText::new(lang.t("check_for_updates_desc"))
+                .color(theme.fg_dim)
+                .size(FONT_SM),
+        );
 
         ui.add_space(SPACE_LG);
         ui.separator();
         ui.add_space(SPACE_SM);
 
-        ui.label(egui::RichText::new(lang.t("restore_sessions")).color(theme.fg_primary).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(lang.t("restore_sessions"))
+                .color(theme.fg_primary)
+                .size(14.0)
+                .strong(),
+        );
         ui.add_space(SPACE_XS);
         let restore = ui.checkbox(&mut self.restore_sessions, lang.t("restore_sessions"));
         if restore.changed() {
             *changed = true;
         }
-        ui.label(egui::RichText::new(lang.t("restore_sessions_desc")).color(theme.fg_dim).size(FONT_SM));
+        ui.label(
+            egui::RichText::new(lang.t("restore_sessions_desc"))
+                .color(theme.fg_dim)
+                .size(FONT_SM),
+        );
 
         // ZMODEM download directory — only where the transfer engine exists
         // (see terminal::zmodem); the section vanishes elsewhere.
@@ -754,23 +982,36 @@ impl PortalApp {
             ui.separator();
             ui.add_space(SPACE_SM);
 
-            ui.label(egui::RichText::new(lang.t("zmodem_download_dir")).color(theme.fg_primary).size(14.0).strong());
+            ui.label(
+                egui::RichText::new(lang.t("zmodem_download_dir"))
+                    .color(theme.fg_primary)
+                    .size(14.0)
+                    .strong(),
+            );
             ui.add_space(SPACE_XS);
             ui.horizontal(|ui| {
                 ui.label(widgets::field_label(lang.t("zmodem_download_dir"), theme));
                 ui.add_space(SPACE_SM);
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut self.zmodem_download_dir)
-                        .hint_text(egui::RichText::new("~/Downloads").color(theme.hint_color()).italics())
+                        .hint_text(
+                            egui::RichText::new("~/Downloads")
+                                .color(theme.hint_color())
+                                .italics(),
+                        )
                         .desired_width(300.0)
                         .font(egui::FontId::proportional(13.0))
-                        .text_color(theme.fg_primary)
+                        .text_color(theme.fg_primary),
                 );
                 if resp.changed() || resp.lost_focus() {
                     *changed = true;
                 }
             });
-            ui.label(egui::RichText::new(lang.t("zmodem_download_dir_desc")).color(theme.fg_dim).size(FONT_SM));
+            ui.label(
+                egui::RichText::new(lang.t("zmodem_download_dir_desc"))
+                    .color(theme.fg_dim)
+                    .size(FONT_SM),
+            );
         }
 
         ui.add_space(SPACE_LG);
@@ -780,9 +1021,18 @@ impl PortalApp {
         // File-manager integration: the OS right-click "Open new Portal
         // tab/window here" actions (Finder Quick Actions / Nautilus / Dolphin)
         // that feed the single-instance IPC.
-        ui.label(egui::RichText::new(lang.t("integration_section")).color(theme.fg_primary).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(lang.t("integration_section"))
+                .color(theme.fg_primary)
+                .size(14.0)
+                .strong(),
+        );
         ui.add_space(SPACE_XS);
-        ui.label(egui::RichText::new(lang.t("integration_desc")).color(theme.fg_dim).size(FONT_SM));
+        ui.label(
+            egui::RichText::new(lang.t("integration_desc"))
+                .color(theme.fg_dim)
+                .size(FONT_SM),
+        );
         ui.add_space(SPACE_XS);
         {
             use crate::integration::{self, IntegrationStatus};
@@ -793,7 +1043,9 @@ impl PortalApp {
                     IntegrationStatus::NotInstalled => ("integration_not_installed", theme.fg_dim),
                 };
                 ui.label(
-                    egui::RichText::new(lang.t(status_key)).color(status_color).size(FONT_SM),
+                    egui::RichText::new(lang.t(status_key))
+                        .color(status_color)
+                        .size(FONT_SM),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if integration::status() != IntegrationStatus::Installed

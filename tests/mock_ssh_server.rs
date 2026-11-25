@@ -1,8 +1,8 @@
 //! Mock SSH server for testing SSH client functionality
 
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Simple mock SSH server for testing
 pub struct MockSshServer {

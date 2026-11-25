@@ -65,7 +65,9 @@ impl AiChatState {
     /// Begin (or continue) streaming an assistant reply.
     pub fn begin_stream(&mut self) {
         if self.streaming.is_none() {
-            self.streaming = Some(StreamingBuf { text: String::new() });
+            self.streaming = Some(StreamingBuf {
+                text: String::new(),
+            });
         }
         self.running = true;
         self.error = None;
@@ -153,8 +155,16 @@ pub fn build_system_prompt(env: &ExecutionEnvironment) -> String {
         Some(host) => format!("connected to remote host {host}"),
         None => "running on the local machine".to_string(),
     };
-    let shell = if env.shell.is_empty() { "sh" } else { env.shell.as_str() };
-    let cwd = if env.cwd.is_empty() { "?" } else { env.cwd.as_str() };
+    let shell = if env.shell.is_empty() {
+        "sh"
+    } else {
+        env.shell.as_str()
+    };
+    let cwd = if env.cwd.is_empty() {
+        "?"
+    } else {
+        env.cwd.as_str()
+    };
 
     format!(
         "You are a terminal assistant {location}. The execution environment is \

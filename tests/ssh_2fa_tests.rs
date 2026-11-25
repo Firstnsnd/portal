@@ -116,7 +116,9 @@ async fn password_auth_succeeds_against_mock() {
     let bridge = AuthPromptBridge::new();
     let handle = connect_to_mock(
         server.port,
-        &ResolvedAuth::Password { password: "pw123".into() },
+        &ResolvedAuth::Password {
+            password: "pw123".into(),
+        },
         &bridge,
     )
     .await;
@@ -138,12 +140,17 @@ async fn password_only_server_never_surfaces_prompt() {
     let bridge = AuthPromptBridge::new();
     let result = with_timeout(connect_to_mock(
         server.port,
-        &ResolvedAuth::Password { password: "pw123".into() },
+        &ResolvedAuth::Password {
+            password: "pw123".into(),
+        },
         &bridge,
     ))
     .await;
 
-    assert!(bridge.pending().is_none(), "no prompt may surface on a password-only server");
+    assert!(
+        bridge.pending().is_none(),
+        "no prompt may surface on a password-only server"
+    );
     assert!(result.is_ok());
 
     with_timeout(server.shutdown()).await;
@@ -153,9 +160,7 @@ async fn password_only_server_never_surfaces_prompt() {
 #[tokio::test]
 async fn known_hosts_file_not_touched_by_tests() {
     let known_hosts = dirs::home_dir().map(|h| h.join(".ssh/known_hosts"));
-    let before: Option<Vec<u8>> = known_hosts
-        .as_ref()
-        .and_then(|p| std::fs::read(p).ok());
+    let before: Option<Vec<u8>> = known_hosts.as_ref().and_then(|p| std::fs::read(p).ok());
 
     let server = MockSshServer::start(MockAuthMode::PasswordAccept {
         password: "pw".into(),
@@ -168,7 +173,9 @@ async fn known_hosts_file_not_touched_by_tests() {
     for _ in 0..2 {
         let handle = with_timeout(connect_to_mock(
             server.port,
-            &ResolvedAuth::Password { password: "pw".into() },
+            &ResolvedAuth::Password {
+                password: "pw".into(),
+            },
             &bridge,
         ))
         .await;
@@ -176,9 +183,7 @@ async fn known_hosts_file_not_touched_by_tests() {
     }
     with_timeout(server.shutdown()).await;
 
-    let after: Option<Vec<u8>> = known_hosts
-        .as_ref()
-        .and_then(|p| std::fs::read(p).ok());
+    let after: Option<Vec<u8>> = known_hosts.as_ref().and_then(|p| std::fs::read(p).ok());
     assert_eq!(
         before, after,
         "known_hosts must be byte-identical after test connections"
@@ -201,21 +206,33 @@ async fn kbdint_two_round_password_then_otp_succeeds() {
     let bridge = Arc::new(AuthPromptBridge::new());
     let _answerer = spawn_answerer(
         Arc::clone(&bridge),
-        vec![("Password:", "pw123".into()), ("Verification", "123456".into())],
+        vec![
+            ("Password:", "pw123".into()),
+            ("Verification", "123456".into()),
+        ],
     );
 
     let result = with_timeout(connect_to_mock(
         server.port,
-        &ResolvedAuth::Password { password: "ignored-by-kbdint-server".into() },
+        &ResolvedAuth::Password {
+            password: "ignored-by-kbdint-server".into(),
+        },
         &bridge,
     ))
     .await;
 
     let seen = server.answers_seen();
     with_timeout(server.shutdown()).await;
-    assert!(result.is_ok(), "2FA two-round server must be connectable — got: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "2FA two-round server must be connectable — got: {:?}",
+        result.err()
+    );
     // Both rounds reached the server with the typed answers.
-    assert_eq!(seen, vec![vec!["pw123".to_string()], vec!["123456".to_string()]]);
+    assert_eq!(
+        seen,
+        vec![vec!["pw123".to_string()], vec!["123456".to_string()]]
+    );
 }
 
 /// T3.2 — single-round OTP server.
@@ -228,20 +245,23 @@ async fn kbdint_single_round_otp_succeeds() {
     .expect("mock server starts");
 
     let bridge = Arc::new(AuthPromptBridge::new());
-    let _answerer = spawn_answerer(
-        Arc::clone(&bridge),
-        vec![("Verification", "654321".into())],
-    );
+    let _answerer = spawn_answerer(Arc::clone(&bridge), vec![("Verification", "654321".into())]);
 
     let result = with_timeout(connect_to_mock(
         server.port,
-        &ResolvedAuth::Password { password: "x".into() },
+        &ResolvedAuth::Password {
+            password: "x".into(),
+        },
         &bridge,
     ))
     .await;
 
     with_timeout(server.shutdown()).await;
-    assert!(result.is_ok(), "single-round OTP server must be connectable — got: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "single-round OTP server must be connectable — got: {:?}",
+        result.err()
+    );
 }
 
 /// T3.3 — a wrong OTP fails with the clear auth error, and the typed
@@ -262,16 +282,24 @@ async fn kbdint_wrong_otp_rejected() {
 
     let result = with_timeout(connect_to_mock(
         server.port,
-        &ResolvedAuth::Password { password: "x".into() },
+        &ResolvedAuth::Password {
+            password: "x".into(),
+        },
         &bridge,
     ))
     .await;
 
     let seen = server.answers_seen();
     with_timeout(server.shutdown()).await;
-    let err = result.err().unwrap_or_else(|| panic!("wrong OTP must fail"));
+    let err = result
+        .err()
+        .unwrap_or_else(|| panic!("wrong OTP must fail"));
     assert_eq!(err, "Authentication failed");
-    assert_eq!(seen, vec![vec!["000000".to_string()]], "the wrong answer must reach the server");
+    assert_eq!(
+        seen,
+        vec![vec!["000000".to_string()]],
+        "the wrong answer must reach the server"
+    );
 }
 
 /// T3.4 — per-prompt echo flags survive to the bridge (UI masks echo=false).
@@ -284,12 +312,12 @@ async fn kbdint_echo_flags_reach_the_bridge() {
     .expect("mock server starts");
 
     let bridge = Arc::new(AuthPromptBridge::new());
-    let auth = ResolvedAuth::Password { password: "x".into() };
+    let auth = ResolvedAuth::Password {
+        password: "x".into(),
+    };
     let task_bridge = Arc::clone(&bridge);
     let port = server.port;
-    let connect = tokio::spawn(async move {
-        connect_to_mock(port, &auth, &task_bridge).await
-    });
+    let connect = tokio::spawn(async move { connect_to_mock(port, &auth, &task_bridge).await });
 
     // Drive manually to inspect the fields before answering.
     let prompt = loop {
@@ -307,7 +335,11 @@ async fn kbdint_echo_flags_reach_the_bridge() {
     assert!(bridge.respond(vec!["user".into(), "999999".into()]));
     let result = with_timeout(connect).await.expect("join");
     with_timeout(server.shutdown()).await;
-    assert!(result.is_ok(), "echo-flag server must be connectable — got: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "echo-flag server must be connectable — got: {:?}",
+        result.err()
+    );
 }
 
 /// T3.5 — a 0-prompt info round is auto-answered without ever surfacing
@@ -321,14 +353,23 @@ async fn kbdint_zero_prompt_round_auto_answered_without_ui() {
     let bridge = AuthPromptBridge::new();
     let result = with_timeout(connect_to_mock(
         server.port,
-        &ResolvedAuth::Password { password: "x".into() },
+        &ResolvedAuth::Password {
+            password: "x".into(),
+        },
         &bridge,
     ))
     .await;
 
     with_timeout(server.shutdown()).await;
-    assert!(result.is_ok(), "zero-prompt info server must be connectable — got: {:?}", result.err());
-    assert!(bridge.pending().is_none(), "info-only rounds must never surface a prompt");
+    assert!(
+        result.is_ok(),
+        "zero-prompt info server must be connectable — got: {:?}",
+        result.err()
+    );
+    assert!(
+        bridge.pending().is_none(),
+        "info-only rounds must never surface a prompt"
+    );
 }
 
 /// T3.6 — a reject-everything server yields the clear error, no prompt.
@@ -341,14 +382,21 @@ async fn reject_all_yields_clear_error() {
     let bridge = AuthPromptBridge::new();
     let result = with_timeout(connect_to_mock(
         server.port,
-        &ResolvedAuth::Password { password: "x".into() },
+        &ResolvedAuth::Password {
+            password: "x".into(),
+        },
         &bridge,
     ))
     .await;
 
     with_timeout(server.shutdown()).await;
     assert!(bridge.pending().is_none());
-    assert_eq!(result.err().unwrap_or_else(|| panic!("reject-all must fail")), "Authentication failed");
+    assert_eq!(
+        result
+            .err()
+            .unwrap_or_else(|| panic!("reject-all must fail")),
+        "Authentication failed"
+    );
 }
 
 /// T3.7 — a malicious server looping 0-prompt info rounds is stopped by
@@ -362,14 +410,18 @@ async fn infinite_info_requests_stopped_by_round_guard() {
     let bridge = AuthPromptBridge::new();
     let result = with_timeout(connect_to_mock(
         server.port,
-        &ResolvedAuth::Password { password: "x".into() },
+        &ResolvedAuth::Password {
+            password: "x".into(),
+        },
         &bridge,
     ))
     .await;
 
     with_timeout(server.shutdown()).await;
     assert_eq!(
-        result.err().unwrap_or_else(|| panic!("loop server must be cut off")),
+        result
+            .err()
+            .unwrap_or_else(|| panic!("loop server must be cut off")),
         "Too many authentication rounds"
     );
 }
@@ -384,12 +436,12 @@ async fn user_cancel_mid_prompt_aborts_auth() {
     .expect("mock server starts");
 
     let bridge = Arc::new(AuthPromptBridge::new());
-    let auth = ResolvedAuth::Password { password: "x".into() };
+    let auth = ResolvedAuth::Password {
+        password: "x".into(),
+    };
     let task_bridge = Arc::clone(&bridge);
     let port = server.port;
-    let connect = tokio::spawn(async move {
-        connect_to_mock(port, &auth, &task_bridge).await
-    });
+    let connect = tokio::spawn(async move { connect_to_mock(port, &auth, &task_bridge).await });
 
     // Wait for the OTP prompt, then the user cancels.
     loop {
@@ -403,7 +455,9 @@ async fn user_cancel_mid_prompt_aborts_auth() {
     let result = with_timeout(connect).await.expect("join");
     with_timeout(server.shutdown()).await;
     assert_eq!(
-        result.err().unwrap_or_else(|| panic!("cancel must abort auth")),
+        result
+            .err()
+            .unwrap_or_else(|| panic!("cancel must abort auth")),
         "Authentication cancelled"
     );
 }
@@ -420,32 +474,34 @@ async fn pubkey_then_kbdint_fallback() {
 
     // Generate a throwaway client key and feed it as inline key content,
     // exactly like a host configured with an SSH key.
-    let key = russh::keys::PrivateKey::random(
-        &mut rand::rngs::OsRng,
-        russh::keys::Algorithm::Ed25519,
-    )
-    .expect("client keygen");
+    let key =
+        russh::keys::PrivateKey::random(&mut rand::rngs::OsRng, russh::keys::Algorithm::Ed25519)
+            .expect("client keygen");
     let key_content = key
         .to_openssh(russh::keys::ssh_key::LineEnding::LF)
         .expect("serialize key")
         .to_string();
 
     let bridge = Arc::new(AuthPromptBridge::new());
-    let _answerer = spawn_answerer(
-        Arc::clone(&bridge),
-        vec![("Verification", "246810".into())],
-    );
+    let _answerer = spawn_answerer(Arc::clone(&bridge), vec![("Verification", "246810".into())]);
 
     let result = with_timeout(connect_to_mock(
         server.port,
-        &ResolvedAuth::Key { key_content, passphrase: None },
+        &ResolvedAuth::Key {
+            key_content,
+            passphrase: None,
+        },
         &bridge,
     ))
     .await;
 
     let seen = server.answers_seen();
     with_timeout(server.shutdown()).await;
-    assert!(result.is_ok(), "pubkey→kbd-int server must be connectable — got: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "pubkey→kbd-int server must be connectable — got: {:?}",
+        result.err()
+    );
     assert_eq!(seen, vec![vec!["246810".to_string()]]);
 }
 
@@ -462,18 +518,25 @@ async fn decline_bridge_gives_actionable_error() {
     let bridge = AuthPromptBridge::decline();
     let result = with_timeout(connect_to_mock(
         server.port,
-        &ResolvedAuth::Password { password: "x".into() },
+        &ResolvedAuth::Password {
+            password: "x".into(),
+        },
         &bridge,
     ))
     .await;
 
     with_timeout(server.shutdown()).await;
-    let err = result.err().unwrap_or_else(|| panic!("decline must not connect"));
+    let err = result
+        .err()
+        .unwrap_or_else(|| panic!("decline must not connect"));
     assert!(
         err.contains("two-factor") && err.contains("terminal session"),
         "error must tell the user what to do, got: {err}"
     );
-    assert!(bridge.pending().is_none(), "decline must never publish a prompt");
+    assert!(
+        bridge.pending().is_none(),
+        "decline must never publish a prompt"
+    );
 }
 
 /// T3.11 — jump host (plain password) → 2FA target: the target's OTP
@@ -492,16 +555,15 @@ async fn jump_target_auth_uses_same_state_machine() {
     .expect("target mock starts");
 
     let bridge = Arc::new(AuthPromptBridge::new());
-    let _answerer = spawn_answerer(
-        Arc::clone(&bridge),
-        vec![("Verification", "135790".into())],
-    );
+    let _answerer = spawn_answerer(Arc::clone(&bridge), vec![("Verification", "135790".into())]);
 
     let jump_info = portal::ssh::JumpHostInfo {
         host: "127.0.0.1".into(),
         port: jump.port,
         username: "user".into(),
-        auth: ResolvedAuth::Password { password: "jumppw".into() },
+        auth: ResolvedAuth::Password {
+            password: "jumppw".into(),
+        },
         proxy: None,
     };
 
@@ -510,7 +572,9 @@ async fn jump_target_auth_uses_same_state_machine() {
         "127.0.0.1",
         target.port,
         "user",
-        &ResolvedAuth::Password { password: "ignored".into() },
+        &ResolvedAuth::Password {
+            password: "ignored".into(),
+        },
         0,
         false,
         &bridge,
@@ -522,18 +586,18 @@ async fn jump_target_auth_uses_same_state_machine() {
     let seen = target.answers_seen();
     with_timeout(jump.shutdown()).await;
     with_timeout(target.shutdown()).await;
-    assert!(result.is_ok(), "jump→2FA target must be connectable — got: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "jump→2FA target must be connectable — got: {:?}",
+        result.err()
+    );
     assert_eq!(seen, vec![vec!["135790".to_string()]]);
 }
 
 // ── Phase 4: SFTP path ──────────────────────────────────────────────────
 
 /// Drive `sftp_task` to completion and collect the terminal response.
-async fn drive_sftp_task(
-    port: u16,
-    otp_delay: std::time::Duration,
-    otp: &str,
-) -> SftpTerminal {
+async fn drive_sftp_task(port: u16, otp_delay: std::time::Duration, otp: &str) -> SftpTerminal {
     use portal::sftp::{sftp_task, SftpResponse};
     use tokio::sync::mpsc;
 
@@ -543,7 +607,9 @@ async fn drive_sftp_task(
     let bridge = std::sync::Arc::new(AuthPromptBridge::new());
 
     let task_bridge = std::sync::Arc::clone(&bridge);
-    let auth = ResolvedAuth::Password { password: "x".into() };
+    let auth = ResolvedAuth::Password {
+        password: "x".into(),
+    };
     let task = tokio::spawn(async move {
         sftp_task(
             "127.0.0.1".into(),
@@ -569,8 +635,7 @@ async fn drive_sftp_task(
     while std::time::Instant::now() < deadline + std::time::Duration::from_secs(4) {
         if !answered && deadline <= std::time::Instant::now() {
             if let Some(p) = bridge.pending() {
-                let answers: Vec<String> =
-                    p.prompts.iter().map(|_| otp.to_string()).collect();
+                let answers: Vec<String> = p.prompts.iter().map(|_| otp.to_string()).collect();
                 assert!(bridge.respond(answers), "answer count must match");
                 answered = true;
             }
@@ -633,7 +698,10 @@ async fn sftp_task_completes_2fa_via_bridge() {
                 "auth must have passed, got: {e}"
             );
         }
-        other => panic!("expected an error response after auth, got {:?}", matches!(other, SftpTerminal::Running)),
+        other => panic!(
+            "expected an error response after auth, got {:?}",
+            matches!(other, SftpTerminal::Running)
+        ),
     }
 }
 
@@ -675,7 +743,9 @@ async fn sftp_auth_phase_survives_slow_otp_beyond_connect_timeout() {
 async fn remote_forward_activated_on_connect_and_cancelled_on_stop() {
     // Full SshSession connect → the mock must grant session channels.
     let server = with_timeout(MockSshServer::start_with_session_channels(
-        MockAuthMode::PasswordAccept { password: "pw".into() },
+        MockAuthMode::PasswordAccept {
+            password: "pw".into(),
+        },
     ))
     .await
     .expect("mock server starts");
@@ -701,7 +771,9 @@ async fn remote_forward_activated_on_connect_and_cancelled_on_stop() {
         "127.0.0.1".into(),
         server.port,
         "user".into(),
-        ResolvedAuth::Password { password: "pw".into() },
+        ResolvedAuth::Password {
+            password: "pw".into(),
+        },
         80,
         24,
         Vec::new(),
@@ -717,12 +789,13 @@ async fn remote_forward_activated_on_connect_and_cancelled_on_stop() {
     // The -R activation runs inside ssh_task; poll until it lands.
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     let forward_active = |session: &portal::ssh::SshSession| {
-        session
-            .port_forwards
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|pf| pf.config == remote_cfg && matches!(*pf.state.lock().unwrap(), portal::ssh::port_forward::ForwardState::Active))
+        session.port_forwards.lock().unwrap().iter().any(|pf| {
+            pf.config == remote_cfg
+                && matches!(
+                    *pf.state.lock().unwrap(),
+                    portal::ssh::port_forward::ForwardState::Active
+                )
+        })
     };
     while !forward_active(&session) {
         assert!(
@@ -764,7 +837,10 @@ async fn remote_forward_activated_on_connect_and_cancelled_on_stop() {
         let fwds = session.port_forwards.lock().unwrap();
         fwds.iter().all(|pf| pf.config != remote_cfg)
     };
-    assert!(forward_removed, "stopped forward must be removed from the list");
+    assert!(
+        forward_removed,
+        "stopped forward must be removed from the list"
+    );
 
     session.disconnect();
     // shutdown_background moves the blocking join off-thread — a plain drop
@@ -792,7 +868,9 @@ async fn dynamic_forward_serves_socks5_connections() {
     let echo_port = echo.local_addr().unwrap().port();
     tokio::spawn(async move {
         loop {
-            let Ok((mut sock, _)) = echo.accept().await else { return };
+            let Ok((mut sock, _)) = echo.accept().await else {
+                return;
+            };
             tokio::spawn(async move {
                 let mut buf = [0u8; 256];
                 loop {
@@ -812,7 +890,9 @@ async fn dynamic_forward_serves_socks5_connections() {
     let bridge = AuthPromptBridge::new();
     let handle = with_timeout(connect_to_mock(
         server.port,
-        &ResolvedAuth::Password { password: "pw".into() },
+        &ResolvedAuth::Password {
+            password: "pw".into(),
+        },
         &bridge,
     ))
     .await
@@ -879,7 +959,9 @@ async fn dynamic_forward_serves_socks5_connections() {
     // Tunnel is live: bytes round-trip through the echo server.
     client.write_all(b"ping-through-tunnel").await.unwrap();
     let mut echo_back = vec![0u8; b"ping-through-tunnel".len()];
-    with_timeout(client.read_exact(&mut echo_back)).await.unwrap();
+    with_timeout(client.read_exact(&mut echo_back))
+        .await
+        .unwrap();
     assert_eq!(echo_back, b"ping-through-tunnel");
 
     pf.stop();
@@ -919,7 +1001,8 @@ async fn spawn_http_connect_proxy(expected: String) -> u16 {
         let head = String::from_utf8_lossy(&buf);
         let first = head.lines().next().unwrap_or("");
         assert_eq!(
-            first, format!("CONNECT {expected} HTTP/1.1"),
+            first,
+            format!("CONNECT {expected} HTTP/1.1"),
             "client must CONNECT to the SSH server through the proxy"
         );
         client
@@ -970,7 +1053,9 @@ async fn ssh_connects_through_http_proxy() {
     portal::ssh::authenticate(
         &mut handle,
         "user",
-        &ResolvedAuth::Password { password: "pw".into() },
+        &ResolvedAuth::Password {
+            password: "pw".into(),
+        },
         &bridge,
     )
     .await
@@ -1002,7 +1087,10 @@ async fn ssh_connects_through_socks5_proxy() {
                 Ok((consumed, method)) => {
                     buf.drain(..consumed);
                     assert_eq!(method, s5::METHOD_NO_AUTH);
-                    client.write_all(&[s5::SOCKS_VERSION, method]).await.unwrap();
+                    client
+                        .write_all(&[s5::SOCKS_VERSION, method])
+                        .await
+                        .unwrap();
                     break;
                 }
                 Err(s5::SocksError::Incomplete) => {}
@@ -1026,15 +1114,21 @@ async fn ssh_connects_through_socks5_proxy() {
             buf.extend_from_slice(&chunk[..n]);
         }
         let target_port = u16::from_be_bytes([buf[8], buf[9]]);
-        assert_eq!(target_port, server.port, "SOCKS5 CONNECT must target the SSH server");
+        assert_eq!(
+            target_port, server.port,
+            "SOCKS5 CONNECT must target the SSH server"
+        );
         client
-            .write_all(&s5::success_reply(&s5::SocksHost::Ipv4(
-                std::net::Ipv4Addr::LOCALHOST,
-            ), 0))
+            .write_all(&s5::success_reply(
+                &s5::SocksHost::Ipv4(std::net::Ipv4Addr::LOCALHOST),
+                0,
+            ))
             .await
             .unwrap();
 
-        let mut target = tokio::net::TcpStream::connect(("127.0.0.1", target_port)).await.unwrap();
+        let mut target = tokio::net::TcpStream::connect(("127.0.0.1", target_port))
+            .await
+            .unwrap();
         let _ = tokio::io::copy_bidirectional(&mut client, &mut target).await;
     });
 
@@ -1059,7 +1153,9 @@ async fn ssh_connects_through_socks5_proxy() {
     portal::ssh::authenticate(
         &mut handle,
         "user",
-        &ResolvedAuth::Password { password: "pw".into() },
+        &ResolvedAuth::Password {
+            password: "pw".into(),
+        },
         &bridge,
     )
     .await

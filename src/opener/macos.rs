@@ -36,7 +36,10 @@ impl Opener for MacosOpener {
 
     fn open_privacy_settings(&self) -> Result<(), String> {
         // Full Disk Access pane — the pane the cwd-permission dialog points at.
-        run(&["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"])
+        run(&[
+            "open",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+        ])
     }
 }
 

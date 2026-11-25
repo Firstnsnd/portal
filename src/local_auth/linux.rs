@@ -112,8 +112,7 @@ extern "C" fn password_conversation(
             return PAM_CONV_ERR;
         }
         let n = num_msg as usize;
-        let responses =
-            libc::calloc(n, std::mem::size_of::<PamResponse>()) as *mut PamResponse;
+        let responses = libc::calloc(n, std::mem::size_of::<PamResponse>()) as *mut PamResponse;
         if responses.is_null() {
             return PAM_CONV_ERR;
         }

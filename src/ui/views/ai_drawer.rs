@@ -6,12 +6,12 @@
 
 use eframe::egui;
 
+use super::ai_markdown::render_markdown;
 use crate::llm::types::{ChatMessage, ChatRole, ExecutionEnvironment};
-use crate::ui::state::ai_chat::{spawn_chat, AiChatState};
 use crate::ui::pane::AppWindow;
 use crate::ui::pane_view::WindowContext;
+use crate::ui::state::ai_chat::{spawn_chat, AiChatState};
 use crate::ui::tokens as tk;
-use super::ai_markdown::render_markdown;
 
 /// Radius (px) of the draggable orb.
 pub const ORB_RADIUS: f32 = 15.0;
@@ -63,7 +63,9 @@ pub fn render_ai_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut Wi
     // holds keyboard focus via this id (see render_terminal_session).
     // Computed before `tab` borrows the window mutably.
     let composer_id = window.ai_composer_id();
-    let Some(tab) = window.tabs.get_mut(active) else { return };
+    let Some(tab) = window.tabs.get_mut(active) else {
+        return;
+    };
     let handle = tab.ai_chat.clone();
 
     // Move a confirmed-run command out to `pending_ai_command` (consumed next
@@ -110,7 +112,15 @@ pub fn render_ai_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut Wi
                 .resizable(false)
                 .frame(egui::Frame::none())
                 .show_inside(ui, |ui| {
-                    draw_composer(ui, theme, lang, &handle, &mut composer_text, &mut do_send, composer_id);
+                    draw_composer(
+                        ui,
+                        theme,
+                        lang,
+                        &handle,
+                        &mut composer_text,
+                        &mut do_send,
+                        composer_id,
+                    );
                 });
 
             // Messages take exactly the space left above the composer dock.
@@ -123,7 +133,15 @@ pub fn render_ai_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut Wi
                         draw_empty_state(ui, theme, lang);
                     }
                     for msg in &st.messages {
-                        draw_bubble(ui, msg, theme, lang, composer_id, &mut run_wanted, &mut composer_wanted);
+                        draw_bubble(
+                            ui,
+                            msg,
+                            theme,
+                            lang,
+                            composer_id,
+                            &mut run_wanted,
+                            &mut composer_wanted,
+                        );
                     }
                     if let Some(buf) = &st.streaming {
                         if buf.text.is_empty() {
@@ -144,7 +162,9 @@ pub fn render_ai_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut Wi
 
             // If a Run button was clicked, ask for confirmation.
             if let Some(cmd) = run_wanted {
-                if let Ok(mut st) = handle.lock() { st.confirm_run = Some(cmd); }
+                if let Ok(mut st) = handle.lock() {
+                    st.confirm_run = Some(cmd);
+                }
             }
             // A bubble's right-click menu asked to drop the message into the
             // composer draft (newline-joined onto any existing text). The
@@ -215,14 +235,20 @@ fn draw_header(
     handle: &std::sync::Arc<std::sync::Mutex<AiChatState>>,
 ) {
     egui::Frame::none()
-        .inner_margin(egui::Margin { left: PAD, right: 12.0, top: 14.0, bottom: 12.0 })
+        .inner_margin(egui::Margin {
+            left: PAD,
+            right: 12.0,
+            top: 14.0,
+            bottom: 12.0,
+        })
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 // Accent dot + title
                 ui.vertical(|ui| {
                     ui.add_space(2.0);
                     ui.horizontal(|ui| {
-                        let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
                         ui.painter().circle_filled(rect.center(), 4.0, theme.accent);
                         ui.label(
                             egui::RichText::new(lang.t("ai_title"))
@@ -240,13 +266,20 @@ fn draw_header(
                     }
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(
-                        egui::Button::new(
-                            egui::RichText::new("\u{2715}").color(theme.fg_dim).size(15.0),
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("\u{2715}")
+                                    .color(theme.fg_dim)
+                                    .size(15.0),
+                            )
+                            .frame(false),
                         )
-                        .frame(false),
-                    ).clicked() {
-                        if let Ok(mut st) = handle.lock() { st.open = false; }
+                        .clicked()
+                    {
+                        if let Ok(mut st) = handle.lock() {
+                            st.open = false;
+                        }
                     }
                 });
             });
@@ -256,7 +289,11 @@ fn draw_header(
 fn draw_empty_state(ui: &mut egui::Ui, theme: &crate::ui::ThemeColors, lang: crate::ui::Language) {
     ui.add_space(16.0);
     ui.vertical_centered(|ui| {
-        ui.label(egui::RichText::new("\u{2726}").color(theme.accent_alpha(140)).size(28.0));
+        ui.label(
+            egui::RichText::new("\u{2726}")
+                .color(theme.accent_alpha(140))
+                .size(28.0),
+        );
         ui.add_space(6.0);
         ui.label(
             egui::RichText::new(lang.t("ai_input_placeholder"))
@@ -270,7 +307,12 @@ fn draw_empty_state(ui: &mut egui::Ui, theme: &crate::ui::ThemeColors, lang: cra
 fn draw_streaming_bubble(ui: &mut egui::Ui, text: &str, theme: &crate::ui::ThemeColors) {
     ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
         egui::Frame::none()
-            .inner_margin(egui::Margin { left: PAD, right: PAD, top: 0.0, bottom: 0.0 })
+            .inner_margin(egui::Margin {
+                left: PAD,
+                right: PAD,
+                top: 0.0,
+                bottom: 0.0,
+            })
             .show(ui, |ui| {
                 bubble_frame(theme.bg_secondary).show(ui, |ui| {
                     // Lay out a break-anywhere galley so the bubble
@@ -289,9 +331,7 @@ fn draw_streaming_bubble(ui: &mut egui::Ui, text: &str, theme: &crate::ui::Theme
                     job.wrap.max_width = max_w;
                     let galley = ui.fonts(|f| f.layout_job(job));
                     ui.set_max_width(max_w);
-                    ui.add(
-                        egui::Label::new(egui::WidgetText::Galley(galley)).selectable(true),
-                    );
+                    ui.add(egui::Label::new(egui::WidgetText::Galley(galley)).selectable(true));
                 });
             });
         ui.add_space(BUBBLE_GAP);
@@ -305,15 +345,23 @@ fn draw_thinking_bubble(ui: &mut egui::Ui, theme: &crate::ui::theme::ThemeColors
     let now = ui.input(|i| i.time);
     // The app repaints on activity, not a fixed 60 FPS, so while waiting for the
     // first token we must keep asking for repaints or the dots freeze on frame one.
-    ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(50));
     ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
         egui::Frame::none()
-            .inner_margin(egui::Margin { left: PAD, right: PAD, top: 0.0, bottom: 0.0 })
+            .inner_margin(egui::Margin {
+                left: PAD,
+                right: PAD,
+                top: 0.0,
+                bottom: 0.0,
+            })
             .show(ui, |ui| {
                 bubble_frame(theme.bg_secondary).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new("\u{2726}").color(theme.accent).size(tk::FONT_XS),
+                            egui::RichText::new("\u{2726}")
+                                .color(theme.accent)
+                                .size(tk::FONT_XS),
                         );
                         ui.add_space(4.0);
                         // Three accent dots bouncing vertically in a staggered
@@ -322,14 +370,9 @@ fn draw_thinking_bubble(ui: &mut egui::Ui, theme: &crate::ui::theme::ThemeColors
                             let bounce = (now * 5.0 + i as f64 * 0.9).sin();
                             let y_off = (bounce * 2.5) as f32;
                             ui.add_space(2.0);
-                            let (rect, _) = ui.allocate_exact_size(
-                                egui::vec2(6.0, 12.0),
-                                egui::Sense::hover(),
-                            );
-                            let center = egui::pos2(
-                                rect.center().x,
-                                rect.center().y + y_off,
-                            );
+                            let (rect, _) =
+                                ui.allocate_exact_size(egui::vec2(6.0, 12.0), egui::Sense::hover());
+                            let center = egui::pos2(rect.center().x, rect.center().y + y_off);
                             ui.painter().circle_filled(center, 3.0, theme.accent);
                         }
                         ui.add_space(8.0);
@@ -348,9 +391,18 @@ fn draw_error(
     err: &str,
 ) {
     ui.add_space(4.0);
-    let text = if err == "no_api_key" { lang.t("ai_no_key_configured") } else { err };
+    let text = if err == "no_api_key" {
+        lang.t("ai_no_key_configured")
+    } else {
+        err
+    };
     egui::Frame::none()
-        .inner_margin(egui::Margin { left: PAD, right: PAD, top: 0.0, bottom: 0.0 })
+        .inner_margin(egui::Margin {
+            left: PAD,
+            right: PAD,
+            top: 0.0,
+            bottom: 0.0,
+        })
         .show(ui, |ui| {
             egui::Frame::none()
                 .fill(theme.error_dim)
@@ -428,7 +480,9 @@ fn draw_bubble(
                             ui.set_max_width(wrap_w);
                             if !label.is_empty() {
                                 ui.label(
-                                    egui::RichText::new(label).color(theme.accent).size(tk::FONT_XS),
+                                    egui::RichText::new(label)
+                                        .color(theme.accent)
+                                        .size(tk::FONT_XS),
                                 );
                                 ui.add_space(2.0);
                             }
@@ -443,11 +497,25 @@ fn draw_bubble(
                                         code_block(ui, theme, lang, block, run_wanted);
                                     },
                                     |ui| {
-                                        message_menu(ui, lang, &msg.content, composer_id, composer_wanted)
+                                        message_menu(
+                                            ui,
+                                            lang,
+                                            &msg.content,
+                                            composer_id,
+                                            composer_wanted,
+                                        )
                                     },
                                 );
                             } else {
-                                draw_sent_message(ui, &msg.content, theme, wrap_w, lang, composer_id, composer_wanted);
+                                draw_sent_message(
+                                    ui,
+                                    &msg.content,
+                                    theme,
+                                    wrap_w,
+                                    lang,
+                                    composer_id,
+                                    composer_wanted,
+                                );
                             }
                         });
                     });
@@ -463,13 +531,18 @@ fn draw_bubble(
 /// for short messages. Returns the width in points, before any frame padding.
 fn measure_bubble_content(ui: &mut egui::Ui, msg: &ChatMessage, label: &str) -> f32 {
     let font_id = egui::FontId::proportional(tk::FONT_BASE);
-    let galley = ui.fonts(|f| f.layout_no_wrap(msg.content.to_owned(), font_id, egui::Color32::WHITE));
+    let galley =
+        ui.fonts(|f| f.layout_no_wrap(msg.content.to_owned(), font_id, egui::Color32::WHITE));
     let body_w = galley.size().x;
     let label_w = if label.is_empty() {
         0.0
     } else {
         let id = egui::FontId::proportional(tk::FONT_XS);
-        ui.fonts(|f| f.layout_no_wrap(label.to_owned(), id, egui::Color32::WHITE).size().x)
+        ui.fonts(|f| {
+            f.layout_no_wrap(label.to_owned(), id, egui::Color32::WHITE)
+                .size()
+                .x
+        })
     };
     body_w.max(label_w)
 }
@@ -494,20 +567,14 @@ fn draw_sent_message(
     // because `WidgetText::LayoutJob` has its `max_width`/wrap fields overridden
     // by the surrounding layout — the galley form is the only way to guarantee
     // `break_anywhere` (the CSS `overflow-wrap: anywhere` equivalent) applies.
-    let mut job = egui::text::LayoutJob::simple(
-        content.to_owned(),
-        font_id,
-        theme.fg_primary,
-        max_w,
-    );
+    let mut job =
+        egui::text::LayoutJob::simple(content.to_owned(), font_id, theme.fg_primary, max_w);
     job.wrap.break_anywhere = true;
     job.wrap.max_width = max_w;
     let galley = ui.fonts(|f| f.layout_job(job));
 
     ui.set_max_width(max_w);
-    let resp = ui.add(
-        egui::Label::new(egui::WidgetText::Galley(galley)).selectable(true),
-    );
+    let resp = ui.add(egui::Label::new(egui::WidgetText::Galley(galley)).selectable(true));
     resp.context_menu(|ui| {
         message_menu(ui, lang, content, composer_id, composer_wanted);
     });
@@ -590,7 +657,12 @@ fn code_block(
     egui::Frame::none()
         .fill(theme.input_bg)
         .rounding(egui::Rounding::same(tk::RADIUS_SM))
-        .inner_margin(egui::Margin { left: 10.0, right: 10.0, top: 7.0, bottom: 7.0 })
+        .inner_margin(egui::Margin {
+            left: 10.0,
+            right: 10.0,
+            top: 7.0,
+            bottom: 7.0,
+        })
         .show(ui, |ui| {
             // Push a unique id scope per block using an auto-incrementing id
             // (NOT the command text — identical commands must still get distinct
@@ -602,39 +674,53 @@ fn code_block(
                 ui.scope(|ui| {
                     thin_floating_scroll(ui);
                     egui::ScrollArea::horizontal()
-                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
+                        )
                         .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(&cmd)
-                                        .color(theme.fg_primary)
-                                        .size(tk::FONT_SM)
-                                        .monospace(),
-                                )
-                                .selectable(true),
-                            );
-                            // Fixed gap so the command's last characters never
-                            // touch the Run/Copy actions when scrolled to the end.
-                            ui.add_space(56.0);
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let small = |text: &str| {
-                                    egui::RichText::new(text)
-                                        .color(theme.accent)
-                                        .size(tk::FONT_SM)
-                                        .strong()
-                                };
-                                if ui.add(egui::Button::new(small("Run")).frame(false)).clicked() {
-                                    *run_wanted = Some(cmd.clone());
-                                }
-                                if ui.add(egui::Button::new(small(lang.t("copy"))).frame(false)).clicked() {
-                                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                        let _ = clipboard.set_text(cmd.clone());
-                                    }
-                                }
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(&cmd)
+                                            .color(theme.fg_primary)
+                                            .size(tk::FONT_SM)
+                                            .monospace(),
+                                    )
+                                    .selectable(true),
+                                );
+                                // Fixed gap so the command's last characters never
+                                // touch the Run/Copy actions when scrolled to the end.
+                                ui.add_space(56.0);
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let small = |text: &str| {
+                                            egui::RichText::new(text)
+                                                .color(theme.accent)
+                                                .size(tk::FONT_SM)
+                                                .strong()
+                                        };
+                                        if ui
+                                            .add(egui::Button::new(small("Run")).frame(false))
+                                            .clicked()
+                                        {
+                                            *run_wanted = Some(cmd.clone());
+                                        }
+                                        if ui
+                                            .add(
+                                                egui::Button::new(small(lang.t("copy")))
+                                                    .frame(false),
+                                            )
+                                            .clicked()
+                                        {
+                                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                                let _ = clipboard.set_text(cmd.clone());
+                                            }
+                                        }
+                                    },
+                                );
                             });
                         });
-                    });
                 });
             });
         });
@@ -643,9 +729,17 @@ fn code_block(
 fn bubble_frame(fill: egui::Color32) -> egui::Frame {
     egui::Frame {
         fill,
-        inner_margin: egui::Margin { left: 14.0, right: 14.0, top: 10.0, bottom: 10.0 },
+        inner_margin: egui::Margin {
+            left: 14.0,
+            right: 14.0,
+            top: 10.0,
+            bottom: 10.0,
+        },
         rounding: egui::Rounding {
-            nw: 10.0, ne: 10.0, sw: 10.0, se: 2.0,
+            nw: 10.0,
+            ne: 10.0,
+            sw: 10.0,
+            se: 2.0,
         },
         stroke: egui::Stroke::NONE,
         ..Default::default()
@@ -707,10 +801,14 @@ fn draw_composer(
                         let btn = ui.add_enabled(
                             can_send,
                             egui::Button::new(
-                                egui::RichText::new(if running { lang.t("loading") } else { lang.t("ai_send") })
-                                    .color(theme.button_text)
-                                    .size(tk::FONT_MD)
-                                    .strong(),
+                                egui::RichText::new(if running {
+                                    lang.t("loading")
+                                } else {
+                                    lang.t("ai_send")
+                                })
+                                .color(theme.button_text)
+                                .size(tk::FONT_MD)
+                                .strong(),
                             )
                             .fill(theme.accent)
                             .rounding(8.0)
@@ -720,7 +818,9 @@ fn draw_composer(
                     });
 
                     // Persist the composer draft so it survives redraws.
-                    if let Ok(mut st) = handle.lock() { st.input = composer_text.clone(); }
+                    if let Ok(mut st) = handle.lock() {
+                        st.input = composer_text.clone();
+                    }
 
                     if can_send && (enter_pressed || send_clicked) {
                         *do_send = Some(composer_text.trim().to_string());
@@ -749,7 +849,9 @@ fn render_run_confirm(
     lang: crate::ui::Language,
     handle: &std::sync::Arc<std::sync::Mutex<AiChatState>>,
 ) {
-    let Some(cmd) = handle.lock().ok().and_then(|s| s.confirm_run.clone()) else { return };
+    let Some(cmd) = handle.lock().ok().and_then(|s| s.confirm_run.clone()) else {
+        return;
+    };
 
     let screen = ctx.screen_rect();
     let max_w = confirm_max_width(screen.width());
@@ -767,7 +869,12 @@ fn render_run_confirm(
         .frame(crate::ui::widgets::dialog_frame(theme))
         .show(ctx, |ui| {
             ui.set_max_width(max_w - 2.0 * 20.0); // minus the dialog frame's inner margin
-            ui.label(egui::RichText::new(lang.t("ai_confirm_run")).color(theme.fg_primary).size(tk::FONT_BASE).strong());
+            ui.label(
+                egui::RichText::new(lang.t("ai_confirm_run"))
+                    .color(theme.fg_primary)
+                    .size(tk::FONT_BASE)
+                    .strong(),
+            );
             ui.add_space(tk::SPACE_SM);
             egui::Frame::none()
                 .fill(theme.input_bg)
@@ -803,10 +910,19 @@ fn render_run_confirm(
                 });
             ui.add_space(tk::SPACE_MD);
             ui.horizontal(|ui| {
-                if ui.add(crate::ui::widgets::danger_button(lang.t("ai_run"), theme)).clicked() {
+                if ui
+                    .add(crate::ui::widgets::danger_button(lang.t("ai_run"), theme))
+                    .clicked()
+                {
                     confirmed = true;
                 }
-                if ui.add(crate::ui::widgets::secondary_button(lang.t("ai_cancel"), theme)).clicked() {
+                if ui
+                    .add(crate::ui::widgets::secondary_button(
+                        lang.t("ai_cancel"),
+                        theme,
+                    ))
+                    .clicked()
+                {
                     cancelled = true;
                 }
             });
@@ -819,6 +935,68 @@ fn render_run_confirm(
             st.pending_run = Some(cmd);
         }
     }
+}
+
+/// Render the draggable orb in the bottom-right of a tab's terminal area.
+///
+/// Returns `(clicked, new_offset)`:
+/// - `clicked` — a clean click (no drag) that should open the drawer.
+/// - `new_offset` — the absolute drag offset to persist.
+pub fn render_orb(
+    ctx: &egui::Context,
+    tab_rect: egui::Rect,
+    theme: &crate::ui::ThemeColors,
+    prev_offset: egui::Vec2,
+) -> (bool, egui::Vec2) {
+    let anchor = egui::pos2(
+        tab_rect.right() - ORB_MARGIN,
+        tab_rect.bottom() - ORB_MARGIN,
+    );
+    let center = anchor - prev_offset;
+
+    let mut opened = false;
+    let mut offset = prev_offset;
+
+    let orb_id = egui::Id::new("llm_orb");
+    egui::Area::new(orb_id)
+        .fixed_pos(egui::pos2(center.x - ORB_RADIUS, center.y - ORB_RADIUS))
+        .order(egui::Order::Foreground)
+        .interactable(true)
+        .show(ctx, |ui| {
+            let (rect, resp) = ui.allocate_exact_size(
+                egui::vec2(ORB_RADIUS * 2.0, ORB_RADIUS * 2.0),
+                egui::Sense::click_and_drag(),
+            );
+            let c = rect.center();
+            let hovered = resp.hovered() || resp.dragged();
+            let base = if hovered {
+                theme.accent
+            } else {
+                theme.accent_alpha(200)
+            };
+            ui.painter().circle_filled(c, ORB_RADIUS, base);
+            ui.painter().circle(
+                c,
+                ORB_RADIUS,
+                egui::Color32::TRANSPARENT,
+                egui::Stroke::new(2.0, theme.button_text),
+            );
+            ui.painter().text(
+                c,
+                egui::Align2::CENTER_CENTER,
+                "\u{2726}",
+                egui::FontId::proportional(15.0),
+                theme.button_text,
+            );
+
+            if resp.dragged() {
+                offset = prev_offset - resp.drag_delta();
+            } else if resp.clicked() {
+                opened = true;
+            }
+        });
+
+    (opened, offset)
 }
 
 /// Layout regression tests for the chat drawer, rendered headlessly with
@@ -836,12 +1014,13 @@ mod layout_tests {
     const EPS: f32 = 0.5;
 
     fn raw_input() -> egui::RawInput {
-        let mut raw = egui::RawInput::default();
-        raw.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(SCREEN_W, SCREEN_H),
-        ));
-        raw
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(SCREEN_W, SCREEN_H),
+            )),
+            ..Default::default()
+        }
     }
 
     fn theme() -> crate::ui::ThemeColors {
@@ -865,26 +1044,28 @@ mod layout_tests {
         let mut list_min_rect = egui::Rect::NOTHING;
         let out = ctx.run(raw_input(), |ctx| {
             let theme = theme();
-            egui::SidePanel::right("drawer").exact_width(drawer_width).show(ctx, |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for msg in messages {
-                            let mut run_wanted: Option<String> = None;
-                            let mut composer_wanted: Option<String> = None;
-                            draw_bubble(
-                                ui,
-                                msg,
-                                &theme,
-                                crate::ui::Language::English,
-                                egui::Id::new("test_composer"),
-                                &mut run_wanted,
-                                &mut composer_wanted,
-                            );
-                        }
-                        list_min_rect = ui.min_rect();
-                    });
-            });
+            egui::SidePanel::right("drawer")
+                .exact_width(drawer_width)
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            for msg in messages {
+                                let mut run_wanted: Option<String> = None;
+                                let mut composer_wanted: Option<String> = None;
+                                draw_bubble(
+                                    ui,
+                                    msg,
+                                    &theme,
+                                    crate::ui::Language::English,
+                                    egui::Id::new("test_composer"),
+                                    &mut run_wanted,
+                                    &mut composer_wanted,
+                                );
+                            }
+                            list_min_rect = ui.min_rect();
+                        });
+                });
         });
         let mut visible = egui::Rect::NOTHING;
         for prim in ctx.tessellate(out.shapes, 1.0) {
@@ -923,21 +1104,25 @@ mod layout_tests {
         let mut bg_xmin = f32::INFINITY;
         let mut bg_xmax = f32::NEG_INFINITY;
         let out = ctx.run(raw_input(), |ctx| {
-            egui::SidePanel::right("drawer").exact_width(460.0).show(ctx, |ui| {
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    let mut run_wanted = None;
-                    let mut composer_wanted = None;
-                    draw_bubble(
-                        ui,
-                        &ChatMessage::user(text.to_string()),
-                        &theme,
-                        crate::ui::Language::English,
-                        egui::Id::new("test_composer"),
-                        &mut run_wanted,
-                        &mut composer_wanted,
-                    );
+            egui::SidePanel::right("drawer")
+                .exact_width(460.0)
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let mut run_wanted = None;
+                            let mut composer_wanted = None;
+                            draw_bubble(
+                                ui,
+                                &ChatMessage::user(text.to_string()),
+                                &theme,
+                                crate::ui::Language::English,
+                                egui::Id::new("test_composer"),
+                                &mut run_wanted,
+                                &mut composer_wanted,
+                            );
+                        });
                 });
-            });
         });
         // Find the bubble background mesh (the accent-tinted fill) and measure
         // its horizontal extent at the top of the bubble.
@@ -1019,7 +1204,8 @@ mod layout_tests {
         // And it still never overflows the drawer edge.
         assert!(
             visible.max.x <= SCREEN_W + EPS,
-            "long run overflowed the drawer: painted to {}", visible.max.x
+            "long run overflowed the drawer: painted to {}",
+            visible.max.x
         );
     }
 
@@ -1069,21 +1255,25 @@ mod layout_tests {
         let user_bg = theme.accent_alpha(32);
         let mut bg_xmin = f32::INFINITY;
         let out = ctx.run(raw_input(), |ctx| {
-            egui::SidePanel::right("drawer").exact_width(460.0).show(ctx, |ui| {
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    let mut run_wanted = None;
-                    let mut composer_wanted = None;
-                    draw_bubble(
-                        ui,
-                        &ChatMessage::user(long.clone()),
-                        &theme,
-                        crate::ui::Language::English,
-                        egui::Id::new("test_composer"),
-                        &mut run_wanted,
-                        &mut composer_wanted,
-                    );
+            egui::SidePanel::right("drawer")
+                .exact_width(460.0)
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let mut run_wanted = None;
+                            let mut composer_wanted = None;
+                            draw_bubble(
+                                ui,
+                                &ChatMessage::user(long.clone()),
+                                &theme,
+                                crate::ui::Language::English,
+                                egui::Id::new("test_composer"),
+                                &mut run_wanted,
+                                &mut composer_wanted,
+                            );
+                        });
                 });
-            });
         });
         // Drawer spans [540, 1000]. Measure the bubble background's left edge.
         for prim in ctx.tessellate(out.shapes, 1.0) {
@@ -1113,12 +1303,11 @@ mod layout_tests {
     #[test]
     fn run_confirm_window_stays_on_screen_for_long_commands() {
         let cmd = "echo this-is-a-fairly-long-command-line --with-flags\n".repeat(120);
-        let handle: crate::ui::state::ai_chat::AiChatHandle = std::sync::Arc::new(
-            std::sync::Mutex::new(AiChatState {
+        let handle: crate::ui::state::ai_chat::AiChatHandle =
+            std::sync::Arc::new(std::sync::Mutex::new(AiChatState {
                 confirm_run: Some(cmd),
                 ..Default::default()
-            }),
-        );
+            }));
         let ctx = egui::Context::default();
         let _ = ctx.run(raw_input(), |ctx| {
             render_run_confirm(ctx, &theme(), crate::ui::Language::English, &handle);
@@ -1142,62 +1331,4 @@ mod layout_tests {
             confirm_max_width(SCREEN_W)
         );
     }
-}
-
-/// Render the draggable orb in the bottom-right of a tab's terminal area.
-///
-/// Returns `(clicked, new_offset)`:
-/// - `clicked` — a clean click (no drag) that should open the drawer.
-/// - `new_offset` — the absolute drag offset to persist.
-pub fn render_orb(
-    ctx: &egui::Context,
-    tab_rect: egui::Rect,
-    theme: &crate::ui::ThemeColors,
-    prev_offset: egui::Vec2,
-) -> (bool, egui::Vec2) {
-    let anchor = egui::pos2(
-        tab_rect.right() - ORB_MARGIN,
-        tab_rect.bottom() - ORB_MARGIN,
-    );
-    let center = anchor - prev_offset;
-
-    let mut opened = false;
-    let mut offset = prev_offset;
-
-    let orb_id = egui::Id::new("llm_orb");
-    egui::Area::new(orb_id)
-        .fixed_pos(egui::pos2(center.x - ORB_RADIUS, center.y - ORB_RADIUS))
-        .order(egui::Order::Foreground)
-        .interactable(true)
-        .show(ctx, |ui| {
-            let (rect, resp) = ui.allocate_exact_size(
-                egui::vec2(ORB_RADIUS * 2.0, ORB_RADIUS * 2.0),
-                egui::Sense::click_and_drag(),
-            );
-            let c = rect.center();
-            let hovered = resp.hovered() || resp.dragged();
-            let base = if hovered { theme.accent } else { theme.accent_alpha(200) };
-            ui.painter().circle_filled(c, ORB_RADIUS, base);
-            ui.painter().circle(
-                c,
-                ORB_RADIUS,
-                egui::Color32::TRANSPARENT,
-                egui::Stroke::new(2.0, theme.button_text),
-            );
-            ui.painter().text(
-                c,
-                egui::Align2::CENTER_CENTER,
-                "\u{2726}",
-                egui::FontId::proportional(15.0),
-                theme.button_text,
-            );
-
-            if resp.dragged() {
-                offset = prev_offset - resp.drag_delta();
-            } else if resp.clicked() {
-                opened = true;
-            }
-        });
-
-    (opened, offset)
 }

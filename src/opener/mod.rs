@@ -5,17 +5,17 @@
 //! the OS supports that), and deep-link authorization settings. [`Opener`] is
 //! the contract; each OS ships its own implementation in a sibling module:
 //!
-//! - [`macos`]:   `open` / `open -R`, TCC pane via `x-apple.systempreferences:`
-//! - [`windows`]: `cmd /C start` + `explorer /select,`
-//! - [`linux`]:   `xdg-open` (reveal degrades to opening the parent folder)
+//! - `macos`:   `open` / `open -R`, TCC pane via `x-apple.systempreferences:`
+//! - `windows`: `cmd /C start` + `explorer /select,`
+//! - `linux`:   `xdg-open` (reveal degrades to opening the parent folder)
 //!
 //! Callers go through the free functions below and never know which backend
 //! is live (same shape as `secret_store::platform_store`).
 
-#[cfg(target_os = "macos")]
-pub mod macos;
 #[cfg(target_os = "linux")]
 pub mod linux;
+#[cfg(target_os = "macos")]
+pub mod macos;
 #[cfg(windows)]
 pub mod windows;
 

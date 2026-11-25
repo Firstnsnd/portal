@@ -6,13 +6,13 @@
 use eframe::egui;
 use std::path::PathBuf;
 
-use crate::config::{HostEntry, Credential, ConnectionRecord, Snippet};
-use crate::ui::types::dialogs::AppView;
+use crate::config::{ConnectionRecord, Credential, HostEntry, Snippet};
 use crate::ui::pane::AppWindow;
-use crate::ui::{ThemeColors, Language};
+use crate::ui::types::dialogs::AppView;
+use crate::ui::{Language, ThemeColors};
 
 // Import view rendering functions
-use crate::ui::views::{hosts_view, history_view, keychain_view, snippets_view, sftp_view};
+use crate::ui::views::{history_view, hosts_view, keychain_view, sftp_view, snippets_view};
 
 /// Actions that a view may request to be performed after rendering.
 /// These are returned from view methods and executed by the caller.
@@ -63,10 +63,8 @@ pub struct WindowContext<'a> {
     /// Probed SFTP support per host ("host:port" → capability), harvested
     /// from live SSH sessions by PortalApp each frame. Read-only here —
     /// only the hosts-list badge consumes it.
-    pub host_sftp_support: &'a std::collections::HashMap<
-        String,
-        crate::ssh::capability::HostCapability,
-    >,
+    pub host_sftp_support:
+        &'a std::collections::HashMap<String, crate::ssh::capability::HostCapability>,
 
     // File paths
     pub hosts_file: &'a PathBuf,
@@ -140,38 +138,23 @@ impl AppWindow {
                 // Terminal rendering is handled separately
                 ViewActions::default()
             }
-            AppView::Hosts => {
-                hosts_view::render_hosts_view(self, ctx, ui, cx)
-            }
-            AppView::Sftp => {
-                sftp_view::render_sftp_view(self, ui, cx)
-            }
-            AppView::Keychain => {
-                keychain_view::render_keychain_view(self, ctx, ui, cx)
-            }
-            AppView::History => {
-                history_view::render_history_view(self, ctx, cx)
-            }
+            AppView::Hosts => hosts_view::render_hosts_view(self, ctx, ui, cx),
+            AppView::Sftp => sftp_view::render_sftp_view(self, ui, cx),
+            AppView::Keychain => keychain_view::render_keychain_view(self, ctx, ui, cx),
+            AppView::History => history_view::render_history_view(self, ctx, cx),
             AppView::Settings => {
                 // Settings rendering
                 ViewActions::default()
             }
-            AppView::Snippets => {
-                snippets_view::render_snippets_view(self, ctx, ui, cx)
-            }
+            AppView::Snippets => snippets_view::render_snippets_view(self, ctx, ui, cx),
             // Replay is dispatched directly in window_content (its state lives
             // on the window itself, not in the shared WindowContext).
             AppView::Replay => ViewActions::default(),
         }
     }
 
-
     /// Render drawers (right panels) for this window
-    pub fn render_drawers(
-        &mut self,
-        ctx: &egui::Context,
-        cx: &mut WindowContext,
-    ) {
+    pub fn render_drawers(&mut self, ctx: &egui::Context, cx: &mut WindowContext) {
         // Host add/edit drawer
         if self.current_view == AppView::Hosts && self.add_host_dialog.open {
             hosts_view::render_add_host_drawer(self, ctx, cx);
@@ -188,9 +171,7 @@ impl AppWindow {
         }
 
         // Terminal tools drawer (broadcast + snippets + metrics in one panel)
-        if self.current_view == AppView::Terminal
-            && self.tabs[self.active_tab].tools_drawer_open
-        {
+        if self.current_view == AppView::Terminal && self.tabs[self.active_tab].tools_drawer_open {
             crate::ui::views::metrics_drawer::render_tools_drawer(self, ctx, cx);
         }
 

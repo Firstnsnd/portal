@@ -24,7 +24,16 @@ impl super::SecretStore for KeychainCli {
 
         // Add with -A (allow all applications to access without prompt)
         match Command::new("security")
-            .args(["add-generic-password", "-a", account, "-s", service, "-w", secret, "-A"])
+            .args([
+                "add-generic-password",
+                "-a",
+                account,
+                "-s",
+                service,
+                "-w",
+                secret,
+                "-A",
+            ])
             .output()
         {
             Ok(o) if o.status.success() => Ok(()),
@@ -59,13 +68,18 @@ impl super::SecretStore for KeychainCli {
             if let Some(rest) = line.strip_prefix("password: ") {
                 if let Some(hex_str) = rest.strip_prefix("0x") {
                     // Hex-encoded binary content — take only hex chars (stop at first space/non-hex)
-                    let hex_only: String = hex_str.chars()
+                    let hex_only: String = hex_str
+                        .chars()
                         .take_while(|c| c.is_ascii_hexdigit())
                         .collect();
                     if !hex_only.is_empty() && hex_only.len().is_multiple_of(2) {
                         let bytes: Vec<u8> = (0..hex_only.len())
                             .step_by(2)
-                            .filter_map(|i| hex_only.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok()))
+                            .filter_map(|i| {
+                                hex_only
+                                    .get(i..i + 2)
+                                    .and_then(|h| u8::from_str_radix(h, 16).ok())
+                            })
                             .collect();
                         if bytes.len() == hex_only.len() / 2 {
                             return String::from_utf8(bytes)

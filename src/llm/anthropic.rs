@@ -45,9 +45,13 @@ pub fn parse_sse(data: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     for line in data.lines() {
         let line = line.trim();
-        let Some(rest) = line.strip_prefix("data:") else { continue };
+        let Some(rest) = line.strip_prefix("data:") else {
+            continue;
+        };
         let rest = rest.trim();
-        let Ok(v) = serde_json::from_str::<Value>(rest) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(rest) else {
+            continue;
+        };
         // Anthropic text streaming: type "content_block_delta" → delta.text.
         if let Some(text) = v.pointer("/delta/text").and_then(Value::as_str) {
             tokens.push(text.to_string());
@@ -62,10 +66,7 @@ mod tests {
 
     #[test]
     fn build_body_lifts_system_and_sets_stream() {
-        let msgs = vec![
-            ChatMessage::user("hello"),
-            ChatMessage::assistant("hi"),
-        ];
+        let msgs = vec![ChatMessage::user("hello"), ChatMessage::assistant("hi")];
         let body = build_body("claude-sonnet", &msgs, 4096);
         assert_eq!(body["model"], "claude-sonnet");
         assert_eq!(body["max_tokens"], 4096);
@@ -78,10 +79,7 @@ mod tests {
 
     #[test]
     fn build_body_moves_system_out_of_messages() {
-        let msgs = vec![
-            ChatMessage::system("be terse"),
-            ChatMessage::user("ls"),
-        ];
+        let msgs = vec![ChatMessage::system("be terse"), ChatMessage::user("ls")];
         let body = build_body("claude", &msgs, 1024);
         assert_eq!(body["system"], "be terse");
         let arr = body["messages"].as_array().unwrap();

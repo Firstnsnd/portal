@@ -146,7 +146,14 @@ pub fn render_markdown(
                     if in_display {
                         if trimmed == "$$" {
                             in_display = false;
-                            render_display_math(ui, &display_buf, theme, base_size, max_width, &mut context_menu);
+                            render_display_math(
+                                ui,
+                                &display_buf,
+                                theme,
+                                base_size,
+                                max_width,
+                                &mut context_menu,
+                            );
                             display_buf.clear();
                         } else {
                             display_buf.push_str(trimmed);
@@ -199,7 +206,14 @@ pub fn render_markdown(
                     prev_kind = kind;
                 }
                 if in_display && !display_buf.trim().is_empty() {
-                    render_display_math(ui, &display_buf, theme, base_size, max_width, &mut context_menu);
+                    render_display_math(
+                        ui,
+                        &display_buf,
+                        theme,
+                        base_size,
+                        max_width,
+                        &mut context_menu,
+                    );
                 }
             }
             MarkdownBlock::Code(c) => {
@@ -284,13 +298,26 @@ fn render_block(
         let quote = rest.trim_start_matches(' ').trim_start();
         ui.set_max_width(max_width - 8.0);
         egui::Frame::none()
-            .inner_margin(egui::Margin { left: 8.0, right: 0.0, top: 0.0, bottom: 0.0 })
+            .inner_margin(egui::Margin {
+                left: 8.0,
+                right: 0.0,
+                top: 0.0,
+                bottom: 0.0,
+            })
             .show(ui, |ui| {
                 // Accent left bar.
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(2.0, 12.0), egui::Sense::hover());
                 ui.painter().rect_filled(rect, 2.0, theme.divider);
                 ui.horizontal(|ui| {
-                    render_inline(ui, quote, theme, base_size, false, max_width - 12.0, context_menu);
+                    render_inline(
+                        ui,
+                        quote,
+                        theme,
+                        base_size,
+                        false,
+                        max_width - 12.0,
+                        context_menu,
+                    );
                 });
             });
         return;
@@ -299,20 +326,44 @@ fn render_block(
     // Unordered list item: `- `, `* `, or `+ `.
     for marker in ["- ", "* ", "+ "] {
         if let Some(rest) = trimmed.strip_prefix(marker) {
-            render_list_item(ui, "\u{2022}", rest.trim_start(), theme, base_size, max_width, context_menu);
+            render_list_item(
+                ui,
+                "\u{2022}",
+                rest.trim_start(),
+                theme,
+                base_size,
+                max_width,
+                context_menu,
+            );
             return;
         }
     }
     // Ordered list item: `1. `, `2. `, …
     if let Some(rest) = parse_ordered(trimmed) {
         let (num, body) = rest;
-        render_list_item(ui, &format!("{num}."), body, theme, base_size, max_width, context_menu);
+        render_list_item(
+            ui,
+            &format!("{num}."),
+            body,
+            theme,
+            base_size,
+            max_width,
+            context_menu,
+        );
         return;
     }
 
     // Plain paragraph.
     ui.set_max_width(max_width);
-    render_inline(ui, trimmed, theme, base_size, false, max_width, context_menu);
+    render_inline(
+        ui,
+        trimmed,
+        theme,
+        base_size,
+        false,
+        max_width,
+        context_menu,
+    );
 }
 
 /// Parse a leading `1.`/`12.` ordered-list marker; returns `(number, rest)`.
@@ -364,7 +415,15 @@ fn render_list_item(
                 .size(base_size),
         );
         ui.add_space(4.0);
-        render_inline(ui, body, theme, base_size, false, max_width - 18.0, context_menu);
+        render_inline(
+            ui,
+            body,
+            theme,
+            base_size,
+            false,
+            max_width - 18.0,
+            context_menu,
+        );
     });
 }
 
@@ -382,7 +441,9 @@ fn render_inline(
     ui.set_max_width(max_width);
     ui.horizontal_wrapped(|ui| {
         for span in spans {
-            let mut rt = egui::RichText::new(&span.text).size(size).color(theme.fg_primary);
+            let mut rt = egui::RichText::new(&span.text)
+                .size(size)
+                .color(theme.fg_primary);
             match span.style {
                 Style::Bold => {
                     rt = rt.strong();
@@ -417,7 +478,11 @@ fn render_inline(
 
             if let Some(href) = &span.href {
                 let resp = ui
-                    .add(egui::Label::new(rt).selectable(true).sense(egui::Sense::click()))
+                    .add(
+                        egui::Label::new(rt)
+                            .selectable(true)
+                            .sense(egui::Sense::click()),
+                    )
                     .on_hover_text(href);
                 if resp.clicked() {
                     ui.ctx().open_url(egui::OpenUrl::same_tab(href));
@@ -441,7 +506,11 @@ fn parse_spans(text: &str) -> Vec<Span> {
 
     let flush = |buf: &mut String, spans: &mut Vec<Span>| {
         if !buf.is_empty() {
-            spans.push(Span { style: Style::Plain, text: std::mem::take(buf), href: None });
+            spans.push(Span {
+                style: Style::Plain,
+                text: std::mem::take(buf),
+                href: None,
+            });
         }
     };
 
@@ -453,16 +522,26 @@ fn parse_spans(text: &str) -> Vec<Span> {
             flush(&mut buf, &mut spans);
             i += 2;
             let mut inner = String::new();
-            while i < chars.len() && !(chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '*') {
+            while i < chars.len()
+                && !(chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '*')
+            {
                 inner.push(chars[i]);
                 i += 1;
             }
             if i < chars.len() {
                 i += 2; // consume closing `**`
-                spans.push(Span { style: Style::Bold, text: inner, href: None });
+                spans.push(Span {
+                    style: Style::Bold,
+                    text: inner,
+                    href: None,
+                });
             } else {
                 // Unterminated: fall back to literal.
-                spans.push(Span { style: Style::Plain, text: format!("**{inner}"), href: None });
+                spans.push(Span {
+                    style: Style::Plain,
+                    text: format!("**{inner}"),
+                    href: None,
+                });
             }
             continue;
         }
@@ -478,9 +557,17 @@ fn parse_spans(text: &str) -> Vec<Span> {
             }
             if i < chars.len() {
                 i += 1; // consume closing backtick
-                spans.push(Span { style: Style::Code, text: inner, href: None });
+                spans.push(Span {
+                    style: Style::Code,
+                    text: inner,
+                    href: None,
+                });
             } else {
-                spans.push(Span { style: Style::Plain, text: format!("`{inner}"), href: None });
+                spans.push(Span {
+                    style: Style::Plain,
+                    text: format!("`{inner}"),
+                    href: None,
+                });
             }
             continue;
         }
@@ -496,9 +583,17 @@ fn parse_spans(text: &str) -> Vec<Span> {
             }
             if i < chars.len() {
                 i += 1;
-                spans.push(Span { style: Style::Italic, text: inner, href: None });
+                spans.push(Span {
+                    style: Style::Italic,
+                    text: inner,
+                    href: None,
+                });
             } else {
-                spans.push(Span { style: Style::Plain, text: format!("*{inner}"), href: None });
+                spans.push(Span {
+                    style: Style::Plain,
+                    text: format!("*{inner}"),
+                    href: None,
+                });
             }
             continue;
         }
@@ -519,7 +614,11 @@ fn parse_spans(text: &str) -> Vec<Span> {
             }
             if j < chars.len() && is_mathish(&inner) {
                 flush(&mut buf, &mut spans);
-                spans.push(Span { style: Style::Math, text: latex_to_unicode(&inner), href: None });
+                spans.push(Span {
+                    style: Style::Math,
+                    text: latex_to_unicode(&inner),
+                    href: None,
+                });
                 i = if display { j + 2 } else { j + 1 };
             } else {
                 buf.push('$');
@@ -534,9 +633,10 @@ fn parse_spans(text: &str) -> Vec<Span> {
                 if let Some(close) = rest.find(']') {
                     let label = &rest[..close];
                     let after = &rest[close + 1..];
-                    if let Some(url) = after.strip_prefix('(').and_then(|s| {
-                        s.find(')').map(|p| &s[..p])
-                    }) {
+                    if let Some(url) = after
+                        .strip_prefix('(')
+                        .and_then(|s| s.find(')').map(|p| &s[..p]))
+                    {
                         flush(&mut buf, &mut spans);
                         spans.push(Span {
                             style: Style::Link,
@@ -576,7 +676,10 @@ fn is_mathish(content: &str) -> bool {
     let has_alpha = content.chars().any(char::is_alphabetic);
     if !content.contains(char::is_whitespace) {
         // Compact token: $x$, $n+1$, $dx$ — but not $5-$ or $3.50$.
-        return has_alpha && !content.chars().all(|c| c.is_ascii_digit() || "+-.,()".contains(c));
+        return has_alpha
+            && !content
+                .chars()
+                .all(|c| c.is_ascii_digit() || "+-.,()".contains(c));
     }
     // Spaced math like `$a + b$` / `$2 + 2 = 4$` needs a real operator.
     content.contains(['=', '+', '<', '>'])
@@ -729,53 +832,156 @@ fn latex_to_unicode(src: &str) -> String {
 /// LaTeX command → Unicode symbol table (linear scan; called per token only).
 const LATEX_SYMBOLS: &[(&str, &str)] = &[
     // Greek
-    ("alpha", "α"), ("beta", "β"), ("gamma", "γ"), ("delta", "δ"),
-    ("epsilon", "ε"), ("varepsilon", "ε"), ("zeta", "ζ"), ("eta", "η"),
-    ("theta", "θ"), ("vartheta", "ϑ"), ("iota", "ι"), ("kappa", "κ"),
-    ("lambda", "λ"), ("mu", "μ"), ("nu", "ν"), ("xi", "ξ"), ("pi", "π"),
-    ("rho", "ρ"), ("sigma", "σ"), ("tau", "τ"), ("upsilon", "υ"),
-    ("phi", "φ"), ("varphi", "ϕ"), ("chi", "χ"), ("psi", "ψ"), ("omega", "ω"),
-    ("Gamma", "Γ"), ("Delta", "Δ"), ("Theta", "Θ"), ("Lambda", "Λ"),
-    ("Xi", "Ξ"), ("Pi", "Π"), ("Sigma", "Σ"), ("Phi", "Φ"), ("Psi", "Ψ"),
+    ("alpha", "α"),
+    ("beta", "β"),
+    ("gamma", "γ"),
+    ("delta", "δ"),
+    ("epsilon", "ε"),
+    ("varepsilon", "ε"),
+    ("zeta", "ζ"),
+    ("eta", "η"),
+    ("theta", "θ"),
+    ("vartheta", "ϑ"),
+    ("iota", "ι"),
+    ("kappa", "κ"),
+    ("lambda", "λ"),
+    ("mu", "μ"),
+    ("nu", "ν"),
+    ("xi", "ξ"),
+    ("pi", "π"),
+    ("rho", "ρ"),
+    ("sigma", "σ"),
+    ("tau", "τ"),
+    ("upsilon", "υ"),
+    ("phi", "φ"),
+    ("varphi", "ϕ"),
+    ("chi", "χ"),
+    ("psi", "ψ"),
+    ("omega", "ω"),
+    ("Gamma", "Γ"),
+    ("Delta", "Δ"),
+    ("Theta", "Θ"),
+    ("Lambda", "Λ"),
+    ("Xi", "Ξ"),
+    ("Pi", "Π"),
+    ("Sigma", "Σ"),
+    ("Phi", "Φ"),
+    ("Psi", "Ψ"),
     ("Omega", "Ω"),
     // Operators
-    ("times", "×"), ("div", "÷"), ("pm", "±"), ("mp", "∓"), ("cdot", "·"),
-    ("ast", "∗"), ("star", "⋆"), ("circ", "∘"), ("bullet", "•"),
-    ("oplus", "⊕"), ("otimes", "⊗"), ("perp", "⊥"), ("parallel", "∥"),
-    ("angle", "∠"), ("degree", "°"),
+    ("times", "×"),
+    ("div", "÷"),
+    ("pm", "±"),
+    ("mp", "∓"),
+    ("cdot", "·"),
+    ("ast", "∗"),
+    ("star", "⋆"),
+    ("circ", "∘"),
+    ("bullet", "•"),
+    ("oplus", "⊕"),
+    ("otimes", "⊗"),
+    ("perp", "⊥"),
+    ("parallel", "∥"),
+    ("angle", "∠"),
+    ("degree", "°"),
     // Relations
-    ("leq", "≤"), ("le", "≤"), ("geq", "≥"), ("ge", "≥"), ("neq", "≠"),
-    ("ne", "≠"), ("approx", "≈"), ("equiv", "≡"), ("sim", "∼"),
-    ("simeq", "≃"), ("cong", "≅"), ("propto", "∝"),
+    ("leq", "≤"),
+    ("le", "≤"),
+    ("geq", "≥"),
+    ("ge", "≥"),
+    ("neq", "≠"),
+    ("ne", "≠"),
+    ("approx", "≈"),
+    ("equiv", "≡"),
+    ("sim", "∼"),
+    ("simeq", "≃"),
+    ("cong", "≅"),
+    ("propto", "∝"),
     // Arrows
-    ("to", "→"), ("rightarrow", "→"), ("leftarrow", "←"), ("gets", "←"),
-    ("leftrightarrow", "↔"), ("Rightarrow", "⇒"), ("Leftarrow", "⇐"),
-    ("Leftrightarrow", "⇔"), ("uparrow", "↑"), ("downarrow", "↓"),
+    ("to", "→"),
+    ("rightarrow", "→"),
+    ("leftarrow", "←"),
+    ("gets", "←"),
+    ("leftrightarrow", "↔"),
+    ("Rightarrow", "⇒"),
+    ("Leftarrow", "⇐"),
+    ("Leftrightarrow", "⇔"),
+    ("uparrow", "↑"),
+    ("downarrow", "↓"),
     ("mapsto", "↦"),
     // Sets & logic
-    ("in", "∈"), ("notin", "∉"), ("ni", "∋"), ("subset", "⊂"),
-    ("subseteq", "⊆"), ("supset", "⊃"), ("supseteq", "⊇"), ("cup", "∪"),
-    ("cap", "∩"), ("emptyset", "∅"), ("varnothing", "∅"), ("forall", "∀"),
-    ("exists", "∃"), ("nexists", "∄"), ("neg", "¬"), ("lnot", "¬"),
-    ("land", "∧"), ("wedge", "∧"), ("lor", "∨"), ("vee", "∨"),
-    ("therefore", "∴"), ("because", "∵"),
+    ("in", "∈"),
+    ("notin", "∉"),
+    ("ni", "∋"),
+    ("subset", "⊂"),
+    ("subseteq", "⊆"),
+    ("supset", "⊃"),
+    ("supseteq", "⊇"),
+    ("cup", "∪"),
+    ("cap", "∩"),
+    ("emptyset", "∅"),
+    ("varnothing", "∅"),
+    ("forall", "∀"),
+    ("exists", "∃"),
+    ("nexists", "∄"),
+    ("neg", "¬"),
+    ("lnot", "¬"),
+    ("land", "∧"),
+    ("wedge", "∧"),
+    ("lor", "∨"),
+    ("vee", "∨"),
+    ("therefore", "∴"),
+    ("because", "∵"),
     // Calculus & misc
-    ("infty", "∞"), ("partial", "∂"), ("nabla", "∇"), ("hbar", "ℏ"),
-    ("ell", "ℓ"), ("aleph", "ℵ"), ("sum", "∑"), ("prod", "∏"),
-    ("coprod", "∐"), ("int", "∫"), ("iint", "∬"), ("iiint", "∭"),
-    ("oint", "∮"), ("prime", "′"), ("dagger", "†"), ("ddagger", "‡"),
-    ("checkmark", "✓"), ("ldots", "…"), ("cdots", "…"), ("dots", "…"),
-    ("vdots", "⋮"), ("quad", " "), ("qquad", " "),
+    ("infty", "∞"),
+    ("partial", "∂"),
+    ("nabla", "∇"),
+    ("hbar", "ℏ"),
+    ("ell", "ℓ"),
+    ("aleph", "ℵ"),
+    ("sum", "∑"),
+    ("prod", "∏"),
+    ("coprod", "∐"),
+    ("int", "∫"),
+    ("iint", "∬"),
+    ("iiint", "∭"),
+    ("oint", "∮"),
+    ("prime", "′"),
+    ("dagger", "†"),
+    ("ddagger", "‡"),
+    ("checkmark", "✓"),
+    ("ldots", "…"),
+    ("cdots", "…"),
+    ("dots", "…"),
+    ("vdots", "⋮"),
+    ("quad", " "),
+    ("qquad", " "),
     // Multi-letter operators (rendered as plain words)
-    ("lim", "lim"), ("log", "log"), ("ln", "ln"), ("exp", "exp"),
-    ("sin", "sin"), ("cos", "cos"), ("tan", "tan"), ("cot", "cot"),
-    ("sec", "sec"), ("csc", "csc"), ("arcsin", "arcsin"), ("arccos", "arccos"),
-    ("arctan", "arctan"), ("min", "min"), ("max", "max"), ("gcd", "gcd"),
-    ("det", "det"), ("deg", "deg"),
+    ("lim", "lim"),
+    ("log", "log"),
+    ("ln", "ln"),
+    ("exp", "exp"),
+    ("sin", "sin"),
+    ("cos", "cos"),
+    ("tan", "tan"),
+    ("cot", "cot"),
+    ("sec", "sec"),
+    ("csc", "csc"),
+    ("arcsin", "arcsin"),
+    ("arccos", "arccos"),
+    ("arctan", "arctan"),
+    ("min", "min"),
+    ("max", "max"),
+    ("gcd", "gcd"),
+    ("det", "det"),
+    ("deg", "deg"),
 ];
 
 fn lookup_symbol(cmd: &str) -> Option<&'static str> {
-    LATEX_SYMBOLS.iter().find(|(name, _)| *name == cmd).map(|(_, sym)| *sym)
+    LATEX_SYMBOLS
+        .iter()
+        .find(|(name, _)| *name == cmd)
+        .map(|(_, sym)| *sym)
 }
 
 /// Read the argument at `i`: a braced group (nesting-aware) or a single char.
@@ -844,49 +1050,51 @@ fn double_struck(g: &str) -> String {
 /// unmappable (the caller then keeps the literal `^{…}` form).
 fn to_superscript(s: &str) -> Option<String> {
     s.chars()
-        .map(|c| Some(match c {
-            '0' => '⁰',
-            '1' => '¹',
-            '2' => '²',
-            '3' => '³',
-            '4' => '⁴',
-            '5' => '⁵',
-            '6' => '⁶',
-            '7' => '⁷',
-            '8' => '⁸',
-            '9' => '⁹',
-            '+' => '⁺',
-            '-' => '⁻',
-            '=' => '⁼',
-            '(' => '⁽',
-            ')' => '⁾',
-            'n' => 'ⁿ',
-            'i' => 'ⁱ',
-            'a' => 'ᵃ',
-            'b' => 'ᵇ',
-            'c' => 'ᶜ',
-            'd' => 'ᵈ',
-            'e' => 'ᵉ',
-            'f' => 'ᶠ',
-            'g' => 'ᵍ',
-            'h' => 'ʰ',
-            'j' => 'ʲ',
-            'k' => 'ᵏ',
-            'l' => 'ˡ',
-            'm' => 'ᵐ',
-            'o' => 'ᵒ',
-            'p' => 'ᵖ',
-            'r' => 'ʳ',
-            's' => 'ˢ',
-            't' => 'ᵗ',
-            'u' => 'ᵘ',
-            'v' => 'ᵛ',
-            'w' => 'ʷ',
-            'x' => 'ˣ',
-            'y' => 'ʸ',
-            'z' => 'ᶻ',
-            _ => return None,
-        }))
+        .map(|c| {
+            Some(match c {
+                '0' => '⁰',
+                '1' => '¹',
+                '2' => '²',
+                '3' => '³',
+                '4' => '⁴',
+                '5' => '⁵',
+                '6' => '⁶',
+                '7' => '⁷',
+                '8' => '⁸',
+                '9' => '⁹',
+                '+' => '⁺',
+                '-' => '⁻',
+                '=' => '⁼',
+                '(' => '⁽',
+                ')' => '⁾',
+                'n' => 'ⁿ',
+                'i' => 'ⁱ',
+                'a' => 'ᵃ',
+                'b' => 'ᵇ',
+                'c' => 'ᶜ',
+                'd' => 'ᵈ',
+                'e' => 'ᵉ',
+                'f' => 'ᶠ',
+                'g' => 'ᵍ',
+                'h' => 'ʰ',
+                'j' => 'ʲ',
+                'k' => 'ᵏ',
+                'l' => 'ˡ',
+                'm' => 'ᵐ',
+                'o' => 'ᵒ',
+                'p' => 'ᵖ',
+                'r' => 'ʳ',
+                's' => 'ˢ',
+                't' => 'ᵗ',
+                'u' => 'ᵘ',
+                'v' => 'ᵛ',
+                'w' => 'ʷ',
+                'x' => 'ˣ',
+                'y' => 'ʸ',
+                'z' => 'ᶻ',
+                _ => return None,
+            })
+        })
         .collect()
 }
 
@@ -894,41 +1102,43 @@ fn to_superscript(s: &str) -> Option<String> {
 /// unmappable (the caller then keeps the literal `_{…}` form).
 fn to_subscript(s: &str) -> Option<String> {
     s.chars()
-        .map(|c| Some(match c {
-            '0' => '₀',
-            '1' => '₁',
-            '2' => '₂',
-            '3' => '₃',
-            '4' => '₄',
-            '5' => '₅',
-            '6' => '₆',
-            '7' => '₇',
-            '8' => '₈',
-            '9' => '₉',
-            '+' => '₊',
-            '-' => '₋',
-            '=' => '₌',
-            '(' => '₍',
-            ')' => '₎',
-            'a' => 'ₐ',
-            'e' => 'ₑ',
-            'h' => 'ₕ',
-            'i' => 'ᵢ',
-            'j' => 'ⱼ',
-            'k' => 'ₖ',
-            'l' => 'ₗ',
-            'm' => 'ₘ',
-            'n' => 'ₙ',
-            'o' => 'ₒ',
-            'p' => 'ₚ',
-            'r' => 'ᵣ',
-            's' => 'ₛ',
-            't' => 'ₜ',
-            'u' => 'ᵤ',
-            'v' => 'ᵥ',
-            'x' => 'ₓ',
-            _ => return None,
-        }))
+        .map(|c| {
+            Some(match c {
+                '0' => '₀',
+                '1' => '₁',
+                '2' => '₂',
+                '3' => '₃',
+                '4' => '₄',
+                '5' => '₅',
+                '6' => '₆',
+                '7' => '₇',
+                '8' => '₈',
+                '9' => '₉',
+                '+' => '₊',
+                '-' => '₋',
+                '=' => '₌',
+                '(' => '₍',
+                ')' => '₎',
+                'a' => 'ₐ',
+                'e' => 'ₑ',
+                'h' => 'ₕ',
+                'i' => 'ᵢ',
+                'j' => 'ⱼ',
+                'k' => 'ₖ',
+                'l' => 'ₗ',
+                'm' => 'ₘ',
+                'n' => 'ₙ',
+                'o' => 'ₒ',
+                'p' => 'ₚ',
+                'r' => 'ᵣ',
+                's' => 'ₛ',
+                't' => 'ₜ',
+                'u' => 'ᵤ',
+                'v' => 'ᵥ',
+                'x' => 'ₓ',
+                _ => return None,
+            })
+        })
         .collect()
 }
 
@@ -1000,7 +1210,9 @@ mod tests {
     #[test]
     fn balks_at_unterminated_bold() {
         let spans = parse_spans("**unclosed");
-        assert!(spans.iter().any(|s| s.style == Style::Plain && s.text == "**unclosed"));
+        assert!(spans
+            .iter()
+            .any(|s| s.style == Style::Plain && s.text == "**unclosed"));
     }
 
     #[test]
@@ -1090,7 +1302,10 @@ mod tests {
     fn math_inline_parses_and_converts() {
         let spans = parse_spans("so $x$ then $E=mc^2$");
         let kinds: Vec<Style> = spans.iter().map(|s| s.style).collect();
-        assert_eq!(kinds, vec![Style::Plain, Style::Math, Style::Plain, Style::Math]);
+        assert_eq!(
+            kinds,
+            vec![Style::Plain, Style::Math, Style::Plain, Style::Math]
+        );
         assert_eq!(spans[1].text, "x");
         assert_eq!(spans[3].text, "E=mc²");
     }

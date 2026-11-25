@@ -5,26 +5,37 @@
 use eframe::egui;
 
 // Import SFTP view components from subdirectory
-use crate::ui::views::sftp::{DragPayload, SelectionAction, MoveToDirRequest, ClipboardRequest};
-use crate::ui::views::sftp::paste::{capture_clipboard, execute_paste, handle_clipboard_request, paste_target_ready};
-use crate::ui::views::sftp::{render_breadcrumbs, render_file_panel, apply_selection_action};
-use crate::ui::views::sftp::render_transfer_progress;
+use crate::sftp::drag_out::{begin_file_promise_drag, PromiseSpec};
+use crate::sftp::drop_planner::{plan_os_drop, DropSide};
+use crate::sftp::{SftpConnectionState, SftpEntryKind};
+use crate::ui::pane::AppWindow;
+use crate::ui::pane_view::{ViewActions, WindowContext};
+use crate::ui::tokens::{self, DIALOG_WIDTH_SM};
+use crate::ui::types::sftp_types::{
+    SftpConfirmDelete, SftpContextMenu, SftpErrorDialog, SftpNewFileDialog, SftpNewFolderDialog,
+    SftpPanel, SftpRenameDialog,
+};
 use crate::ui::views::sftp::drop_logic::{
     execute_transfer_plan, os_drop_target_for, panel_dirs_for, plan_in_app_drop,
     resolve_os_drop_target, should_start_os_drag, OsDropResolution,
 };
-use crate::sftp::drag_out::{begin_file_promise_drag, PromiseSpec};
-use crate::sftp::drop_planner::{plan_os_drop, DropSide};
-use crate::ui::pane_view::{ViewActions, WindowContext};
-use crate::ui::pane::AppWindow;
-use crate::ui::types::sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpErrorDialog, SftpPanel};
-use crate::ui::views::sftp::editor::{EditorOutput, execute_editor_save, open_editor_in_side, render_embedded_editor};
-use crate::sftp::{SftpConnectionState, SftpEntryKind};
+use crate::ui::views::sftp::editor::{
+    execute_editor_save, open_editor_in_side, render_embedded_editor, EditorOutput,
+};
+use crate::ui::views::sftp::paste::{
+    capture_clipboard, execute_paste, handle_clipboard_request, paste_target_ready,
+};
+use crate::ui::views::sftp::render_transfer_progress;
+use crate::ui::views::sftp::{apply_selection_action, render_breadcrumbs, render_file_panel};
+use crate::ui::views::sftp::{ClipboardRequest, DragPayload, MoveToDirRequest, SelectionAction};
 use crate::ui::widgets;
-use crate::ui::tokens::{self, DIALOG_WIDTH_SM};
 
 /// Render SFTP view for this window
-pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut WindowContext) -> ViewActions {
+pub fn render_sftp_view(
+    window: &mut AppWindow,
+    ui: &mut egui::Ui,
+    cx: &mut WindowContext,
+) -> ViewActions {
     // Configure text cursor for smoother appearance
     ui.ctx().style_mut(|style| {
         style.visuals.text_cursor.stroke = egui::Stroke::new(2.0, cx.theme.fg_primary);
@@ -38,10 +49,8 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     let divider_x = available.min.x + available.width() / 2.0;
     let panel_w = (available.width() - 1.0) / 2.0;
 
-    let left_panel_rect = egui::Rect::from_min_size(
-        available.min,
-        egui::vec2(panel_w, available.height()),
-    );
+    let left_panel_rect =
+        egui::Rect::from_min_size(available.min, egui::vec2(panel_w, available.height()));
     let right_panel_rect = egui::Rect::from_min_size(
         egui::pos2(divider_x + 1.0, available.min.y),
         egui::vec2(panel_w, available.height()),
@@ -52,7 +61,8 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         egui::pos2(divider_x, available.min.y),
         egui::vec2(2.0, available.height()),
     );
-    ui.painter().rect_filled(shadow_rect, 0.0, cx.theme.hover_shadow);
+    ui.painter()
+        .rect_filled(shadow_rect, 0.0, cx.theme.hover_shadow);
 
     let mut local_left_navigate_to: Option<String> = None;
     let mut local_left_selection_action: Option<SelectionAction> = None;
@@ -111,11 +121,19 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     // DroppedFile events are a one-frame pulse from egui-winit; take them
     // once here. A half occupied by an embedded editor is not a drop target.
     let dropped: Vec<std::path::PathBuf> = ui.ctx().input(|i| {
-        i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect()
+        i.raw
+            .dropped_files
+            .iter()
+            .filter_map(|f| f.path.clone())
+            .collect()
     });
     if !dropped.is_empty() {
         if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
-            let active_hint = if window.sftp_active_side_left { DropSide::Left } else { DropSide::Right };
+            let active_hint = if window.sftp_active_side_left {
+                DropSide::Left
+            } else {
+                DropSide::Right
+            };
             let side = resolve_os_drop_target(pos, left_panel_rect, right_panel_rect, active_hint);
             let editor_covers_target = match side {
                 DropSide::Left => left_editor_open,
@@ -124,7 +142,8 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
             if !editor_covers_target {
                 match os_drop_target_for(window, side) {
                     OsDropResolution::Target(target) => {
-                        let plan = plan_os_drop(&dropped, &target, |p: &std::path::Path| p.is_dir());
+                        let plan =
+                            plan_os_drop(&dropped, &target, |p: &std::path::Path| p.is_dir());
                         if let Some(detail) = execute_transfer_plan(window, &plan) {
                             window.sftp_error_dialog = Some(SftpErrorDialog {
                                 title: cx.language.t("drop_not_connected").to_string(),
@@ -1097,7 +1116,10 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         } else {
             let path = format!(
                 "{}/{}",
-                window.local_browser_right.current_path.trim_end_matches('/'),
+                window
+                    .local_browser_right
+                    .current_path
+                    .trim_end_matches('/'),
                 name
             );
             window.local_browser_right.navigate(&path);
@@ -1120,17 +1142,17 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
             } else if name.starts_with('/') {
                 browser.navigate(&name);
             } else {
-                let path = format!(
-                    "{}/{}",
-                    browser.current_path.trim_end_matches('/'),
-                    name
-                );
+                let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                 browser.navigate(&path);
             }
         }
         if let Some(action) = left_remote_selection_action {
             let count = window.sftp_browser_left.as_ref().unwrap().entries.len();
-            apply_selection_action(&mut window.sftp_browser_left.as_mut().unwrap().selection, action, count);
+            apply_selection_action(
+                &mut window.sftp_browser_left.as_mut().unwrap().selection,
+                action,
+                count,
+            );
         }
     }
 
@@ -1143,17 +1165,17 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
             } else if name.starts_with('/') {
                 browser.navigate(&name);
             } else {
-                let path = format!(
-                    "{}/{}",
-                    browser.current_path.trim_end_matches('/'),
-                    name
-                );
+                let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                 browser.navigate(&path);
             }
         }
         if let Some(action) = remote_selection_action {
             let count = window.sftp_browser.as_ref().unwrap().entries.len();
-            apply_selection_action(&mut window.sftp_browser.as_mut().unwrap().selection, action, count);
+            apply_selection_action(
+                &mut window.sftp_browser.as_mut().unwrap().selection,
+                action,
+                count,
+            );
         }
     }
 
@@ -1205,10 +1227,18 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         if let Some(payload) = egui::DragAndDrop::payload::<DragPayload>(&ctx) {
             if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
                 if left_panel_rect.contains(pos) && !payload.is_local {
-                    ui.painter().rect_stroke(left_panel_rect, 2.0, egui::Stroke::new(2.0, cx.theme.accent));
+                    ui.painter().rect_stroke(
+                        left_panel_rect,
+                        2.0,
+                        egui::Stroke::new(2.0, cx.theme.accent),
+                    );
                 }
                 if right_panel_rect.contains(pos) && payload.is_local {
-                    ui.painter().rect_stroke(right_panel_rect, 2.0, egui::Stroke::new(2.0, cx.theme.accent));
+                    ui.painter().rect_stroke(
+                        right_panel_rect,
+                        2.0,
+                        egui::Stroke::new(2.0, cx.theme.accent),
+                    );
                 }
             }
             if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
@@ -1220,7 +1250,8 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                         format!("\u{1F4C4} {}", e.entry_name)
                     }
                 } else {
-                    cx.language.tf("n_items", &payload.entries.len().to_string())
+                    cx.language
+                        .tf("n_items", &payload.entries.len().to_string())
                 };
                 egui::Area::new(egui::Id::new("sftp_drag_ghost"))
                     .fixed_pos(pos + egui::vec2(14.0, -8.0))
@@ -1234,7 +1265,11 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                             ..Default::default()
                         }
                         .show(ui, |ui| {
-                            ui.label(egui::RichText::new(ghost_text).color(cx.theme.fg_primary).size(12.0));
+                            ui.label(
+                                egui::RichText::new(ghost_text)
+                                    .color(cx.theme.fg_primary)
+                                    .size(12.0),
+                            );
                         });
                     });
             }
@@ -1243,8 +1278,13 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         // ── OS drag hover highlight (Finder → panel) ──
         if ui.ctx().input(|i| !i.raw.hovered_files.is_empty()) {
             if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
-                let active_hint = if window.sftp_active_side_left { DropSide::Left } else { DropSide::Right };
-                let side = resolve_os_drop_target(pos, left_panel_rect, right_panel_rect, active_hint);
+                let active_hint = if window.sftp_active_side_left {
+                    DropSide::Left
+                } else {
+                    DropSide::Right
+                };
+                let side =
+                    resolve_os_drop_target(pos, left_panel_rect, right_panel_rect, active_hint);
                 // A half showing an embedded editor is not a drop target —
                 // no highlight, no badge.
                 let editor_covers_target = match side {
@@ -1257,8 +1297,13 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                         DropSide::Right => right_panel_rect,
                     };
                     let inner = panel_rect.shrink(2.0);
-                    ui.painter().rect_filled(inner, tokens::RADIUS_SM, cx.theme.accent_alpha(24));
-                    ui.painter().rect_stroke(inner, tokens::RADIUS_SM, egui::Stroke::new(2.0, cx.theme.accent));
+                    ui.painter()
+                        .rect_filled(inner, tokens::RADIUS_SM, cx.theme.accent_alpha(24));
+                    ui.painter().rect_stroke(
+                        inner,
+                        tokens::RADIUS_SM,
+                        egui::Stroke::new(2.0, cx.theme.accent),
+                    );
 
                     // "⤓ Drop to Upload" badge at the top of the target panel
                     let badge_text = format!("\u{2913} {}", cx.language.t("drop_to_upload"));
@@ -1275,9 +1320,15 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                         ),
                         galley.size() + padding * 2.0,
                     );
-                    ui.painter().rect_filled(badge_rect, tokens::RADIUS_SM, cx.theme.bg_elevated);
-                    ui.painter().rect_stroke(badge_rect, tokens::RADIUS_SM, egui::Stroke::new(1.0, cx.theme.accent));
-                    ui.painter().galley(badge_rect.min + padding, galley, cx.theme.fg_primary);
+                    ui.painter()
+                        .rect_filled(badge_rect, tokens::RADIUS_SM, cx.theme.bg_elevated);
+                    ui.painter().rect_stroke(
+                        badge_rect,
+                        tokens::RADIUS_SM,
+                        egui::Stroke::new(1.0, cx.theme.accent),
+                    );
+                    ui.painter()
+                        .galley(badge_rect.min + padding, galley, cx.theme.fg_primary);
                 }
             }
         }
@@ -1288,8 +1339,13 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         if ctx.input(|i| i.pointer.any_released()) {
             if let Some(payload) = egui::DragAndDrop::take_payload::<DragPayload>(&ctx) {
                 if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                    let active_hint = if window.sftp_active_side_left { DropSide::Left } else { DropSide::Right };
-                    let side = resolve_os_drop_target(pos, left_panel_rect, right_panel_rect, active_hint);
+                    let active_hint = if window.sftp_active_side_left {
+                        DropSide::Left
+                    } else {
+                        DropSide::Right
+                    };
+                    let side =
+                        resolve_os_drop_target(pos, left_panel_rect, right_panel_rect, active_hint);
                     // Releasing over an embedded editor is a no-op.
                     let editor_covers_target = match side {
                         DropSide::Left => left_editor_open,
@@ -1319,13 +1375,8 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         let mut should_cancel = false;
         if let Some(browser) = window.sftp_browser.as_ref() {
             if let Some(ref progress) = browser.transfer {
-                should_cancel = render_transfer_progress(
-                    ui,
-                    progress,
-                    available,
-                    cx.theme,
-                    &cx.language,
-                );
+                should_cancel =
+                    render_transfer_progress(ui, progress, available, cx.theme, &cx.language);
             }
         }
         if should_cancel {
@@ -1338,7 +1389,11 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     // ── Handle delete key requests ──
     if local_left_delete_request {
         let filtered = window.local_browser_left.filtered_entries();
-        let names: Vec<String> = window.local_browser_left.selection.selected.iter()
+        let names: Vec<String> = window
+            .local_browser_left
+            .selection
+            .selected
+            .iter()
             .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
             .collect();
         if !names.is_empty() {
@@ -1351,7 +1406,10 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     if remote_delete_request {
         if let Some(ref mut browser) = window.sftp_browser {
             let filtered = browser.filtered_entries();
-            let names: Vec<String> = browser.selection.selected.iter()
+            let names: Vec<String> = browser
+                .selection
+                .selected
+                .iter()
                 .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                 .collect();
             if !names.is_empty() {
@@ -1365,7 +1423,10 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     if left_remote_delete_request {
         if let Some(ref mut browser) = window.sftp_browser_left {
             let filtered = browser.filtered_entries();
-            let names: Vec<String> = browser.selection.selected.iter()
+            let names: Vec<String> = browser
+                .selection
+                .selected
+                .iter()
                 .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                 .collect();
             if !names.is_empty() {
@@ -1384,8 +1445,13 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
         (SftpPanel::RightRemote, remote_clipboard_req),
         (SftpPanel::LeftRemote, left_remote_clipboard_req),
     ];
-    for (panel, request) in clipboard_requests.into_iter().filter_map(|(p, r)| r.map(|r| (p, r))) {
-        if let Some(detail) = handle_clipboard_request(window, cx.language.t("duplicate_suffix"), panel, request) {
+    for (panel, request) in clipboard_requests
+        .into_iter()
+        .filter_map(|(p, r)| r.map(|r| (p, r)))
+    {
+        if let Some(detail) =
+            handle_clipboard_request(window, cx.language.t("duplicate_suffix"), panel, request)
+        {
             window.sftp_error_dialog = Some(SftpErrorDialog {
                 title: cx.language.t("paste").to_string(),
                 message: detail,
@@ -1440,7 +1506,9 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
     }
 
     // ── Handle context menu requests ──
-    let menu_just_opened = local_left_ctx_menu_req.is_some() || remote_ctx_menu_req.is_some() || left_remote_ctx_menu_req.is_some();
+    let menu_just_opened = local_left_ctx_menu_req.is_some()
+        || remote_ctx_menu_req.is_some()
+        || left_remote_ctx_menu_req.is_some();
     if let Some((pos, entry_idx)) = local_left_ctx_menu_req {
         if let Some(idx) = entry_idx {
             if !window.local_browser_left.selection.is_selected(idx) {
@@ -1448,19 +1516,31 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
             }
         }
         let indices: Vec<usize> = if entry_idx.is_some() {
-            window.local_browser_left.selection.selected.iter().copied().collect()
+            window
+                .local_browser_left
+                .selection
+                .selected
+                .iter()
+                .copied()
+                .collect()
         } else {
             vec![]
         };
         let filtered = window.local_browser_left.filtered_entries();
-        let names: Vec<String> = indices.iter()
+        let names: Vec<String> = indices
+            .iter()
             .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
             .collect();
-        let all_dirs = !indices.is_empty() && indices.iter().all(|&i| {
-            filtered.get(i).is_some_and(|e| e.kind == SftpEntryKind::Directory)
-        });
+        let all_dirs = !indices.is_empty()
+            && indices.iter().all(|&i| {
+                filtered
+                    .get(i)
+                    .is_some_and(|e| e.kind == SftpEntryKind::Directory)
+            });
         let any_dirs = indices.iter().any(|&i| {
-            filtered.get(i).is_some_and(|e| e.kind == SftpEntryKind::Directory)
+            filtered
+                .get(i)
+                .is_some_and(|e| e.kind == SftpEntryKind::Directory)
         });
         window.sftp_context_menu = Some(SftpContextMenu {
             pos,
@@ -1478,19 +1558,31 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
             }
         }
         let indices: Vec<usize> = if entry_idx.is_some() {
-            window.local_browser_right.selection.selected.iter().copied().collect()
+            window
+                .local_browser_right
+                .selection
+                .selected
+                .iter()
+                .copied()
+                .collect()
         } else {
             vec![]
         };
         let filtered = window.local_browser_right.filtered_entries();
-        let names: Vec<String> = indices.iter()
+        let names: Vec<String> = indices
+            .iter()
             .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
             .collect();
-        let all_dirs = !indices.is_empty() && indices.iter().all(|&i| {
-            filtered.get(i).is_some_and(|e| e.kind == SftpEntryKind::Directory)
-        });
+        let all_dirs = !indices.is_empty()
+            && indices.iter().all(|&i| {
+                filtered
+                    .get(i)
+                    .is_some_and(|e| e.kind == SftpEntryKind::Directory)
+            });
         let any_dirs = indices.iter().any(|&i| {
-            filtered.get(i).is_some_and(|e| e.kind == SftpEntryKind::Directory)
+            filtered
+                .get(i)
+                .is_some_and(|e| e.kind == SftpEntryKind::Directory)
         });
         window.sftp_context_menu = Some(SftpContextMenu {
             pos,
@@ -1514,14 +1606,20 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                 vec![]
             };
             let filtered = browser.filtered_entries();
-            let names: Vec<String> = indices.iter()
+            let names: Vec<String> = indices
+                .iter()
                 .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                 .collect();
-            let all_dirs = !indices.is_empty() && indices.iter().all(|&i| {
-                filtered.get(i).is_some_and(|e| e.kind == SftpEntryKind::Directory)
-            });
+            let all_dirs = !indices.is_empty()
+                && indices.iter().all(|&i| {
+                    filtered
+                        .get(i)
+                        .is_some_and(|e| e.kind == SftpEntryKind::Directory)
+                });
             let any_dirs = indices.iter().any(|&i| {
-                filtered.get(i).is_some_and(|e| e.kind == SftpEntryKind::Directory)
+                filtered
+                    .get(i)
+                    .is_some_and(|e| e.kind == SftpEntryKind::Directory)
             });
             window.sftp_context_menu = Some(SftpContextMenu {
                 pos,
@@ -1546,14 +1644,20 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                 vec![]
             };
             let filtered = browser.filtered_entries();
-            let names: Vec<String> = indices.iter()
+            let names: Vec<String> = indices
+                .iter()
                 .filter_map(|&i| filtered.get(i).map(|e| e.name.clone()))
                 .collect();
-            let all_dirs = !indices.is_empty() && indices.iter().all(|&i| {
-                filtered.get(i).is_some_and(|e| e.kind == SftpEntryKind::Directory)
-            });
+            let all_dirs = !indices.is_empty()
+                && indices.iter().all(|&i| {
+                    filtered
+                        .get(i)
+                        .is_some_and(|e| e.kind == SftpEntryKind::Directory)
+                });
             let any_dirs = indices.iter().any(|&i| {
-                filtered.get(i).is_some_and(|e| e.kind == SftpEntryKind::Directory)
+                filtered
+                    .get(i)
+                    .is_some_and(|e| e.kind == SftpEntryKind::Directory)
             });
             window.sftp_context_menu = Some(SftpContextMenu {
                 pos,
@@ -1568,7 +1672,14 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
 
     // ── Render context menu ──
     if let Some(ref menu) = window.sftp_context_menu.as_ref().map(|m| {
-        (m.pos, m.panel, m.entry_indices.clone(), m.entry_names.clone(), m.all_dirs, m.any_dirs)
+        (
+            m.pos,
+            m.panel,
+            m.entry_indices.clone(),
+            m.entry_names.clone(),
+            m.all_dirs,
+            m.any_dirs,
+        )
     }) {
         let (pos, panel, entry_indices, entry_names, _all_dirs, any_dirs) = menu.clone();
         let has_entries = !entry_indices.is_empty();
@@ -1597,36 +1708,55 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
 
                     if has_entries {
                         if is_single
-                            && ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(cx.language.t("rename")).size(12.0).color(cx.theme.fg_primary)
-                                ).frame(false)
-                            ).clicked() {
-                                window.sftp_rename_dialog = Some(SftpRenameDialog {
-                                    panel,
-                                    old_name: entry_names[0].clone(),
-                                    new_name: entry_names[0].clone(),
-                                    error: String::new(),
-                                });
-                                close_menu = true;
-                            }
+                            && ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(cx.language.t("rename"))
+                                            .size(12.0)
+                                            .color(cx.theme.fg_primary),
+                                    )
+                                    .frame(false),
+                                )
+                                .clicked()
+                        {
+                            window.sftp_rename_dialog = Some(SftpRenameDialog {
+                                panel,
+                                old_name: entry_names[0].clone(),
+                                new_name: entry_names[0].clone(),
+                                error: String::new(),
+                            });
+                            close_menu = true;
+                        }
 
-                        if is_single && !any_dirs
-                            && ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(cx.language.t("edit_file")).size(12.0).color(cx.theme.fg_primary)
-                                ).frame(false)
-                            ).clicked() {
-                                open_editor_in_side(window, panel, &entry_names[0]);
-                                close_menu = true;
-                            }
+                        if is_single
+                            && !any_dirs
+                            && ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(cx.language.t("edit_file"))
+                                            .size(12.0)
+                                            .color(cx.theme.fg_primary),
+                                    )
+                                    .frame(false),
+                                )
+                                .clicked()
+                        {
+                            open_editor_in_side(window, panel, &entry_names[0]);
+                            close_menu = true;
+                        }
 
                         // Copy the selection into the app clipboard (Finder-style snapshot)
-                        if ui.add(
-                            egui::Button::new(
-                                egui::RichText::new(cx.language.t("copy")).size(12.0).color(cx.theme.fg_primary)
-                            ).frame(false)
-                        ).clicked() {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new(cx.language.t("copy"))
+                                        .size(12.0)
+                                        .color(cx.theme.fg_primary),
+                                )
+                                .frame(false),
+                            )
+                            .clicked()
+                        {
                             window.sftp_clipboard = capture_clipboard(window, panel);
                             close_menu = true;
                         }
@@ -1636,11 +1766,17 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                         } else {
                             cx.language.t("delete_file").to_string()
                         };
-                        if ui.add(
-                            egui::Button::new(
-                                egui::RichText::new(delete_label).size(12.0).color(cx.theme.red)
-                            ).frame(false)
-                        ).clicked() {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new(delete_label)
+                                        .size(12.0)
+                                        .color(cx.theme.red),
+                                )
+                                .frame(false),
+                            )
+                            .clicked()
+                        {
                             window.sftp_confirm_delete = Some(SftpConfirmDelete {
                                 panel,
                                 names: entry_names.clone(),
@@ -1652,14 +1788,21 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                     }
 
                     // Paste the clipboard into this panel (remote targets must be connected)
-                    let paste_ready = window.sftp_clipboard.is_some() && paste_target_ready(window, panel);
-                    if ui.add_enabled(
-                        paste_ready,
-                        egui::Button::new(
-                            egui::RichText::new(cx.language.t("paste")).size(12.0)
-                        ).frame(false)
-                    ).clicked() {
-                        if let Some(detail) = execute_paste(window, panel, cx.language.t("duplicate_suffix")) {
+                    let paste_ready =
+                        window.sftp_clipboard.is_some() && paste_target_ready(window, panel);
+                    if ui
+                        .add_enabled(
+                            paste_ready,
+                            egui::Button::new(
+                                egui::RichText::new(cx.language.t("paste")).size(12.0),
+                            )
+                            .frame(false),
+                        )
+                        .clicked()
+                    {
+                        if let Some(detail) =
+                            execute_paste(window, panel, cx.language.t("duplicate_suffix"))
+                        {
                             window.sftp_error_dialog = Some(SftpErrorDialog {
                                 title: cx.language.t("paste").to_string(),
                                 message: detail,
@@ -1670,26 +1813,42 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
 
                     // Local panel: open a terminal tab at this directory
                     let local_cwd = match panel {
-                        SftpPanel::LeftLocal => Some(window.local_browser_left.current_path.clone()),
-                        SftpPanel::RightLocal => Some(window.local_browser_right.current_path.clone()),
+                        SftpPanel::LeftLocal => {
+                            Some(window.local_browser_left.current_path.clone())
+                        }
+                        SftpPanel::RightLocal => {
+                            Some(window.local_browser_right.current_path.clone())
+                        }
                         _ => None,
                     };
                     if let Some(cwd) = local_cwd {
-                        if ui.add(
-                            egui::Button::new(
-                                egui::RichText::new(cx.language.t("open_terminal_here")).size(12.0).color(cx.theme.fg_primary)
-                            ).frame(false)
-                        ).clicked() {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new(cx.language.t("open_terminal_here"))
+                                        .size(12.0)
+                                        .color(cx.theme.fg_primary),
+                                )
+                                .frame(false),
+                            )
+                            .clicked()
+                        {
                             open_terminal_at = Some(cwd);
                             close_menu = true;
                         }
                     }
 
-                    if ui.add(
-                        egui::Button::new(
-                            egui::RichText::new(cx.language.t("new_folder")).size(12.0).color(cx.theme.fg_primary)
-                        ).frame(false)
-                    ).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(cx.language.t("new_folder"))
+                                    .size(12.0)
+                                    .color(cx.theme.fg_primary),
+                            )
+                            .frame(false),
+                        )
+                        .clicked()
+                    {
                         window.sftp_new_folder_dialog = Some(SftpNewFolderDialog {
                             panel,
                             name: String::new(),
@@ -1698,11 +1857,17 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
                         close_menu = true;
                     }
 
-                    if ui.add(
-                        egui::Button::new(
-                            egui::RichText::new(cx.language.t("new_file")).size(12.0).color(cx.theme.fg_primary)
-                        ).frame(false)
-                    ).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(cx.language.t("new_file"))
+                                    .size(12.0)
+                                    .color(cx.theme.fg_primary),
+                            )
+                            .frame(false),
+                        )
+                        .clicked()
+                    {
                         window.sftp_new_file_dialog = Some(SftpNewFileDialog {
                             panel,
                             name: String::new(),
@@ -1787,7 +1952,11 @@ pub fn render_sftp_view(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut Wind
 /// persist the edited content (closing on success, surfacing errors inline).
 fn resolve_editor_output(window: &mut AppWindow, out: Option<EditorOutput>, left: bool) {
     let Some(out) = out else { return };
-    let slot = if left { &mut window.sftp_editor_left } else { &mut window.sftp_editor_right };
+    let slot = if left {
+        &mut window.sftp_editor_left
+    } else {
+        &mut window.sftp_editor_right
+    };
     if out.close {
         *slot = None;
         return;
@@ -1804,7 +1973,11 @@ fn resolve_editor_output(window: &mut AppWindow, out: Option<EditorOutput>, left
                     }
                 }
                 Err(e) => {
-                    let slot = if left { window.sftp_editor_left.as_mut() } else { window.sftp_editor_right.as_mut() };
+                    let slot = if left {
+                        window.sftp_editor_left.as_mut()
+                    } else {
+                        window.sftp_editor_right.as_mut()
+                    };
                     if let Some(ed) = slot {
                         ed.error = e;
                     }
@@ -1832,42 +2005,81 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
             .frame(widgets::dialog_frame(cx.theme))
             .show(ui.ctx(), |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("\u{270F}").size(18.0).color(cx.theme.accent));
+                    ui.label(
+                        egui::RichText::new("\u{270F}")
+                            .size(18.0)
+                            .color(cx.theme.accent),
+                    );
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(cx.language.t("rename")).size(15.0).color(cx.theme.fg_primary).strong());
+                    ui.label(
+                        egui::RichText::new(cx.language.t("rename"))
+                            .size(15.0)
+                            .color(cx.theme.fg_primary)
+                            .strong(),
+                    );
                 });
                 ui.add_space(10.0);
 
-                ui.label(egui::RichText::new(cx.language.t("new_name")).size(12.0).color(cx.theme.fg_dim));
+                ui.label(
+                    egui::RichText::new(cx.language.t("new_name"))
+                        .size(12.0)
+                        .color(cx.theme.fg_dim),
+                );
                 ui.add_space(4.0);
                 let te = ui.add(
                     egui::TextEdit::singleline(&mut dialog.new_name)
                         .desired_width(260.0)
-                        .hint_text(egui::RichText::new(cx.language.t("new_name")).color(cx.theme.hint_color()).italics())
+                        .hint_text(
+                            egui::RichText::new(cx.language.t("new_name"))
+                                .color(cx.theme.hint_color())
+                                .italics(),
+                        )
                         .text_color(cx.theme.fg_primary)
-                        .font(egui::FontId::proportional(13.0))
+                        .font(egui::FontId::proportional(13.0)),
                 );
-                if te.lost_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter))
-                    && !dialog.new_name.is_empty() && dialog.new_name != dialog.old_name {
-                        rename_action = Some((dialog.panel, dialog.old_name.clone(), dialog.new_name.clone()));
-                        close_rename = true;
-                    }
+                if te.lost_focus()
+                    && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter))
+                    && !dialog.new_name.is_empty()
+                    && dialog.new_name != dialog.old_name
+                {
+                    rename_action = Some((
+                        dialog.panel,
+                        dialog.old_name.clone(),
+                        dialog.new_name.clone(),
+                    ));
+                    close_rename = true;
+                }
                 te.request_focus();
 
                 if !dialog.error.is_empty() {
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(&dialog.error).size(11.0).color(cx.theme.red));
+                    ui.label(
+                        egui::RichText::new(&dialog.error)
+                            .size(11.0)
+                            .color(cx.theme.red),
+                    );
                 }
 
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked()
-                            && !dialog.new_name.is_empty() && dialog.new_name != dialog.old_name {
-                                rename_action = Some((dialog.panel, dialog.old_name.clone(), dialog.new_name.clone()));
-                                close_rename = true;
-                            }
-                        if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                        if ui
+                            .add(widgets::primary_button(cx.language.t("save"), cx.theme))
+                            .clicked()
+                            && !dialog.new_name.is_empty()
+                            && dialog.new_name != dialog.old_name
+                        {
+                            rename_action = Some((
+                                dialog.panel,
+                                dialog.old_name.clone(),
+                                dialog.new_name.clone(),
+                            ));
+                            close_rename = true;
+                        }
+                        if ui
+                            .add(widgets::secondary_button(cx.language.t("cancel"), cx.theme))
+                            .clicked()
+                        {
                             close_rename = true;
                         }
                     });
@@ -1889,15 +2101,31 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
             }
             SftpPanel::LeftRemote => {
                 if let Some(ref mut browser) = window.sftp_browser_left {
-                    let from = format!("{}/{}", browser.current_path.trim_end_matches('/'), old_name);
-                    let to = format!("{}/{}", browser.current_path.trim_end_matches('/'), new_name);
+                    let from = format!(
+                        "{}/{}",
+                        browser.current_path.trim_end_matches('/'),
+                        old_name
+                    );
+                    let to = format!(
+                        "{}/{}",
+                        browser.current_path.trim_end_matches('/'),
+                        new_name
+                    );
                     browser.rename(&from, &to);
                 }
             }
             SftpPanel::RightRemote => {
                 if let Some(ref mut browser) = window.sftp_browser {
-                    let from = format!("{}/{}", browser.current_path.trim_end_matches('/'), old_name);
-                    let to = format!("{}/{}", browser.current_path.trim_end_matches('/'), new_name);
+                    let from = format!(
+                        "{}/{}",
+                        browser.current_path.trim_end_matches('/'),
+                        old_name
+                    );
+                    let to = format!(
+                        "{}/{}",
+                        browser.current_path.trim_end_matches('/'),
+                        new_name
+                    );
                     browser.rename(&from, &to);
                 }
             }
@@ -1925,42 +2153,71 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
             .frame(widgets::dialog_frame(cx.theme))
             .show(ui.ctx(), |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("\u{1F4C1}").size(18.0).color(cx.theme.accent));
+                    ui.label(
+                        egui::RichText::new("\u{1F4C1}")
+                            .size(18.0)
+                            .color(cx.theme.accent),
+                    );
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(cx.language.t("new_folder")).size(15.0).color(cx.theme.fg_primary).strong());
+                    ui.label(
+                        egui::RichText::new(cx.language.t("new_folder"))
+                            .size(15.0)
+                            .color(cx.theme.fg_primary)
+                            .strong(),
+                    );
                 });
                 ui.add_space(10.0);
 
-                ui.label(egui::RichText::new(cx.language.t("folder_name")).size(12.0).color(cx.theme.fg_dim));
+                ui.label(
+                    egui::RichText::new(cx.language.t("folder_name"))
+                        .size(12.0)
+                        .color(cx.theme.fg_dim),
+                );
                 ui.add_space(4.0);
                 let te = ui.add(
                     egui::TextEdit::singleline(&mut dialog.name)
                         .desired_width(260.0)
-                        .hint_text(egui::RichText::new(cx.language.t("folder_name")).color(cx.theme.hint_color()).italics())
+                        .hint_text(
+                            egui::RichText::new(cx.language.t("folder_name"))
+                                .color(cx.theme.hint_color())
+                                .italics(),
+                        )
                         .text_color(cx.theme.fg_primary)
-                        .font(egui::FontId::proportional(13.0))
+                        .font(egui::FontId::proportional(13.0)),
                 );
-                if te.lost_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter))
-                    && !dialog.name.is_empty() {
-                        create_dir_action = Some((dialog.panel, dialog.name.clone()));
-                        close_new_folder = true;
-                    }
+                if te.lost_focus()
+                    && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter))
+                    && !dialog.name.is_empty()
+                {
+                    create_dir_action = Some((dialog.panel, dialog.name.clone()));
+                    close_new_folder = true;
+                }
                 te.request_focus();
 
                 if !dialog.error.is_empty() {
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(&dialog.error).size(11.0).color(cx.theme.red));
+                    ui.label(
+                        egui::RichText::new(&dialog.error)
+                            .size(11.0)
+                            .color(cx.theme.red),
+                    );
                 }
 
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked()
-                            && !dialog.name.is_empty() {
-                                create_dir_action = Some((dialog.panel, dialog.name.clone()));
-                                close_new_folder = true;
-                            }
-                        if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                        if ui
+                            .add(widgets::primary_button(cx.language.t("save"), cx.theme))
+                            .clicked()
+                            && !dialog.name.is_empty()
+                        {
+                            create_dir_action = Some((dialog.panel, dialog.name.clone()));
+                            close_new_folder = true;
+                        }
+                        if ui
+                            .add(widgets::secondary_button(cx.language.t("cancel"), cx.theme))
+                            .clicked()
+                        {
                             close_new_folder = true;
                         }
                     });
@@ -2016,42 +2273,71 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
             .frame(widgets::dialog_frame(cx.theme))
             .show(ui.ctx(), |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("\u{1F4C4}").size(18.0).color(cx.theme.accent));
+                    ui.label(
+                        egui::RichText::new("\u{1F4C4}")
+                            .size(18.0)
+                            .color(cx.theme.accent),
+                    );
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(cx.language.t("new_file")).size(15.0).color(cx.theme.fg_primary).strong());
+                    ui.label(
+                        egui::RichText::new(cx.language.t("new_file"))
+                            .size(15.0)
+                            .color(cx.theme.fg_primary)
+                            .strong(),
+                    );
                 });
                 ui.add_space(10.0);
 
-                ui.label(egui::RichText::new(cx.language.t("file_name")).size(12.0).color(cx.theme.fg_dim));
+                ui.label(
+                    egui::RichText::new(cx.language.t("file_name"))
+                        .size(12.0)
+                        .color(cx.theme.fg_dim),
+                );
                 ui.add_space(4.0);
                 let te = ui.add(
                     egui::TextEdit::singleline(&mut dialog.name)
                         .desired_width(260.0)
-                        .hint_text(egui::RichText::new(cx.language.t("file_name")).color(cx.theme.hint_color()).italics())
+                        .hint_text(
+                            egui::RichText::new(cx.language.t("file_name"))
+                                .color(cx.theme.hint_color())
+                                .italics(),
+                        )
                         .text_color(cx.theme.fg_primary)
-                        .font(egui::FontId::proportional(13.0))
+                        .font(egui::FontId::proportional(13.0)),
                 );
-                if te.lost_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter))
-                    && !dialog.name.is_empty() {
-                        create_file_action = Some((dialog.panel, dialog.name.clone()));
-                        close_new_file = true;
-                    }
+                if te.lost_focus()
+                    && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter))
+                    && !dialog.name.is_empty()
+                {
+                    create_file_action = Some((dialog.panel, dialog.name.clone()));
+                    close_new_file = true;
+                }
                 te.request_focus();
 
                 if !dialog.error.is_empty() {
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(&dialog.error).size(11.0).color(cx.theme.red));
+                    ui.label(
+                        egui::RichText::new(&dialog.error)
+                            .size(11.0)
+                            .color(cx.theme.red),
+                    );
                 }
 
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked()
-                            && !dialog.name.is_empty() {
-                                create_file_action = Some((dialog.panel, dialog.name.clone()));
-                                close_new_file = true;
-                            }
-                        if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                        if ui
+                            .add(widgets::primary_button(cx.language.t("save"), cx.theme))
+                            .clicked()
+                            && !dialog.name.is_empty()
+                        {
+                            create_file_action = Some((dialog.panel, dialog.name.clone()));
+                            close_new_file = true;
+                        }
+                        if ui
+                            .add(widgets::secondary_button(cx.language.t("cancel"), cx.theme))
+                            .clicked()
+                        {
                             close_new_file = true;
                         }
                     });
@@ -2067,7 +2353,11 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
     if let Some((panel, name)) = create_file_action {
         match panel {
             SftpPanel::LeftLocal => {
-                let path = format!("{}/{}", window.local_browser_left.current_path.trim_end_matches('/'), name);
+                let path = format!(
+                    "{}/{}",
+                    window.local_browser_left.current_path.trim_end_matches('/'),
+                    name
+                );
                 match std::fs::write(&path, b"") {
                     Ok(_) => window.local_browser_left.refresh(),
                     Err(e) => log::error!("Local create file error: {}", e),
@@ -2086,7 +2376,14 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
                 }
             }
             SftpPanel::RightLocal => {
-                let path = format!("{}/{}", window.local_browser_right.current_path.trim_end_matches('/'), name);
+                let path = format!(
+                    "{}/{}",
+                    window
+                        .local_browser_right
+                        .current_path
+                        .trim_end_matches('/'),
+                    name
+                );
                 match std::fs::write(&path, b"") {
                     Ok(_) => window.local_browser_right.refresh(),
                     Err(e) => log::error!("Local create file error: {}", e),
@@ -2113,30 +2410,57 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
             .frame(widgets::dialog_frame(cx.theme))
             .show(ui.ctx(), |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("\u{26A0}").size(18.0).color(cx.theme.red));
+                    ui.label(
+                        egui::RichText::new("\u{26A0}")
+                            .size(18.0)
+                            .color(cx.theme.red),
+                    );
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(cx.language.t("delete_file")).size(15.0).color(cx.theme.fg_primary).strong());
+                    ui.label(
+                        egui::RichText::new(cx.language.t("delete_file"))
+                            .size(15.0)
+                            .color(cx.theme.fg_primary)
+                            .strong(),
+                    );
                 });
                 ui.add_space(10.0);
 
                 let confirm_msg = if names.len() == 1 {
                     cx.language.tf("delete_file_confirm", &names[0])
                 } else {
-                    cx.language.tf("delete_items_confirm", &names.len().to_string())
+                    cx.language
+                        .tf("delete_items_confirm", &names.len().to_string())
                 };
-                ui.label(egui::RichText::new(confirm_msg).size(13.0).color(cx.theme.fg_primary));
+                ui.label(
+                    egui::RichText::new(confirm_msg)
+                        .size(13.0)
+                        .color(cx.theme.fg_primary),
+                );
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(cx.language.t("confirm_delete")).size(11.0).color(cx.theme.fg_dim));
+                ui.label(
+                    egui::RichText::new(cx.language.t("confirm_delete"))
+                        .size(11.0)
+                        .color(cx.theme.fg_dim),
+                );
 
                 ui.add_space(16.0);
 
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(widgets::danger_button(cx.language.t("delete_file"), cx.theme)).clicked() {
+                        if ui
+                            .add(widgets::danger_button(
+                                cx.language.t("delete_file"),
+                                cx.theme,
+                            ))
+                            .clicked()
+                        {
                             delete_action = Some((panel, names.clone()));
                             close_delete = true;
                         }
-                        if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                        if ui
+                            .add(widgets::secondary_button(cx.language.t("cancel"), cx.theme))
+                            .clicked()
+                        {
                             close_delete = true;
                         }
                     });
@@ -2168,10 +2492,19 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("❌").size(24.0));
                         ui.add_space(10.0);
-                        ui.label(egui::RichText::new(&dialog.title).size(16.0).strong().color(cx.theme.fg_primary));
+                        ui.label(
+                            egui::RichText::new(&dialog.title)
+                                .size(16.0)
+                                .strong()
+                                .color(cx.theme.fg_primary),
+                        );
                     });
                     ui.add_space(16.0);
-                    ui.label(egui::RichText::new(&dialog.message).size(13.0).color(cx.theme.fg_dim));
+                    ui.label(
+                        egui::RichText::new(&dialog.message)
+                            .size(13.0)
+                            .color(cx.theme.fg_dim),
+                    );
                     ui.add_space(20.0);
                     ui.vertical_centered(|ui| {
                         if ui.add(widgets::primary_button("确定", cx.theme)).clicked() {
@@ -2202,13 +2535,15 @@ pub fn render_sftp_dialogs(window: &mut AppWindow, ui: &mut egui::Ui, cx: &mut W
                 }
                 SftpPanel::LeftRemote => {
                     if let Some(ref mut browser) = window.sftp_browser_left {
-                        let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
+                        let path =
+                            format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                         browser.delete(&path);
                     }
                 }
                 SftpPanel::RightRemote => {
                     if let Some(ref mut browser) = window.sftp_browser {
-                        let path = format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
+                        let path =
+                            format!("{}/{}", browser.current_path.trim_end_matches('/'), name);
                         browser.delete(&path);
                     }
                 }
@@ -2255,7 +2590,8 @@ mod editor_resolve_tests {
     }
 
     fn temp_dir_with(tag: &str, files: &[(&str, &str)]) -> String {
-        let dir = std::env::temp_dir().join(format!("portal_resolve_{}_{}", tag, std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("portal_resolve_{}_{}", tag, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for (name, content) in files {
@@ -2278,12 +2614,26 @@ mod editor_resolve_tests {
         let mut window = test_window("close");
         window.local_browser_left.current_path = dir.clone();
         window.sftp_editor_left = Some(make_editor(SftpPanel::LeftLocal, format!("{}/a.txt", dir)));
-        window.sftp_editor_right = Some(make_editor(SftpPanel::RightLocal, "/tmp/other.txt".into()));
+        window.sftp_editor_right =
+            Some(make_editor(SftpPanel::RightLocal, "/tmp/other.txt".into()));
 
-        resolve_editor_output(&mut window, Some(EditorOutput { close: true, save: None }), true);
+        resolve_editor_output(
+            &mut window,
+            Some(EditorOutput {
+                close: true,
+                save: None,
+            }),
+            true,
+        );
         assert!(window.sftp_editor_left.is_none());
-        assert!(window.sftp_editor_right.is_some(), "the other half's editor must survive");
-        assert_eq!(std::fs::read_to_string(format!("{}/a.txt", dir)).unwrap(), "on disk");
+        assert!(
+            window.sftp_editor_right.is_some(),
+            "the other half's editor must survive"
+        );
+        assert_eq!(
+            std::fs::read_to_string(format!("{}/a.txt", dir)).unwrap(),
+            "on disk"
+        );
     }
 
     #[test]
@@ -2295,11 +2645,20 @@ mod editor_resolve_tests {
 
         resolve_editor_output(
             &mut window,
-            Some(EditorOutput { close: false, save: Some("saved!".into()) }),
+            Some(EditorOutput {
+                close: false,
+                save: Some("saved!".into()),
+            }),
             true,
         );
-        assert!(window.sftp_editor_left.is_none(), "successful save closes the editor");
-        assert_eq!(std::fs::read_to_string(format!("{}/a.txt", dir)).unwrap(), "saved!");
+        assert!(
+            window.sftp_editor_left.is_none(),
+            "successful save closes the editor"
+        );
+        assert_eq!(
+            std::fs::read_to_string(format!("{}/a.txt", dir)).unwrap(),
+            "saved!"
+        );
     }
 
     #[test]
@@ -2308,11 +2667,15 @@ mod editor_resolve_tests {
         std::fs::create_dir(format!("{}/subdir", dir)).unwrap();
         let mut window = test_window("save_err");
         window.local_browser_left.current_path = dir.clone();
-        window.sftp_editor_left = Some(make_editor(SftpPanel::LeftLocal, format!("{}/subdir", dir)));
+        window.sftp_editor_left =
+            Some(make_editor(SftpPanel::LeftLocal, format!("{}/subdir", dir)));
 
         resolve_editor_output(
             &mut window,
-            Some(EditorOutput { close: false, save: Some("x".into()) }),
+            Some(EditorOutput {
+                close: false,
+                save: Some("x".into()),
+            }),
             true,
         );
         let ed = window
@@ -2327,11 +2690,15 @@ mod editor_resolve_tests {
         let dir = temp_dir_with("save_right", &[("b.txt", "right-old")]);
         let mut window = test_window("save_right");
         window.local_browser_right.current_path = dir.clone();
-        window.sftp_editor_right = Some(make_editor(SftpPanel::RightLocal, format!("{}/b.txt", dir)));
+        window.sftp_editor_right =
+            Some(make_editor(SftpPanel::RightLocal, format!("{}/b.txt", dir)));
 
         resolve_editor_output(
             &mut window,
-            Some(EditorOutput { close: false, save: Some("right-new".into()) }),
+            Some(EditorOutput {
+                close: false,
+                save: Some("right-new".into()),
+            }),
             false,
         );
         assert!(window.sftp_editor_right.is_none());

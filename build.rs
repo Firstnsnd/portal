@@ -11,7 +11,10 @@ fn main() {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("assets/portal.ico");
         res.set("ProductName", "Portal");
-        res.set("FileDescription", "Portal - terminal emulator with SSH/SFTP");
+        res.set(
+            "FileDescription",
+            "Portal - terminal emulator with SSH/SFTP",
+        );
         let v = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
         res.set("ProductVersion", &v);
         // VERSIONINFO requires a four-segment version; tag versions have three.

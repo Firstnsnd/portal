@@ -9,12 +9,12 @@
 //!   Dock icon + activation policy). Other platforms show the launched
 //!   window as-is.
 
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
 mod windows;
-#[cfg(target_os = "macos")]
-mod macos;
 
 #[cfg(unix)]
 pub use unix::install_signal_cleanup;

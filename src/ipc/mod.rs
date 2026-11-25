@@ -19,8 +19,8 @@
 //! transport in a sibling module (`unix`: socket, `windows`: named pipe).
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(unix)]
@@ -70,7 +70,11 @@ pub(crate) struct RequestReader {
 
 impl RequestReader {
     pub(crate) fn new() -> Self {
-        Self { buf: String::new(), ended: false, requests: Vec::new() }
+        Self {
+            buf: String::new(),
+            ended: false,
+            requests: Vec::new(),
+        }
     }
 
     /// Feed raw bytes; complete lines are decoded into the request buffer.
@@ -241,9 +245,8 @@ mod tests {
 
     #[test]
     fn parse_flags_and_values() {
-        let reqs = parse_cli_requests(
-            strs(&["--open-tab", "/tmp", "--open-window", "/etc"]).into_iter(),
-        );
+        let reqs =
+            parse_cli_requests(strs(&["--open-tab", "/tmp", "--open-window", "/etc"]).into_iter());
         assert_eq!(
             reqs,
             vec![
@@ -255,7 +258,8 @@ mod tests {
 
     #[test]
     fn parse_bare_existing_dir_becomes_tab() {
-        let reqs = parse_cli_requests(strs(&["--open-tab", "/tmp", "/definitely/not/a/dir"]).into_iter());
+        let reqs =
+            parse_cli_requests(strs(&["--open-tab", "/tmp", "/definitely/not/a/dir"]).into_iter());
         // The bare non-existent path is ignored; /tmp keeps its request.
         assert_eq!(reqs.len(), 1);
         assert_eq!(reqs[0], IpcRequest::OpenTab(PathBuf::from("/tmp")));

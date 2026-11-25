@@ -136,6 +136,10 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert_eq!(&*got.lock().unwrap(), &reqs, "forwarded requests should reach the sink verbatim");
+        assert_eq!(
+            &*got.lock().unwrap(),
+            &reqs,
+            "forwarded requests should reach the sink verbatim"
+        );
     }
 }

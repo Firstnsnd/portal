@@ -14,16 +14,16 @@
 //! - **keychain_view**: Credentials/keychain view
 //! - **snippets_view**: Command snippets view
 
-pub mod nav_panel;
-pub mod tab_view;
-pub mod sftp;
-pub mod sftp_view;
-pub mod settings_view;
-pub mod hosts_view;
-pub mod history_view;
-pub mod keychain_view;
-pub mod snippets_view;
-pub mod metrics_drawer;
 pub mod ai_drawer;
 pub mod ai_markdown;
+pub mod history_view;
+pub mod hosts_view;
+pub mod keychain_view;
+pub mod metrics_drawer;
+pub mod nav_panel;
 pub mod replay_view;
+pub mod settings_view;
+pub mod sftp;
+pub mod sftp_view;
+pub mod snippets_view;
+pub mod tab_view;

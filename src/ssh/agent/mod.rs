@@ -33,7 +33,8 @@ pub const MAX_AGENT_KEYS: usize = 6;
 /// per-OS stream ([`ConcreteStream`]: unix socket / enum'd pipe+Pageant).
 /// No `dyn` here — a boxed stream type parameter through russh's generic
 /// async fns trips rustc's incomplete "Send is not general enough" check.
-pub type PlatformAgentClient = russh::keys::agent::client::AgentClient<crate::ssh::agent::ConcreteStream>;
+pub type PlatformAgentClient =
+    russh::keys::agent::client::AgentClient<crate::ssh::agent::ConcreteStream>;
 
 /// ssh-agent authentication (OpenSSH-style): ask the local agent for its
 /// identities and offer each one to the server, letting the agent produce

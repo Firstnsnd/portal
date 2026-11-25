@@ -61,19 +61,19 @@ pub async fn connect_through_proxy(
         TcpStream::connect((proxy.host.as_str(), proxy.port)),
     )
     .await
-    .map_err(|_| ProxyError::Protocol(format!(
-        "connecting to proxy {}:{} timed out", proxy.host, proxy.port
-    )))??;
+    .map_err(|_| {
+        ProxyError::Protocol(format!(
+            "connecting to proxy {}:{} timed out",
+            proxy.host, proxy.port
+        ))
+    })??;
 
-    tokio::time::timeout(
-        PROXY_HANDSHAKE_TIMEOUT,
-        async {
-            match proxy.kind {
-                ProxyKind::Socks5 => socks5_connect(stream, proxy, target_host, target_port).await,
-                ProxyKind::Http => http_connect(stream, proxy, target_host, target_port).await,
-            }
-        },
-    )
+    tokio::time::timeout(PROXY_HANDSHAKE_TIMEOUT, async {
+        match proxy.kind {
+            ProxyKind::Socks5 => socks5_connect(stream, proxy, target_host, target_port).await,
+            ProxyKind::Http => http_connect(stream, proxy, target_host, target_port).await,
+        }
+    })
     .await
     .map_err(|_| ProxyError::Protocol("proxy handshake timed out".to_string()))?
 }
@@ -92,7 +92,11 @@ async fn http_connect(
     if let Some(username) = &proxy.username {
         use std::fmt::Write as _;
         let credentials = format!("{}:{}", username, proxy.password.as_deref().unwrap_or(""));
-        let _ = write!(request, "Proxy-Authorization: Basic {}\r\n", base64_encode(credentials.as_bytes()));
+        let _ = write!(
+            request,
+            "Proxy-Authorization: Basic {}\r\n",
+            base64_encode(credentials.as_bytes())
+        );
     }
     request.push_str("\r\n");
     stream.write_all(request.as_bytes()).await?;
@@ -136,12 +140,14 @@ async fn socks5_connect(
     stream.read_exact(&mut reply).await?;
     if reply[0] != socks5::SOCKS_VERSION {
         return Err(ProxyError::Protocol(format!(
-            "proxy replied with SOCKS version {}", reply[0]
+            "proxy replied with SOCKS version {}",
+            reply[0]
         )));
     }
     if !offered.contains(&reply[1]) {
         return Err(ProxyError::Protocol(format!(
-            "proxy picked auth method {:#04x} which was not offered", reply[1]
+            "proxy picked auth method {:#04x} which was not offered",
+            reply[1]
         )));
     }
 
@@ -165,7 +171,8 @@ async fn socks5_connect(
         stream.read_exact(&mut status).await?;
         if status[0] != 0x01 {
             return Err(ProxyError::Protocol(format!(
-                "proxy replied to auth negotiation with version {}", status[0]
+                "proxy replied to auth negotiation with version {}",
+                status[0]
             )));
         }
         if status[1] != 0x00 {
@@ -205,12 +212,14 @@ async fn socks5_connect(
     stream.read_exact(&mut header).await?;
     if header[0] != socks5::SOCKS_VERSION {
         return Err(ProxyError::Protocol(format!(
-            "proxy replied to CONNECT with version {}", header[0]
+            "proxy replied to CONNECT with version {}",
+            header[0]
         )));
     }
     if header[1] != 0x00 {
         return Err(ProxyError::Protocol(format!(
-            "proxy CONNECT failed (reply code {:#04x})", header[1]
+            "proxy CONNECT failed (reply code {:#04x})",
+            header[1]
         )));
     }
     let skip = match header[3] {
@@ -262,12 +271,24 @@ fn base64_encode(data: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
         out.push(TABLE[(n >> 18) as usize & 0x3F] as char);
         out.push(TABLE[(n >> 12) as usize & 0x3F] as char);
-        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 0x3F] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[n as usize & 0x3F] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 0x3F] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 0x3F] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -307,7 +328,8 @@ mod tests {
     }
 
     fn base64_decode(input: &str) -> Vec<u8> {
-        const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let mut out = Vec::new();
         let mut acc: u32 = 0;
         let mut bits = 0;
@@ -336,7 +358,10 @@ mod tests {
         assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
         assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
         // Roundtrip through the test decoder.
-        assert_eq!(base64_decode(&base64_encode(b"user:pw:with:colons")), b"user:pw:with:colons");
+        assert_eq!(
+            base64_decode(&base64_encode(b"user:pw:with:colons")),
+            b"user:pw:with:colons"
+        );
     }
 
     /// Spawn a fake HTTP CONNECT proxy: demands the given credentials
@@ -352,7 +377,9 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         tokio::spawn(async move {
-            let Ok((mut sock, _)) = listener.accept().await else { return };
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
             let mut buf = vec![0u8; 1024];
             let n = sock.read(&mut buf).await.unwrap_or(0);
             let head = String::from_utf8_lossy(&buf[..n]).to_string();
@@ -369,7 +396,11 @@ mod tests {
                     .unwrap_or(false),
             };
             let _ = tx.send(head).await;
-            let reply = if ok { status } else { "407 Proxy Authentication Required" };
+            let reply = if ok {
+                status
+            } else {
+                "407 Proxy Authentication Required"
+            };
             let _ = sock
                 .write_all(format!("HTTP/1.1 {reply}\r\nProxy-agent: mock\r\n\r\n").as_bytes())
                 .await;
@@ -400,7 +431,10 @@ mod tests {
             .expect("CONNECT succeeds");
 
         let head = with_timeout(rx.recv()).await.unwrap();
-        assert!(head.starts_with("CONNECT example.com:443 HTTP/1.1\r\n"), "{head}");
+        assert!(
+            head.starts_with("CONNECT example.com:443 HTTP/1.1\r\n"),
+            "{head}"
+        );
         assert!(!head.contains("Proxy-Authorization"));
 
         stream.write_all(b"ping").await.unwrap();
@@ -465,7 +499,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
-            let Ok((mut sock, _)) = listener.accept().await else { return };
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
             let mut buf = Vec::new();
             let mut chunk = [0u8; 256];
 
@@ -544,9 +580,12 @@ mod tests {
                 }
                 buf.extend_from_slice(&chunk[..n]);
             }
-            let _ = sock.write_all(&s5::success_reply(&s5::SocksHost::Ipv4(
-                std::net::Ipv4Addr::LOCALHOST,
-            ), 0)).await;
+            let _ = sock
+                .write_all(&s5::success_reply(
+                    &s5::SocksHost::Ipv4(std::net::Ipv4Addr::LOCALHOST),
+                    0,
+                ))
+                .await;
 
             // Tunnel: echo everything.
             loop {
@@ -610,7 +649,10 @@ mod tests {
             .expect_err("proxy demands auth, client has none");
         // The mock closes the connection mid-handshake → Io, or the
         // sub-negotiation read gets EOF. Either way it must not succeed.
-        assert!(matches!(err, ProxyError::Io(_) | ProxyError::Protocol(_)), "{err}");
+        assert!(
+            matches!(err, ProxyError::Io(_) | ProxyError::Protocol(_)),
+            "{err}"
+        );
     }
 
     #[tokio::test]

@@ -5,21 +5,29 @@
 
 use vte::{Params, Perform};
 
-use super::color::{DEFAULT_FG, DEFAULT_BG, ANSI_COLORS, parse_extended_color};
-use super::types::TerminalCell;
+use super::color::{parse_extended_color, ANSI_COLORS, DEFAULT_BG, DEFAULT_FG};
 use super::grid::TerminalGrid;
 use super::types::CellAttrs;
+use super::types::TerminalCell;
 
 /// Get CSI parameter value, defaulting to 1 if 0
 #[inline]
 pub fn param_or_one(p: u16) -> usize {
-    if p == 0 { 1 } else { p as usize }
+    if p == 0 {
+        1
+    } else {
+        p as usize
+    }
 }
 
 /// Get CSI parameter value, defaulting to 1 if 0 (usize version)
 #[inline]
 pub fn param_or_one_usize(p: usize) -> usize {
-    if p == 0 { 1 } else { p }
+    if p == 0 {
+        1
+    } else {
+        p
+    }
 }
 
 /// Get the i-th CSI parameter's first sub-param (or None). Avoids collecting
@@ -95,7 +103,10 @@ impl<'a> VteHandler<'a> {
             4 => self.attrs.underline = true,
             7 => self.attrs.inverse = true,
             9 => self.attrs.strikethrough = true,
-            22 => { self.attrs.bold = false; self.attrs.dim = false; }
+            22 => {
+                self.attrs.bold = false;
+                self.attrs.dim = false;
+            }
             23 => self.attrs.italic = false,
             24 => self.attrs.underline = false,
             27 => self.attrs.inverse = false,
@@ -155,7 +166,8 @@ impl<'a> Perform for VteHandler<'a> {
                 self.grid.wrap_pending = false;
                 self.grid.cursor_row += 1;
                 if self.grid.cursor_row > self.grid.scroll_bottom {
-                    self.grid.scroll_up(self.grid.scroll_top, self.grid.scroll_bottom);
+                    self.grid
+                        .scroll_up(self.grid.scroll_top, self.grid.scroll_bottom);
                     self.grid.cursor_row = self.grid.scroll_bottom;
                 }
             }
@@ -207,11 +219,13 @@ impl<'a> Perform for VteHandler<'a> {
             }
             'B' => {
                 // CUD - Cursor Down
-                self.grid.cursor_row = (self.grid.cursor_row + param_or_one(p1)).min(self.grid.rows.saturating_sub(1));
+                self.grid.cursor_row =
+                    (self.grid.cursor_row + param_or_one(p1)).min(self.grid.rows.saturating_sub(1));
             }
             'C' => {
                 // CUF - Cursor Forward
-                self.grid.cursor_col = (self.grid.cursor_col + param_or_one(p1)).min(self.grid.cols.saturating_sub(1));
+                self.grid.cursor_col =
+                    (self.grid.cursor_col + param_or_one(p1)).min(self.grid.cols.saturating_sub(1));
             }
             'D' => {
                 // CUB - Cursor Back
@@ -220,7 +234,8 @@ impl<'a> Perform for VteHandler<'a> {
             'E' => {
                 // CNL - Cursor Next Line
                 self.grid.cursor_col = 0;
-                self.grid.cursor_row = (self.grid.cursor_row + param_or_one(p1)).min(self.grid.rows.saturating_sub(1));
+                self.grid.cursor_row =
+                    (self.grid.cursor_row + param_or_one(p1)).min(self.grid.rows.saturating_sub(1));
             }
             'F' => {
                 // CPL - Cursor Previous Line
@@ -280,13 +295,15 @@ impl<'a> Perform for VteHandler<'a> {
             'S' => {
                 // SU - Scroll Up
                 for _ in 0..param_or_one(p1) {
-                    self.grid.scroll_up(self.grid.scroll_top, self.grid.scroll_bottom);
+                    self.grid
+                        .scroll_up(self.grid.scroll_top, self.grid.scroll_bottom);
                 }
             }
             'T' => {
                 // SD - Scroll Down
                 for _ in 0..param_or_one(p1) {
-                    self.grid.scroll_down(self.grid.scroll_top, self.grid.scroll_bottom);
+                    self.grid
+                        .scroll_down(self.grid.scroll_top, self.grid.scroll_bottom);
                 }
             }
             'X' => {
@@ -325,7 +342,10 @@ impl<'a> Perform for VteHandler<'a> {
                 // DECSTBM - Set Scrolling Region
                 if !is_private {
                     let top = param_or_one_usize(p1 as usize);
-                    let bottom = param_or_one_usize(param_at(params, 1).unwrap_or(self.grid.rows as u16) as usize).max(1);
+                    let bottom = param_or_one_usize(
+                        param_at(params, 1).unwrap_or(self.grid.rows as u16) as usize,
+                    )
+                    .max(1);
                     self.grid.scroll_top = (top - 1).min(self.grid.rows.saturating_sub(1));
                     self.grid.scroll_bottom = (bottom - 1).min(self.grid.rows.saturating_sub(1));
                     // Move cursor to home after setting scroll region
@@ -337,7 +357,7 @@ impl<'a> Perform for VteHandler<'a> {
                 // SM / DECSET
                 if is_private {
                     match p1 {
-                        7 => self.grid.autowrap = true,   // DECAWM: auto-wrap ON
+                        7 => self.grid.autowrap = true, // DECAWM: auto-wrap ON
                         25 => self.grid.cursor_visible = true,
                         1049 => self.grid.enter_alt_screen(),
                         2026 => self.grid.in_sync_update = true, // begin synchronized update
@@ -349,7 +369,7 @@ impl<'a> Perform for VteHandler<'a> {
                 // RM / DECRST
                 if is_private {
                     match p1 {
-                        7 => self.grid.autowrap = false,  // DECAWM: auto-wrap OFF
+                        7 => self.grid.autowrap = false, // DECAWM: auto-wrap OFF
                         25 => self.grid.cursor_visible = false,
                         1049 => self.grid.exit_alt_screen(),
                         2026 => self.grid.in_sync_update = false, // end synchronized update
@@ -384,14 +404,16 @@ impl<'a> Perform for VteHandler<'a> {
                 // IND - Index (move cursor down, scroll if needed)
                 self.grid.cursor_row += 1;
                 if self.grid.cursor_row > self.grid.scroll_bottom {
-                    self.grid.scroll_up(self.grid.scroll_top, self.grid.scroll_bottom);
+                    self.grid
+                        .scroll_up(self.grid.scroll_top, self.grid.scroll_bottom);
                     self.grid.cursor_row = self.grid.scroll_bottom;
                 }
             }
             ([], b'M') => {
                 // RI - Reverse Index (move cursor up, scroll if needed)
                 if self.grid.cursor_row == self.grid.scroll_top {
-                    self.grid.scroll_down(self.grid.scroll_top, self.grid.scroll_bottom);
+                    self.grid
+                        .scroll_down(self.grid.scroll_top, self.grid.scroll_bottom);
                 } else {
                     self.grid.cursor_row = self.grid.cursor_row.saturating_sub(1);
                 }
@@ -401,7 +423,8 @@ impl<'a> Perform for VteHandler<'a> {
                 self.grid.cursor_col = 0;
                 self.grid.cursor_row += 1;
                 if self.grid.cursor_row > self.grid.scroll_bottom {
-                    self.grid.scroll_up(self.grid.scroll_top, self.grid.scroll_bottom);
+                    self.grid
+                        .scroll_up(self.grid.scroll_top, self.grid.scroll_bottom);
                     self.grid.cursor_row = self.grid.scroll_bottom;
                 }
             }

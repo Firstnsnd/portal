@@ -97,8 +97,9 @@ pub fn session_state_file_path() -> PathBuf {
     super::config_dir().join("session_state.json")
 }
 
-/// Atomically save the session state. Failures are logged, never fatal —
-/// a broken save must not take down exit.
+/// Atomically save the session state (same-directory temp + fsync + rename,
+/// owner-only permissions — snapshots carry host names and usernames).
+/// Failures are logged, never fatal — a broken save must not take down exit.
 pub fn save_session_state(path: &std::path::Path, state: &SessionStateFile) {
     if let Some(parent) = path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
@@ -113,13 +114,8 @@ pub fn save_session_state(path: &std::path::Path, state: &SessionStateFile) {
             return;
         }
     };
-    let tmp = path.with_extension("json.tmp");
-    if let Err(e) = std::fs::write(&tmp, json) {
+    if let Err(e) = super::atomic_write_private_file(path, json.as_bytes()) {
         log::warn!("session-state: write failed: {}", e);
-        return;
-    }
-    if let Err(e) = std::fs::rename(&tmp, path) {
-        log::warn!("session-state: rename failed: {}", e);
     }
 }
 
@@ -140,7 +136,8 @@ pub fn load_session_state(path: &std::path::Path) -> Option<SessionStateFile> {
         Ok(state) => {
             log::warn!(
                 "session-state: version {} not supported (expected {})",
-                state.version, SESSION_STATE_VERSION
+                state.version,
+                SESSION_STATE_VERSION
             );
             let bad = path.with_extension("bad");
             let _ = std::fs::rename(path, &bad);
@@ -181,7 +178,13 @@ mod tests {
     fn session_dto_serde_transfer_interrupted_defaults_false() {
         let json = r#"{"kind":"ssh","host_name":"prod-1"}"#;
         let dto: SessionDto = serde_json::from_str(json).unwrap();
-        assert!(matches!(dto, SessionDto::Ssh { transfer_interrupted: false, .. }));
+        assert!(matches!(
+            dto,
+            SessionDto::Ssh {
+                transfer_interrupted: false,
+                ..
+            }
+        ));
 
         let local = SessionDto::Local {
             shell: "/bin/zsh".to_string(),

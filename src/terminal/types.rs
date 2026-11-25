@@ -3,7 +3,7 @@
 //! This module contains core type definitions for terminal emulation,
 //! including terminal cells and cell attributes.
 
-use super::color::{DEFAULT_FG, DEFAULT_BG};
+use super::color::{DEFAULT_BG, DEFAULT_FG};
 
 /// A single terminal cell with character and styling information.
 #[derive(Debug, Clone, PartialEq)]

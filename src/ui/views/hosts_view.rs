@@ -6,12 +6,12 @@ use eframe::egui;
 use std::sync::{Arc, Mutex};
 
 // These types are defined in pane_view.rs
-use crate::ui::pane_view::{WindowContext, ViewActions};
-use crate::ui::pane::AppWindow;
 use crate::config::HostEntry;
 use crate::ssh::test_connection;
-use crate::ui::types::dialogs::{AuthMethodChoice, TestConnState, KeySourceChoice, CredentialMode};
+use crate::ui::pane::AppWindow;
+use crate::ui::pane_view::{ViewActions, WindowContext};
 use crate::ui::tokens::*;
+use crate::ui::types::dialogs::{AuthMethodChoice, CredentialMode, KeySourceChoice, TestConnState};
 use crate::ui::widgets;
 
 /// Render hosts view for this window
@@ -55,9 +55,20 @@ pub fn render_hosts_view(
         })
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(cx.language.t("hosts")).color(cx.theme.fg_dim).size(FONT_BASE).strong());
+                ui.label(
+                    egui::RichText::new(cx.language.t("hosts"))
+                        .color(cx.theme.fg_dim)
+                        .size(FONT_BASE)
+                        .strong(),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(widgets::text_button(cx.language.t("new_host"), cx.theme.accent)).clicked() {
+                    if ui
+                        .add(widgets::text_button(
+                            cx.language.t("new_host"),
+                            cx.theme.accent,
+                        ))
+                        .clicked()
+                    {
                         window.add_host_dialog.open_new();
                     }
                 });
@@ -89,16 +100,34 @@ pub fn render_hosts_view(
                             window.host_filter.group.clone()
                         };
                         egui::ComboBox::from_id_salt("group_filter")
-                            .selected_text(egui::RichText::new(group_label).color(cx.theme.accent).size(FONT_MD))
+                            .selected_text(
+                                egui::RichText::new(group_label)
+                                    .color(cx.theme.accent)
+                                    .size(FONT_MD),
+                            )
                             .width(90.0)
                             .show_ui(ui, |ui| {
                                 widgets::style_dropdown(ui, cx.theme);
-                                if widgets::dropdown_item(ui, cx.theme, cx.language.t("snippet_default_group"), window.host_filter.group.is_empty()).clicked() {
+                                if widgets::dropdown_item(
+                                    ui,
+                                    cx.theme,
+                                    cx.language.t("snippet_default_group"),
+                                    window.host_filter.group.is_empty(),
+                                )
+                                .clicked()
+                                {
                                     window.host_filter.group.clear();
                                     ui.close_menu();
                                 }
                                 for group in &all_groups {
-                                    if widgets::dropdown_item(ui, cx.theme, group.clone(), window.host_filter.group == *group).clicked() {
+                                    if widgets::dropdown_item(
+                                        ui,
+                                        cx.theme,
+                                        group.clone(),
+                                        window.host_filter.group == *group,
+                                    )
+                                    .clicked()
+                                    {
                                         window.host_filter.group = group.clone();
                                         ui.close_menu();
                                     }
@@ -114,16 +143,34 @@ pub fn render_hosts_view(
                             window.host_filter.tag.clone()
                         };
                         egui::ComboBox::from_id_salt("tag_filter")
-                            .selected_text(egui::RichText::new(tag_label).color(cx.theme.accent).size(FONT_MD))
+                            .selected_text(
+                                egui::RichText::new(tag_label)
+                                    .color(cx.theme.accent)
+                                    .size(FONT_MD),
+                            )
                             .width(90.0)
                             .show_ui(ui, |ui| {
                                 widgets::style_dropdown(ui, cx.theme);
-                                if widgets::dropdown_item(ui, cx.theme, cx.language.t("snippet_default_group"), window.host_filter.tag.is_empty()).clicked() {
+                                if widgets::dropdown_item(
+                                    ui,
+                                    cx.theme,
+                                    cx.language.t("snippet_default_group"),
+                                    window.host_filter.tag.is_empty(),
+                                )
+                                .clicked()
+                                {
                                     window.host_filter.tag.clear();
                                     ui.close_menu();
                                 }
                                 for tag in &all_tags {
-                                    if widgets::dropdown_item(ui, cx.theme, tag.clone(), window.host_filter.tag == *tag).clicked() {
+                                    if widgets::dropdown_item(
+                                        ui,
+                                        cx.theme,
+                                        tag.clone(),
+                                        window.host_filter.tag == *tag,
+                                    )
+                                    .clicked()
+                                    {
                                         window.host_filter.tag = tag.clone();
                                         ui.close_menu();
                                     }
@@ -133,9 +180,15 @@ pub fn render_hosts_view(
                         ui.add_space(SPACE_SM);
 
                         if window.host_filter.is_active()
-                            && ui.add(widgets::text_button(cx.language.t("clear_history"), cx.theme.accent)).clicked() {
-                                window.host_filter.clear();
-                            }
+                            && ui
+                                .add(widgets::text_button(
+                                    cx.language.t("clear_history"),
+                                    cx.theme.accent,
+                                ))
+                                .clicked()
+                        {
+                            window.host_filter.clear();
+                        }
                     });
 
                     ui.add_space(SPACE_SM);
@@ -143,21 +196,30 @@ pub fn render_hosts_view(
                     // LOCAL section
                     ui.horizontal(|ui| {
                         ui.add_space(SPACE_XL);
-                        ui.label(egui::RichText::new(cx.language.t("local")).color(cx.theme.fg_dim).size(FONT_XS).strong());
+                        ui.label(
+                            egui::RichText::new(cx.language.t("local"))
+                                .color(cx.theme.fg_dim)
+                                .size(FONT_XS)
+                                .strong(),
+                        );
                     });
                     ui.add_space(SPACE_XS);
 
                     for host in cx.hosts.iter() {
-                        if !host.is_local { continue; }
+                        if !host.is_local {
+                            continue;
+                        }
                         let width = ui.available_width();
-                        let (rect, resp) = ui.allocate_exact_size(
-                            egui::vec2(width, 36.0),
-                            egui::Sense::click(),
-                        );
+                        let (rect, resp) =
+                            ui.allocate_exact_size(egui::vec2(width, 36.0), egui::Sense::click());
                         if resp.hovered() {
                             ui.painter().rect_filled(
-                                egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - 1.0), rect.max),
-                                0.0, cx.theme.hover_shadow,
+                                egui::Rect::from_min_max(
+                                    egui::pos2(rect.min.x, rect.max.y - 1.0),
+                                    rect.max,
+                                ),
+                                0.0,
+                                cx.theme.hover_shadow,
                             );
                             ui.painter().rect_filled(rect, 0.0, cx.theme.hover_bg);
                         }
@@ -185,35 +247,49 @@ pub fn render_hosts_view(
                     // SSH HOSTS section
                     ui.horizontal(|ui| {
                         ui.add_space(SPACE_XL);
-                        ui.label(egui::RichText::new(cx.language.t("ssh_hosts")).color(cx.theme.fg_dim).size(FONT_XS).strong());
+                        ui.label(
+                            egui::RichText::new(cx.language.t("ssh_hosts"))
+                                .color(cx.theme.fg_dim)
+                                .size(FONT_XS)
+                                .strong(),
+                        );
                     });
                     ui.add_space(SPACE_XS);
 
                     // Collect groups
                     let mut groups: Vec<String> = Vec::new();
                     for host in cx.hosts.iter() {
-                        if !host.is_local && !host.group.is_empty() && !groups.contains(&host.group)
-                            && window.host_filter.matches(host) {
-                                groups.push(host.group.clone());
-                            }
+                        if !host.is_local
+                            && !host.group.is_empty()
+                            && !groups.contains(&host.group)
+                            && window.host_filter.matches(host)
+                        {
+                            groups.push(host.group.clone());
+                        }
                     }
 
                     // Ungrouped SSH hosts
                     for (i, host) in cx.hosts.iter().enumerate() {
-                        if host.is_local || !host.group.is_empty() { continue; }
-                        if !window.host_filter.matches(host) { continue; }
+                        if host.is_local || !host.group.is_empty() {
+                            continue;
+                        }
+                        if !window.host_filter.matches(host) {
+                            continue;
+                        }
 
                         let row_h = 58.0;
                         let width = ui.available_width();
-                        let (rect, resp) = ui.allocate_exact_size(
-                            egui::vec2(width, row_h),
-                            egui::Sense::click(),
-                        );
+                        let (rect, resp) =
+                            ui.allocate_exact_size(egui::vec2(width, row_h), egui::Sense::click());
                         let hovered = resp.hovered();
                         if hovered {
                             ui.painter().rect_filled(
-                                egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - 1.0), rect.max),
-                                0.0, cx.theme.hover_shadow,
+                                egui::Rect::from_min_max(
+                                    egui::pos2(rect.min.x, rect.max.y - 1.0),
+                                    rect.max,
+                                ),
+                                0.0,
+                                cx.theme.hover_shadow,
                             );
                             ui.painter().rect_filled(rect, 0.0, cx.theme.hover_bg);
                         }
@@ -231,10 +307,18 @@ pub fn render_hosts_view(
                             egui::FontId::proportional(13.0),
                             cx.theme.fg_primary,
                         );
-                        let name_w = ui.fonts(|f| f.layout_no_wrap(
-                            host.name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).rect.width());
+                        let name_w = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                host.name.clone(),
+                                egui::FontId::proportional(13.0),
+                                egui::Color32::WHITE,
+                            )
+                            .rect
+                            .width()
+                        });
                         let mut badge_x = rect.min.x + 46.0 + name_w + 8.0;
-                        badge_x += forward_badge(ui, window, host, badge_x, rect.min.y + 18.0, cx.theme);
+                        badge_x +=
+                            forward_badge(ui, window, host, badge_x, rect.min.y + 18.0, cx.theme);
                         badge_x += sftp_badge(ui, cx, host, badge_x, rect.min.y + 18.0);
                         protected_badge(ui, host, badge_x, rect.min.y + 18.0, cx.theme);
                         record_badge(ui, host, rect, cx.theme);
@@ -275,9 +359,22 @@ pub fn render_hosts_view(
                             let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
                             let over_btn = pointer_pos.is_some_and(|p| btn_rect.contains(p));
 
-                            let btn_bg = if over_btn { cx.theme.accent } else { cx.theme.bg_elevated };
-                            let btn_text = if over_btn { cx.theme.bg_primary } else { cx.theme.accent };
-                            ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, cx.theme.accent));
+                            let btn_bg = if over_btn {
+                                cx.theme.accent
+                            } else {
+                                cx.theme.bg_elevated
+                            };
+                            let btn_text = if over_btn {
+                                cx.theme.bg_primary
+                            } else {
+                                cx.theme.accent
+                            };
+                            ui.painter().rect(
+                                btn_rect,
+                                4.0,
+                                btn_bg,
+                                egui::Stroke::new(1.0, cx.theme.accent),
+                            );
                             ui.painter().text(
                                 btn_rect.center(),
                                 egui::Align2::CENTER_CENTER,
@@ -305,8 +402,12 @@ pub fn render_hosts_view(
                         });
                         ui.add_space(SPACE_XS);
                         for (i, host) in cx.hosts.iter().enumerate() {
-                            if host.is_local || host.group != *group { continue; }
-                            if !window.host_filter.matches(host) { continue; }
+                            if host.is_local || host.group != *group {
+                                continue;
+                            }
+                            if !window.host_filter.matches(host) {
+                                continue;
+                            }
 
                             let row_h = 58.0;
                             let width = ui.available_width();
@@ -317,8 +418,12 @@ pub fn render_hosts_view(
                             let hovered = resp.hovered();
                             if hovered {
                                 ui.painter().rect_filled(
-                                    egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - 1.0), rect.max),
-                                    0.0, cx.theme.hover_shadow,
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(rect.min.x, rect.max.y - 1.0),
+                                        rect.max,
+                                    ),
+                                    0.0,
+                                    cx.theme.hover_shadow,
                                 );
                                 ui.painter().rect_filled(rect, 0.0, cx.theme.hover_bg);
                             }
@@ -336,10 +441,24 @@ pub fn render_hosts_view(
                                 egui::FontId::proportional(13.0),
                                 cx.theme.fg_primary,
                             );
-                            let name_w = ui.fonts(|f| f.layout_no_wrap(
-                                host.name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).rect.width());
+                            let name_w = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    host.name.clone(),
+                                    egui::FontId::proportional(13.0),
+                                    egui::Color32::WHITE,
+                                )
+                                .rect
+                                .width()
+                            });
                             let mut badge_x = rect.min.x + 46.0 + name_w + 8.0;
-                            badge_x += forward_badge(ui, window, host, badge_x, rect.min.y + 18.0, cx.theme);
+                            badge_x += forward_badge(
+                                ui,
+                                window,
+                                host,
+                                badge_x,
+                                rect.min.y + 18.0,
+                                cx.theme,
+                            );
                             badge_x += sftp_badge(ui, cx, host, badge_x, rect.min.y + 18.0);
                             protected_badge(ui, host, badge_x, rect.min.y + 18.0, cx.theme);
                             record_badge(ui, host, rect, cx.theme);
@@ -380,9 +499,22 @@ pub fn render_hosts_view(
                                 let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
                                 let over_btn = pointer_pos.is_some_and(|p| btn_rect.contains(p));
 
-                                let btn_bg = if over_btn { cx.theme.accent } else { cx.theme.bg_elevated };
-                                let btn_text = if over_btn { cx.theme.bg_primary } else { cx.theme.accent };
-                                ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, cx.theme.accent));
+                                let btn_bg = if over_btn {
+                                    cx.theme.accent
+                                } else {
+                                    cx.theme.bg_elevated
+                                };
+                                let btn_text = if over_btn {
+                                    cx.theme.bg_primary
+                                } else {
+                                    cx.theme.accent
+                                };
+                                ui.painter().rect(
+                                    btn_rect,
+                                    4.0,
+                                    btn_bg,
+                                    egui::Stroke::new(1.0, cx.theme.accent),
+                                );
                                 ui.painter().text(
                                     btn_rect.center(),
                                     egui::Align2::CENTER_CENTER,
@@ -408,7 +540,11 @@ pub fn render_hosts_view(
 
     // Delete confirmation dialog
     if let Some(idx) = window.confirm_delete_host {
-        let host_name = cx.hosts.get(idx).map(|h| h.name.clone()).unwrap_or_default();
+        let host_name = cx
+            .hosts
+            .get(idx)
+            .map(|h| h.name.clone())
+            .unwrap_or_default();
         let mut open = true;
         egui::Window::new(cx.language.t("delete_host"))
             .open(&mut open)
@@ -420,29 +556,46 @@ pub fn render_hosts_view(
             .frame(widgets::dialog_frame(cx.theme))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("\u{26A0}").size(18.0).color(cx.theme.red));
+                    ui.label(
+                        egui::RichText::new("\u{26A0}")
+                            .size(18.0)
+                            .color(cx.theme.red),
+                    );
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(cx.language.t("delete_host")).size(15.0).color(cx.theme.fg_primary).strong());
+                    ui.label(
+                        egui::RichText::new(cx.language.t("delete_host"))
+                            .size(15.0)
+                            .color(cx.theme.fg_primary)
+                            .strong(),
+                    );
                 });
                 ui.add_space(10.0);
 
                 ui.label(
                     egui::RichText::new(cx.language.tf("delete_confirm", &host_name))
-                        .color(cx.theme.fg_primary).size(13.0)
+                        .color(cx.theme.fg_primary)
+                        .size(13.0),
                 );
                 ui.add_space(4.0);
                 ui.label(
                     egui::RichText::new(cx.language.t("confirm_delete"))
-                        .color(cx.theme.fg_dim).size(11.0)
+                        .color(cx.theme.fg_dim)
+                        .size(11.0),
                 );
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(widgets::danger_button(cx.language.t("delete"), cx.theme)).clicked() {
+                        if ui
+                            .add(widgets::danger_button(cx.language.t("delete"), cx.theme))
+                            .clicked()
+                        {
                             actions.delete_host = Some(idx);
                             window.confirm_delete_host = None;
                         }
-                        if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                        if ui
+                            .add(widgets::secondary_button(cx.language.t("cancel"), cx.theme))
+                            .clicked()
+                        {
                             window.confirm_delete_host = None;
                         }
                     });
@@ -485,8 +638,8 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                 TestConnState::Success(msg)
             }
             Err(msg) => {
-                let is_key_error = msg.contains("Host key verification failed") ||
-                                  msg.contains("MITM attack");
+                let is_key_error =
+                    msg.contains("Host key verification failed") || msg.contains("MITM attack");
                 window.add_host_dialog.show_remove_key_button = is_key_error;
                 TestConnState::Failed(msg)
             }
@@ -524,28 +677,42 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                 .inner_margin(egui::Margin::symmetric(widgets::FORM_LEFT_MARGIN, 16.0))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(drawer_title)
-                            .size(widgets::FONT_SIZE_TITLE).strong().color(cx.theme.fg_primary));
+                        ui.label(
+                            egui::RichText::new(drawer_title)
+                                .size(widgets::FONT_SIZE_TITLE)
+                                .strong()
+                                .color(cx.theme.fg_primary),
+                        );
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 2.0;
                             // Close button
-                            if ui.add(
-                                egui::Button::new(egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim))
-                                    .frame(false)
-                            ).clicked() {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("×").size(20.0).color(cx.theme.fg_dim),
+                                    )
+                                    .frame(false),
+                                )
+                                .clicked()
+                            {
                                 window.add_host_dialog.reset();
                             }
                             // Delete button (edit mode only)
                             if window.add_host_dialog.edit_index.is_some()
-                                && ui.add(
-                                    egui::Button::new(egui::RichText::new("\u{1F5D1}").size(FONT_BASE))
-                                        .frame(false)
-                                ).on_hover_text(cx.language.t("delete"))
-                                .clicked() {
-                                    window.confirm_delete_host = window.add_host_dialog.edit_index;
-                                    window.add_host_dialog.open = false;
-                                }
+                                && ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new("\u{1F5D1}").size(FONT_BASE),
+                                        )
+                                        .frame(false),
+                                    )
+                                    .on_hover_text(cx.language.t("delete"))
+                                    .clicked()
+                            {
+                                window.confirm_delete_host = window.add_host_dialog.edit_index;
+                                window.add_host_dialog.open = false;
+                            }
                             // Duplicate button (edit mode only): switch the
                             // drawer into add mode prefilled with this host's
                             // values, so only user/credential need changing.
@@ -553,16 +720,26 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             // owner gate (the drawer has no ViewActions
                             // channel — it stashes a request instead).
                             if let Some(idx) = window.add_host_dialog.edit_index {
-                                if ui.add(
-                                    egui::Button::new(egui::RichText::new(cx.language.t("duplicate")).size(FONT_BASE))
-                                        .frame(false)
-                                ).on_hover_text(cx.language.t("duplicate"))
-                                .clicked() {
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new(cx.language.t("duplicate"))
+                                                .size(FONT_BASE),
+                                        )
+                                        .frame(false),
+                                    )
+                                    .on_hover_text(cx.language.t("duplicate"))
+                                    .clicked()
+                                {
                                     if let Some(host) = cx.hosts.get(idx) {
                                         if host.protected {
-                                            window.add_host_dialog.duplicate_gate_request = Some(idx);
+                                            window.add_host_dialog.duplicate_gate_request =
+                                                Some(idx);
                                         } else if let Some(host) = cx.hosts.get(idx).cloned() {
-                                            window.add_host_dialog.open_duplicate(&host, cx.language.t("duplicate_suffix"));
+                                            window.add_host_dialog.open_duplicate(
+                                                &host,
+                                                cx.language.t("duplicate_suffix"),
+                                            );
                                         }
                                     }
                                 }
@@ -586,49 +763,69 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                         .inner_margin(egui::Margin::symmetric(widgets::FORM_LEFT_MARGIN, 0.0))
                         .show(ui, |ui| {
                             // Name field - full width
-                            widgets::form_field(ui, cx.language.t("label"), true,
+                            widgets::form_field(
+                                ui,
+                                cx.language.t("label"),
+                                true,
                                 &mut window.add_host_dialog.name,
-                                cx.language.t("host_label_hint"), cx.theme);
+                                cx.language.t("host_label_hint"),
+                                cx.theme,
+                            );
                             ui.add_space(widgets::SPACING_FIELD);
 
                             // Host + Port in same row
                             widgets::form_field_2col(
                                 ui,
-                                cx.language.t("host_ip"), true,
+                                cx.language.t("host_ip"),
+                                true,
                                 &mut window.add_host_dialog.host,
-                                cx.language.t("host_ip_hint"), 170.0,
-                                cx.language.t("port"), true,
+                                cx.language.t("host_ip_hint"),
+                                170.0,
+                                cx.language.t("port"),
+                                true,
                                 &mut window.add_host_dialog.port,
-                                cx.language.t("port_hint"), 80.0,
-                                cx.theme
+                                cx.language.t("port_hint"),
+                                80.0,
+                                cx.theme,
                             );
                             ui.add_space(widgets::SPACING_FIELD);
 
                             // Username + Group in same row
                             widgets::form_field_2col(
                                 ui,
-                                cx.language.t("username"), true,
+                                cx.language.t("username"),
+                                true,
                                 &mut window.add_host_dialog.username,
-                                cx.language.t("username_hint"), 125.0,
-                                cx.language.t("group"), false,
+                                cx.language.t("username_hint"),
+                                125.0,
+                                cx.language.t("group"),
+                                false,
                                 &mut window.add_host_dialog.group,
-                                cx.language.t("group_hint"), 125.0,
-                                cx.theme
+                                cx.language.t("group_hint"),
+                                125.0,
+                                cx.theme,
                             );
                             ui.add_space(widgets::SPACING_FIELD);
 
                             // Tags - full width
-                            widgets::form_field(ui, cx.language.t("tag"), false,
+                            widgets::form_field(
+                                ui,
+                                cx.language.t("tag"),
+                                false,
                                 &mut window.add_host_dialog.tags,
-                                cx.language.t("tag_hint"), cx.theme);
+                                cx.language.t("tag_hint"),
+                                cx.theme,
+                            );
 
                             widgets::form_separator(ui);
 
                             // Authentication section
-                            ui.label(egui::RichText::new(cx.language.t("authentication"))
-                                .color(cx.theme.fg_primary)
-                                .size(widgets::FONT_SIZE_TITLE)
-                                .strong());
+                            ui.label(
+                                egui::RichText::new(cx.language.t("authentication"))
+                                    .color(cx.theme.fg_primary)
+                                    .size(widgets::FONT_SIZE_TITLE)
+                                    .strong(),
+                            );
                             ui.add_space(widgets::SPACING_FIELD);
 
                             // Credential mode tabs
@@ -636,22 +833,41 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             ui.horizontal(|ui| {
                                 let modes: [(CredentialMode, &str); 3] = [
                                     (CredentialMode::None, cx.language.t("credential_none")),
-                                    (CredentialMode::Existing, cx.language.t("credential_existing")),
+                                    (
+                                        CredentialMode::Existing,
+                                        cx.language.t("credential_existing"),
+                                    ),
                                     (CredentialMode::Inline, cx.language.t("credential_inline")),
                                 ];
                                 for (mode, text) in &modes {
                                     if *mode == CredentialMode::Existing && !has_credentials {
                                         continue;
                                     }
-                                    let is_selected = window.add_host_dialog.credential_mode == *mode;
-                                    let text_color = if is_selected { cx.theme.accent } else { cx.theme.fg_dim };
-                                    let bg_color = if is_selected { cx.theme.accent_alpha(15) } else { egui::Color32::TRANSPARENT };
+                                    let is_selected =
+                                        window.add_host_dialog.credential_mode == *mode;
+                                    let text_color = if is_selected {
+                                        cx.theme.accent
+                                    } else {
+                                        cx.theme.fg_dim
+                                    };
+                                    let bg_color = if is_selected {
+                                        cx.theme.accent_alpha(15)
+                                    } else {
+                                        egui::Color32::TRANSPARENT
+                                    };
                                     let btn = egui::Button::new(
-                                        egui::RichText::new(*text).size(12.0).color(text_color)
+                                        egui::RichText::new(*text).size(12.0).color(text_color),
                                     )
                                     .fill(bg_color)
                                     .rounding(4.0)
-                                    .stroke(egui::Stroke::new(1.0, if is_selected { cx.theme.accent } else { egui::Color32::TRANSPARENT }));
+                                    .stroke(egui::Stroke::new(
+                                        1.0,
+                                        if is_selected {
+                                            cx.theme.accent
+                                        } else {
+                                            egui::Color32::TRANSPARENT
+                                        },
+                                    ));
                                     if ui.add(btn).clicked() {
                                         window.add_host_dialog.credential_mode = *mode;
                                     }
@@ -664,29 +880,60 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             // Existing credential selector
                             if window.add_host_dialog.credential_mode == CredentialMode::Existing {
                                 ui.vertical(|ui| {
-                                    widgets::form_label(ui, cx.language.t("select_credential"), true, cx.theme);
+                                    widgets::form_label(
+                                        ui,
+                                        cx.language.t("select_credential"),
+                                        true,
+                                        cx.theme,
+                                    );
                                     ui.add_space(widgets::SPACING_LABEL);
-                                    let selected_id = window.add_host_dialog.selected_credential_id.as_ref();
+                                    let selected_id =
+                                        window.add_host_dialog.selected_credential_id.as_ref();
                                     let selected_text = selected_id
                                         .and_then(|id| cx.credentials.iter().find(|c| &c.id == id))
                                         .map(|c| c.name.clone())
-                                        .unwrap_or_else(|| cx.language.t("select_credential").to_string());
+                                        .unwrap_or_else(|| {
+                                            cx.language.t("select_credential").to_string()
+                                        });
                                     widgets::style_combo_button(ui, cx.theme);
                                     egui::ComboBox::from_id_salt("existing_credential")
-                                        .selected_text(egui::RichText::new(selected_text).size(widgets::FONT_SIZE_INPUT).color(cx.theme.accent))
+                                        .selected_text(
+                                            egui::RichText::new(selected_text)
+                                                .size(widgets::FONT_SIZE_INPUT)
+                                                .color(cx.theme.accent),
+                                        )
                                         .width(ui.available_width())
                                         .show_ui(ui, |ui| {
                                             widgets::style_dropdown(ui, cx.theme);
                                             for cred in cx.credentials.iter() {
-                                                let is_selected = window.add_host_dialog.selected_credential_id.as_ref() == Some(&cred.id);
+                                                let is_selected = window
+                                                    .add_host_dialog
+                                                    .selected_credential_id
+                                                    .as_ref()
+                                                    == Some(&cred.id);
                                                 let type_label = match &cred.credential_type {
-                                                    crate::config::CredentialType::Password { .. } => cx.language.t("credential_password"),
-                                                    crate::config::CredentialType::SshKey { .. } => cx.language.t("credential_private_key"),
-                                                    crate::config::CredentialType::Agent { .. } => cx.language.t("credential_agent"),
+                                                    crate::config::CredentialType::Password {
+                                                        ..
+                                                    } => cx.language.t("credential_password"),
+                                                    crate::config::CredentialType::SshKey {
+                                                        ..
+                                                    } => cx.language.t("credential_private_key"),
+                                                    crate::config::CredentialType::Agent {
+                                                        ..
+                                                    } => cx.language.t("credential_agent"),
                                                 };
-                                                let label = format!("{} ({})", cred.name, type_label);
-                                                if widgets::dropdown_item(ui, cx.theme, label, is_selected).clicked() {
-                                                    window.add_host_dialog.selected_credential_id = Some(cred.id.clone());
+                                                let label =
+                                                    format!("{} ({})", cred.name, type_label);
+                                                if widgets::dropdown_item(
+                                                    ui,
+                                                    cx.theme,
+                                                    label,
+                                                    is_selected,
+                                                )
+                                                .clicked()
+                                                {
+                                                    window.add_host_dialog.selected_credential_id =
+                                                        Some(cred.id.clone());
                                                     ui.close_menu();
                                                 }
                                             }
@@ -717,114 +964,210 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
 
                                 match window.add_host_dialog.auth_method {
                                     AuthMethodChoice::Password => {
-                                        widgets::form_field_password(ui, cx.language.t("password"), true,
+                                        widgets::form_field_password(
+                                            ui,
+                                            cx.language.t("password"),
+                                            true,
                                             &mut window.add_host_dialog.password,
-                                            cx.language.t("password_hint"), cx.theme);
+                                            cx.language.t("password_hint"),
+                                            cx.theme,
+                                        );
                                     }
                                     AuthMethodChoice::Key => {
                                         // Key source selector
                                         ui.horizontal(|ui| {
-                                            let local_color = if window.add_host_dialog.key_source == KeySourceChoice::LocalFile { cx.theme.accent } else { cx.theme.fg_dim };
-                                            if ui.add(
-                                                egui::Button::new(egui::RichText::new(cx.language.t("key_source_path")).color(local_color).size(12.0))
-                                                    .stroke(egui::Stroke::NONE).fill(egui::Color32::TRANSPARENT)
-                                            ).clicked() {
-                                                window.add_host_dialog.key_source = KeySourceChoice::LocalFile;
+                                            let local_color = if window.add_host_dialog.key_source
+                                                == KeySourceChoice::LocalFile
+                                            {
+                                                cx.theme.accent
+                                            } else {
+                                                cx.theme.fg_dim
+                                            };
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(
+                                                        egui::RichText::new(
+                                                            cx.language.t("key_source_path"),
+                                                        )
+                                                        .color(local_color)
+                                                        .size(12.0),
+                                                    )
+                                                    .stroke(egui::Stroke::NONE)
+                                                    .fill(egui::Color32::TRANSPARENT),
+                                                )
+                                                .clicked()
+                                            {
+                                                window.add_host_dialog.key_source =
+                                                    KeySourceChoice::LocalFile;
                                             }
                                             ui.add_space(SPACE_SM);
-                                            let import_color = if window.add_host_dialog.key_source == KeySourceChoice::ImportContent { cx.theme.accent } else { cx.theme.fg_dim };
-                                            if ui.add(
-                                                egui::Button::new(egui::RichText::new(cx.language.t("import_key")).color(import_color).size(12.0))
-                                                    .stroke(egui::Stroke::NONE).fill(egui::Color32::TRANSPARENT)
-                                            ).clicked() {
-                                                window.add_host_dialog.key_source = KeySourceChoice::ImportContent;
+                                            let import_color = if window.add_host_dialog.key_source
+                                                == KeySourceChoice::ImportContent
+                                            {
+                                                cx.theme.accent
+                                            } else {
+                                                cx.theme.fg_dim
+                                            };
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(
+                                                        egui::RichText::new(
+                                                            cx.language.t("import_key"),
+                                                        )
+                                                        .color(import_color)
+                                                        .size(12.0),
+                                                    )
+                                                    .stroke(egui::Stroke::NONE)
+                                                    .fill(egui::Color32::TRANSPARENT),
+                                                )
+                                                .clicked()
+                                            {
+                                                window.add_host_dialog.key_source =
+                                                    KeySourceChoice::ImportContent;
                                             }
                                         });
                                         ui.add_space(widgets::SPACING_FIELD);
 
-                                        if window.add_host_dialog.key_source == KeySourceChoice::LocalFile {
-                                            widgets::form_field(ui, cx.language.t("key_path"), true,
+                                        if window.add_host_dialog.key_source
+                                            == KeySourceChoice::LocalFile
+                                        {
+                                            widgets::form_field(
+                                                ui,
+                                                cx.language.t("key_path"),
+                                                true,
                                                 &mut window.add_host_dialog.key_path,
-                                                cx.language.t("key_path_hint"), cx.theme);
+                                                cx.language.t("key_path_hint"),
+                                                cx.theme,
+                                            );
                                         } else {
-                                            widgets::form_field_textarea(ui, cx.language.t("key_content"), true,
+                                            widgets::form_field_textarea(
+                                                ui,
+                                                cx.language.t("key_content"),
+                                                true,
                                                 &mut window.add_host_dialog.key_content,
-                                                cx.language.t("key_content_hint"), 80.0, cx.theme);
+                                                cx.language.t("key_content_hint"),
+                                                80.0,
+                                                cx.theme,
+                                            );
                                         }
 
                                         if window.add_host_dialog.key_in_keychain {
-                                            ui.label(egui::RichText::new(cx.language.t("key_stored_in_keychain")).color(cx.theme.green).size(11.0));
+                                            ui.label(
+                                                egui::RichText::new(
+                                                    cx.language.t("key_stored_in_keychain"),
+                                                )
+                                                .color(cx.theme.green)
+                                                .size(11.0),
+                                            );
                                         }
                                         ui.add_space(widgets::SPACING_FIELD);
-                                        widgets::form_field_password(ui, cx.language.t("key_passphrase"), false,
+                                        widgets::form_field_password(
+                                            ui,
+                                            cx.language.t("key_passphrase"),
+                                            false,
                                             &mut window.add_host_dialog.key_passphrase,
-                                            cx.language.t("key_passphrase_hint"), cx.theme);
+                                            cx.language.t("key_passphrase_hint"),
+                                            cx.theme,
+                                        );
                                     }
                                     AuthMethodChoice::Agent => {
-                                        ui.label(egui::RichText::new(cx.language.t("auth_agent_hint"))
-                                            .color(cx.theme.fg_dim)
-                                            .size(11.0));
+                                        ui.label(
+                                            egui::RichText::new(cx.language.t("auth_agent_hint"))
+                                                .color(cx.theme.fg_dim)
+                                                .size(11.0),
+                                        );
                                     }
                                 }
                             }
 
                             // Session recording
                             ui.add_space(widgets::SPACING_FIELD);
-                            ui.checkbox(&mut window.add_host_dialog.auto_record, cx.language.t("record_this_host"));
-                            ui.label(egui::RichText::new(cx.language.t("record_this_host_desc"))
-                                .color(cx.theme.fg_dim)
-                                .size(11.0));
+                            ui.checkbox(
+                                &mut window.add_host_dialog.auto_record,
+                                cx.language.t("record_this_host"),
+                            );
+                            ui.label(
+                                egui::RichText::new(cx.language.t("record_this_host_desc"))
+                                    .color(cx.theme.fg_dim)
+                                    .size(11.0),
+                            );
                             ui.add_space(widgets::SPACING_FIELD);
 
                             // Owner verification gate
                             ui.add_space(widgets::SPACING_FIELD);
-                            ui.checkbox(&mut window.add_host_dialog.protected, cx.language.t("protect_this_host"));
-                            ui.label(egui::RichText::new(cx.language.t("protect_this_host_desc"))
-                                .color(cx.theme.fg_dim)
-                                .size(11.0));
+                            ui.checkbox(
+                                &mut window.add_host_dialog.protected,
+                                cx.language.t("protect_this_host"),
+                            );
+                            ui.label(
+                                egui::RichText::new(cx.language.t("protect_this_host_desc"))
+                                    .color(cx.theme.fg_dim)
+                                    .size(11.0),
+                            );
                             ui.add_space(widgets::SPACING_FIELD);
 
                             widgets::form_separator(ui);
 
                             // Port Forwards section
-                            ui.label(egui::RichText::new(cx.language.t("port_forwards"))
-                                .color(cx.theme.fg_primary)
-                                .size(widgets::FONT_SIZE_TITLE)
-                                .strong());
+                            ui.label(
+                                egui::RichText::new(cx.language.t("port_forwards"))
+                                    .color(cx.theme.fg_primary)
+                                    .size(widgets::FONT_SIZE_TITLE)
+                                    .strong(),
+                            );
                             ui.add_space(widgets::SPACING_FIELD);
 
                             // Existing port forwards list
                             let mut remove_forward_idx = None;
-                            for (fi, fwd) in window.add_host_dialog.port_forwards.iter().enumerate() {
+                            for (fi, fwd) in window.add_host_dialog.port_forwards.iter().enumerate()
+                            {
                                 let kind_label = match fwd.kind {
                                     crate::config::ForwardKind::Local => "-L",
                                     crate::config::ForwardKind::Remote => "-R",
                                     crate::config::ForwardKind::Dynamic => "-D",
                                 };
                                 let detail = match fwd.kind {
-                                    crate::config::ForwardKind::Dynamic => format!(
-                                        "{}:{} (SOCKS5)", fwd.local_host, fwd.local_port
-                                    ),
+                                    crate::config::ForwardKind::Dynamic => {
+                                        format!("{}:{} (SOCKS5)", fwd.local_host, fwd.local_port)
+                                    }
                                     _ => format!(
                                         "{}:{} → {}:{}",
-                                        fwd.local_host, fwd.local_port,
-                                        fwd.remote_host, fwd.remote_port
+                                        fwd.local_host,
+                                        fwd.local_port,
+                                        fwd.remote_host,
+                                        fwd.remote_port
                                     ),
                                 };
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(kind_label)
-                                        .size(widgets::FONT_SIZE_INPUT).color(cx.theme.accent));
+                                    ui.label(
+                                        egui::RichText::new(kind_label)
+                                            .size(widgets::FONT_SIZE_INPUT)
+                                            .color(cx.theme.accent),
+                                    );
                                     ui.add_space(SPACE_SM);
-                                    ui.label(egui::RichText::new(detail)
-                                        .size(widgets::FONT_SIZE_INPUT).color(cx.theme.fg_primary));
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if ui.add(
-                                            egui::Button::new(egui::RichText::new("×").size(14.0).color(cx.theme.fg_dim))
-                                                .frame(false)
-                                        ).clicked() {
-                                            remove_forward_idx = Some(fi);
-                                        }
-                                    });
+                                    ui.label(
+                                        egui::RichText::new(detail)
+                                            .size(widgets::FONT_SIZE_INPUT)
+                                            .color(cx.theme.fg_primary),
+                                    );
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(
+                                                        egui::RichText::new("×")
+                                                            .size(14.0)
+                                                            .color(cx.theme.fg_dim),
+                                                    )
+                                                    .frame(false),
+                                                )
+                                                .clicked()
+                                            {
+                                                remove_forward_idx = Some(fi);
+                                            }
+                                        },
+                                    );
                                 });
                                 ui.add_space(4.0);
                             }
@@ -839,20 +1182,46 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                 let mut selected_kind = dlg.new_forward_kind.clone();
                                 ui.horizontal(|ui| {
                                     let kinds = [
-                                        (crate::config::ForwardKind::Local, cx.language.t("local_forward")),
-                                        (crate::config::ForwardKind::Remote, cx.language.t("remote_forward")),
-                                        (crate::config::ForwardKind::Dynamic, cx.language.t("forward_dynamic_label")),
+                                        (
+                                            crate::config::ForwardKind::Local,
+                                            cx.language.t("local_forward"),
+                                        ),
+                                        (
+                                            crate::config::ForwardKind::Remote,
+                                            cx.language.t("remote_forward"),
+                                        ),
+                                        (
+                                            crate::config::ForwardKind::Dynamic,
+                                            cx.language.t("forward_dynamic_label"),
+                                        ),
                                     ];
                                     for (kind, label) in kinds {
                                         let is_sel = selected_kind == kind;
-                                        let color = if is_sel { cx.theme.accent } else { cx.theme.fg_dim };
-                                        let bg = if is_sel { cx.theme.accent_alpha(15) } else { egui::Color32::TRANSPARENT };
+                                        let color = if is_sel {
+                                            cx.theme.accent
+                                        } else {
+                                            cx.theme.fg_dim
+                                        };
+                                        let bg = if is_sel {
+                                            cx.theme.accent_alpha(15)
+                                        } else {
+                                            egui::Color32::TRANSPARENT
+                                        };
                                         let btn = egui::Button::new(
-                                            egui::RichText::new(label).size(12.0).color(color)
+                                            egui::RichText::new(label).size(12.0).color(color),
                                         )
                                         .fill(bg)
                                         .rounding(4.0)
-                                        .stroke(egui::Stroke::new(1.0, if is_sel { cx.theme.accent } else { egui::Color32::TRANSPARENT }));
+                                        .stroke(
+                                            egui::Stroke::new(
+                                                1.0,
+                                                if is_sel {
+                                                    cx.theme.accent
+                                                } else {
+                                                    egui::Color32::TRANSPARENT
+                                                },
+                                            ),
+                                        );
                                         if ui.add(btn).clicked() {
                                             selected_kind = kind;
                                         }
@@ -865,47 +1234,81 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                 // Local host + port
                                 widgets::form_field_2col(
                                     ui,
-                                    cx.language.t("forward_local_host"), true,
+                                    cx.language.t("forward_local_host"),
+                                    true,
                                     &mut dlg.new_forward_local_host,
-                                    cx.language.t("tunnel_local_host_placeholder"), 170.0,
-                                    cx.language.t("forward_local_port"), true,
+                                    cx.language.t("tunnel_local_host_placeholder"),
+                                    170.0,
+                                    cx.language.t("forward_local_port"),
+                                    true,
                                     &mut dlg.new_forward_local_port,
-                                    "8080", 80.0,
-                                    cx.theme
+                                    "8080",
+                                    80.0,
+                                    cx.theme,
                                 );
                                 ui.add_space(widgets::SPACING_FIELD);
 
                                 // Remote host + port (unused by -D; hidden instead)
-                                let is_dynamic = dlg.new_forward_kind == crate::config::ForwardKind::Dynamic;
+                                let is_dynamic =
+                                    dlg.new_forward_kind == crate::config::ForwardKind::Dynamic;
                                 if !is_dynamic {
                                     widgets::form_field_2col(
                                         ui,
-                                        cx.language.t("forward_remote_host"), true,
+                                        cx.language.t("forward_remote_host"),
+                                        true,
                                         &mut dlg.new_forward_remote_host,
-                                        cx.language.t("tunnel_remote_host_placeholder"), 170.0,
-                                        cx.language.t("forward_remote_port"), true,
+                                        cx.language.t("tunnel_remote_host_placeholder"),
+                                        170.0,
+                                        cx.language.t("forward_remote_port"),
+                                        true,
                                         &mut dlg.new_forward_remote_port,
-                                        "3306", 80.0,
-                                        cx.theme
+                                        "3306",
+                                        80.0,
+                                        cx.theme,
                                     );
                                     ui.add_space(widgets::SPACING_FIELD);
                                 }
 
                                 // Add button
                                 let can_add = !dlg.new_forward_local_port.trim().is_empty()
-                                    && (is_dynamic || !dlg.new_forward_remote_port.trim().is_empty());
+                                    && (is_dynamic
+                                        || !dlg.new_forward_remote_port.trim().is_empty());
                                 ui.horizontal(|ui| {
-                                    if ui.add_enabled(can_add, widgets::primary_button(cx.language.t("add_forward"), cx.theme)).clicked() {
+                                    if ui
+                                        .add_enabled(
+                                            can_add,
+                                            widgets::primary_button(
+                                                cx.language.t("add_forward"),
+                                                cx.theme,
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
                                         let lp = dlg.new_forward_local_port.trim().parse::<u16>();
                                         if let Ok(local_port) = lp {
-                                            let rp = dlg.new_forward_remote_port.trim().parse::<u16>().unwrap_or(0);
-                                            dlg.port_forwards.push(crate::config::PortForwardConfig {
-                                                kind: dlg.new_forward_kind.clone(),
-                                                local_host: dlg.new_forward_local_host.trim().to_string(),
-                                                local_port,
-                                                remote_host: if is_dynamic { String::new() } else { dlg.new_forward_remote_host.trim().to_string() },
-                                                remote_port: if is_dynamic { 0 } else { rp },
-                                            });
+                                            let rp = dlg
+                                                .new_forward_remote_port
+                                                .trim()
+                                                .parse::<u16>()
+                                                .unwrap_or(0);
+                                            dlg.port_forwards.push(
+                                                crate::config::PortForwardConfig {
+                                                    kind: dlg.new_forward_kind.clone(),
+                                                    local_host: dlg
+                                                        .new_forward_local_host
+                                                        .trim()
+                                                        .to_string(),
+                                                    local_port,
+                                                    remote_host: if is_dynamic {
+                                                        String::new()
+                                                    } else {
+                                                        dlg.new_forward_remote_host
+                                                            .trim()
+                                                            .to_string()
+                                                    },
+                                                    remote_port: if is_dynamic { 0 } else { rp },
+                                                },
+                                            );
                                             dlg.new_forward_local_port.clear();
                                             dlg.new_forward_remote_port.clear();
                                         }
@@ -916,10 +1319,12 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             widgets::form_separator(ui);
 
                             // Proxy section
-                            ui.label(egui::RichText::new(cx.language.t("proxy"))
-                                .color(cx.theme.fg_primary)
-                                .size(widgets::FONT_SIZE_TITLE)
-                                .strong());
+                            ui.label(
+                                egui::RichText::new(cx.language.t("proxy"))
+                                    .color(cx.theme.fg_primary)
+                                    .size(widgets::FONT_SIZE_TITLE)
+                                    .strong(),
+                            );
                             ui.add_space(widgets::SPACING_FIELD);
 
                             {
@@ -929,19 +1334,42 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                 ui.horizontal(|ui| {
                                     let kinds = [
                                         (None, cx.language.t("proxy_none")),
-                                        (Some(crate::config::ProxyKind::Http), cx.language.t("proxy_http")),
-                                        (Some(crate::config::ProxyKind::Socks5), cx.language.t("proxy_socks5")),
+                                        (
+                                            Some(crate::config::ProxyKind::Http),
+                                            cx.language.t("proxy_http"),
+                                        ),
+                                        (
+                                            Some(crate::config::ProxyKind::Socks5),
+                                            cx.language.t("proxy_socks5"),
+                                        ),
                                     ];
                                     for (kind, label) in kinds {
                                         let is_sel = selected_kind == kind;
-                                        let color = if is_sel { cx.theme.accent } else { cx.theme.fg_dim };
-                                        let bg = if is_sel { cx.theme.accent_alpha(15) } else { egui::Color32::TRANSPARENT };
+                                        let color = if is_sel {
+                                            cx.theme.accent
+                                        } else {
+                                            cx.theme.fg_dim
+                                        };
+                                        let bg = if is_sel {
+                                            cx.theme.accent_alpha(15)
+                                        } else {
+                                            egui::Color32::TRANSPARENT
+                                        };
                                         let btn = egui::Button::new(
-                                            egui::RichText::new(label).size(12.0).color(color)
+                                            egui::RichText::new(label).size(12.0).color(color),
                                         )
                                         .fill(bg)
                                         .rounding(4.0)
-                                        .stroke(egui::Stroke::new(1.0, if is_sel { cx.theme.accent } else { egui::Color32::TRANSPARENT }));
+                                        .stroke(
+                                            egui::Stroke::new(
+                                                1.0,
+                                                if is_sel {
+                                                    cx.theme.accent
+                                                } else {
+                                                    egui::Color32::TRANSPARENT
+                                                },
+                                            ),
+                                        );
                                         if ui.add(btn).clicked() {
                                             selected_kind = kind;
                                         }
@@ -954,37 +1382,51 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                 if dlg.proxy_kind.is_some() {
                                     widgets::form_field_2col(
                                         ui,
-                                        cx.language.t("proxy_host"), true,
+                                        cx.language.t("proxy_host"),
+                                        true,
                                         &mut dlg.proxy_host,
-                                        "proxy.corp.example", 170.0,
-                                        cx.language.t("proxy_port"), true,
+                                        "proxy.corp.example",
+                                        170.0,
+                                        cx.language.t("proxy_port"),
+                                        true,
                                         &mut dlg.proxy_port,
-                                        "8080", 80.0,
-                                        cx.theme
+                                        "8080",
+                                        80.0,
+                                        cx.theme,
                                     );
                                     ui.add_space(widgets::SPACING_FIELD);
 
                                     widgets::form_field_2col_mixed(
                                         ui,
-                                        cx.language.t("proxy_username"), false,
+                                        cx.language.t("proxy_username"),
+                                        false,
                                         &mut dlg.proxy_username,
-                                        "user", 170.0,
-                                        cx.language.t("proxy_password"), false,
+                                        "user",
+                                        170.0,
+                                        cx.language.t("proxy_password"),
+                                        false,
                                         &mut dlg.proxy_password,
-                                        "••••••••", 80.0,
-                                        cx.theme
+                                        "••••••••",
+                                        80.0,
+                                        cx.theme,
                                     );
                                     ui.add_space(4.0);
-                                    ui.label(egui::RichText::new(cx.language.t("proxy_password_hint"))
-                                        .color(cx.theme.fg_dim).size(11.0));
+                                    ui.label(
+                                        egui::RichText::new(cx.language.t("proxy_password_hint"))
+                                            .color(cx.theme.fg_dim)
+                                            .size(11.0),
+                                    );
                                 }
                             }
 
                             // Error message
                             if !window.add_host_dialog.error.is_empty() {
                                 ui.add_space(widgets::SPACING_FIELD);
-                                ui.label(egui::RichText::new(&window.add_host_dialog.error)
-                                    .color(cx.theme.red).size(widgets::FONT_SIZE_INPUT));
+                                ui.label(
+                                    egui::RichText::new(&window.add_host_dialog.error)
+                                        .color(cx.theme.red)
+                                        .size(widgets::FONT_SIZE_INPUT),
+                                );
                             }
 
                             // Test connection state
@@ -994,19 +1436,30 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                                     ui.add_space(widgets::SPACING_FIELD);
                                     ui.horizontal(|ui| {
                                         ui.spinner();
-                                        ui.label(egui::RichText::new(cx.language.t("testing")).color(cx.theme.fg_dim).size(12.0));
+                                        ui.label(
+                                            egui::RichText::new(cx.language.t("testing"))
+                                                .color(cx.theme.fg_dim)
+                                                .size(12.0),
+                                        );
                                     });
                                 }
                                 TestConnState::Success(msg) => {
                                     ui.add_space(widgets::SPACING_FIELD);
-                                    ui.label(egui::RichText::new(format!("✓ {}", msg)).color(cx.theme.green).size(12.0));
+                                    ui.label(
+                                        egui::RichText::new(format!("✓ {}", msg))
+                                            .color(cx.theme.green)
+                                            .size(12.0),
+                                    );
                                 }
                                 TestConnState::Failed(msg) => {
                                     ui.add_space(widgets::SPACING_FIELD);
-                                    ui.label(egui::RichText::new(format!("✗ {}", msg)).color(cx.theme.red).size(12.0));
+                                    ui.label(
+                                        egui::RichText::new(format!("✗ {}", msg))
+                                            .color(cx.theme.red)
+                                            .size(12.0),
+                                    );
                                 }
                             }
-
                         });
                 });
 
@@ -1016,19 +1469,34 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                 ui.add_space(widgets::FORM_LEFT_MARGIN);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(16.0);
-                    let is_testing = matches!(window.add_host_dialog.test_conn_state, TestConnState::Testing);
-                    if ui.add_enabled(!is_testing, widgets::primary_button(cx.language.t("test"), cx.theme)).clicked() {
+                    let is_testing = matches!(
+                        window.add_host_dialog.test_conn_state,
+                        TestConnState::Testing
+                    );
+                    if ui
+                        .add_enabled(
+                            !is_testing,
+                            widgets::primary_button(cx.language.t("test"), cx.theme),
+                        )
+                        .clicked()
+                    {
                         test_clicked = true;
                     }
                     ui.add_space(8.0);
                     // Always route a Save click into the save handler, so that
                     // missing required fields can be surfaced as a toast (a
                     // disabled/guarded click would swallow the feedback).
-                    if ui.add(widgets::primary_button(cx.language.t("save"), cx.theme)).clicked() {
+                    if ui
+                        .add(widgets::primary_button(cx.language.t("save"), cx.theme))
+                        .clicked()
+                    {
                         save_clicked = true;
                     }
                     ui.add_space(8.0);
-                    if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                    if ui
+                        .add(widgets::secondary_button(cx.language.t("cancel"), cx.theme))
+                        .clicked()
+                    {
                         window.add_host_dialog.reset();
                     }
                 });
@@ -1059,47 +1527,47 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                         crate::config::ResolvedAuth::None
                     }
                 }
-                CredentialMode::Inline => {
-                    match window.add_host_dialog.auth_method {
-                        AuthMethodChoice::Password => {
-                            let pw = window.add_host_dialog.password.clone();
-                            if pw.is_empty() {
-                                crate::config::ResolvedAuth::None
-                            } else {
-                                crate::config::ResolvedAuth::Password { password: pw }
-                            }
+                CredentialMode::Inline => match window.add_host_dialog.auth_method {
+                    AuthMethodChoice::Password => {
+                        let pw = window.add_host_dialog.password.clone();
+                        if pw.is_empty() {
+                            crate::config::ResolvedAuth::None
+                        } else {
+                            crate::config::ResolvedAuth::Password { password: pw }
                         }
-                        AuthMethodChoice::Key => {
-                            let key_content = match window.add_host_dialog.key_source {
-                                KeySourceChoice::LocalFile => {
-                                    let key_path = window.add_host_dialog.key_path.trim().to_owned();
-                                    if key_path.is_empty() {
-                                        String::new()
-                                    } else {
-                                        std::fs::read_to_string(
-                                            crate::config::expand_key_path(&key_path),
-                                        )
-                                        .unwrap_or_default()
-                                    }
-                                }
-                                KeySourceChoice::ImportContent => {
-                                    window.add_host_dialog.key_content.trim().to_owned()
-                                }
-                            };
-                            let passphrase = if window.add_host_dialog.key_passphrase.is_empty() {
-                                None
-                            } else {
-                                Some(window.add_host_dialog.key_passphrase.clone())
-                            };
-                            crate::config::ResolvedAuth::Key { key_content, passphrase }
-                        }
-                        AuthMethodChoice::Agent => crate::config::ResolvedAuth::Agent,
                     }
-                }
+                    AuthMethodChoice::Key => {
+                        let key_content = match window.add_host_dialog.key_source {
+                            KeySourceChoice::LocalFile => {
+                                let key_path = window.add_host_dialog.key_path.trim().to_owned();
+                                if key_path.is_empty() {
+                                    String::new()
+                                } else {
+                                    std::fs::read_to_string(crate::config::expand_key_path(
+                                        &key_path,
+                                    ))
+                                    .unwrap_or_default()
+                                }
+                            }
+                            KeySourceChoice::ImportContent => {
+                                window.add_host_dialog.key_content.trim().to_owned()
+                            }
+                        };
+                        let passphrase = if window.add_host_dialog.key_passphrase.is_empty() {
+                            None
+                        } else {
+                            Some(window.add_host_dialog.key_passphrase.clone())
+                        };
+                        crate::config::ResolvedAuth::Key {
+                            key_content,
+                            passphrase,
+                        }
+                    }
+                    AuthMethodChoice::Agent => crate::config::ResolvedAuth::Agent,
+                },
             };
 
-            let result_arc: Arc<Mutex<Option<Result<String, String>>>> =
-                Arc::new(Mutex::new(None));
+            let result_arc: Arc<Mutex<Option<Result<String, String>>>> = Arc::new(Mutex::new(None));
             window.add_host_dialog.test_conn_result = Some(Arc::clone(&result_arc));
             window.add_host_dialog.test_conn_state = TestConnState::Testing;
             window.add_host_dialog.error.clear();
@@ -1109,7 +1577,16 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
             let rt = cx.runtime;
             rt.spawn(async move {
                 let settings = crate::config::load_settings();
-                let result = test_connection(host, port, username, resolved, settings.ssh_keepalive_interval, agent_fwd, proxy).await;
+                let result = test_connection(
+                    host,
+                    port,
+                    username,
+                    resolved,
+                    settings.ssh_keepalive_interval,
+                    agent_fwd,
+                    proxy,
+                )
+                .await;
                 if let Ok(mut guard) = result_arc.lock() {
                     *guard = Some(result);
                 }
@@ -1149,14 +1626,21 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
         if !missing.is_empty() {
             window.add_host_dialog.error =
                 cx.language.tf("required_fields_error", &missing.join(", "));
-            window.notifications.push(crate::ssh::AppNotification::warning(
-                window.add_host_dialog.error.clone(),
-            ));
+            window
+                .notifications
+                .push(crate::ssh::AppNotification::warning(
+                    window.add_host_dialog.error.clone(),
+                ));
             return;
         }
 
         // A selected proxy kind must come with usable endpoint fields.
-        let proxy_port: u16 = window.add_host_dialog.proxy_port.trim().parse().unwrap_or(0);
+        let proxy_port: u16 = window
+            .add_host_dialog
+            .proxy_port
+            .trim()
+            .parse()
+            .unwrap_or(0);
         if window.add_host_dialog.proxy_kind.is_some()
             && (window.add_host_dialog.proxy_host.trim().is_empty() || proxy_port == 0)
         {
@@ -1168,10 +1652,11 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
         // system keychain — every keychain operation clears the owner gate
         // (same 5-minute grace window as protected-host actions). The save is
         // parked; the app layer re-runs it via gate_granted once verified.
-        let touches_keychain =
-            matches!(window.add_host_dialog.credential_mode, CredentialMode::Inline)
-            || (window.add_host_dialog.proxy_kind.is_some()
-                && !window.add_host_dialog.proxy_password.is_empty());
+        let touches_keychain = matches!(
+            window.add_host_dialog.credential_mode,
+            CredentialMode::Inline
+        ) || (window.add_host_dialog.proxy_kind.is_some()
+            && !window.add_host_dialog.proxy_password.is_empty());
         if touches_keychain && !gate_granted {
             window.add_host_dialog.save_gate_request = true;
             return;
@@ -1188,7 +1673,8 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
             .and_then(|idx| cx.hosts.get(idx))
             .and_then(|h| h.credential_id.clone())
             .filter(|cid| {
-                cx.hosts.iter()
+                cx.hosts
+                    .iter()
                     .filter(|h| h.credential_id.as_deref() == Some(cid.as_str()))
                     .count()
                     <= 1
@@ -1220,7 +1706,9 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             if let Some(cid) = &own_cid {
                                 cred.id = cid.clone();
                             }
-                            crate::config::store_credential_secret(&cred.id, &cred.name, "password", &pw);
+                            crate::config::store_credential_secret(
+                                &cred.id, &cred.name, "password", &pw,
+                            );
                             Some(cred)
                         }
                     }
@@ -1229,7 +1717,8 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             KeySourceChoice::LocalFile => {
                                 let key_path = window.add_host_dialog.key_path.trim();
                                 if key_path.is_empty() {
-                                    window.add_host_dialog.error = cx.language.t("key_required").to_string();
+                                    window.add_host_dialog.error =
+                                        cx.language.t("key_required").to_string();
                                     return;
                                 }
                                 std::fs::read_to_string(crate::config::expand_key_path(key_path))
@@ -1238,7 +1727,8 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             KeySourceChoice::ImportContent => {
                                 let kc = window.add_host_dialog.key_content.trim().to_owned();
                                 if kc.is_empty() {
-                                    window.add_host_dialog.error = "Private key content is required.".to_string();
+                                    window.add_host_dialog.error =
+                                        "Private key content is required.".to_string();
                                     return;
                                 }
                                 kc
@@ -1255,13 +1745,27 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
                             cred.id = cid.clone();
                         }
                         if !key_content.is_empty() {
-                            crate::config::store_credential_secret(&cred.id, &cred.name, "privatekey", &key_content);
-                            if let crate::config::CredentialType::SshKey { ref mut key_in_keychain, .. } = cred.credential_type {
+                            crate::config::store_credential_secret(
+                                &cred.id,
+                                &cred.name,
+                                "privatekey",
+                                &key_content,
+                            );
+                            if let crate::config::CredentialType::SshKey {
+                                ref mut key_in_keychain,
+                                ..
+                            } = cred.credential_type
+                            {
                                 *key_in_keychain = true;
                             }
                         }
                         if has_passphrase {
-                            crate::config::store_credential_secret(&cred.id, &cred.name, "passphrase", &window.add_host_dialog.key_passphrase);
+                            crate::config::store_credential_secret(
+                                &cred.id,
+                                &cred.name,
+                                "passphrase",
+                                &window.add_host_dialog.key_passphrase,
+                            );
                         }
                         Some(cred)
                     }
@@ -1320,7 +1824,9 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
             window.add_host_dialog.username.trim().to_owned(),
             window.add_host_dialog.group.trim().to_owned(),
             credential_id,
-            window.add_host_dialog.startup_commands
+            window
+                .add_host_dialog
+                .startup_commands
                 .lines()
                 .map(|l| l.trim().to_string())
                 .filter(|l| !l.is_empty())
@@ -1332,13 +1838,16 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
         entry.protected = window.add_host_dialog.protected;
         entry.jump_host = window.add_host_dialog.jump_host.clone();
         entry.port_forwards = window.add_host_dialog.port_forwards.clone();
-        entry.proxy = window.add_host_dialog.proxy_kind.map(|kind| crate::config::ProxyConfig {
-            kind,
-            host: window.add_host_dialog.proxy_host.trim().to_string(),
-            port: proxy_port,
-            username: window.add_host_dialog.proxy_username.trim().to_string(),
-            password_in_keychain: false,
-        });
+        entry.proxy = window
+            .add_host_dialog
+            .proxy_kind
+            .map(|kind| crate::config::ProxyConfig {
+                kind,
+                host: window.add_host_dialog.proxy_host.trim().to_string(),
+                port: proxy_port,
+                username: window.add_host_dialog.proxy_username.trim().to_string(),
+                password_in_keychain: false,
+            });
 
         // Proxy password: keychain only, never hosts.json. Typed password
         // wins; an empty field keeps an existing entry (edit path). Turning
@@ -1346,7 +1855,8 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
         let typed_password = window.add_host_dialog.proxy_password.clone();
         let had_stored_password = window.add_host_dialog.proxy_password_in_keychain;
         let mut stored = false;
-        if entry.proxy.is_some() && !typed_password.is_empty()
+        if entry.proxy.is_some()
+            && !typed_password.is_empty()
             && crate::config::store_proxy_password(&entry, &typed_password)
         {
             stored = true;
@@ -1361,7 +1871,9 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
             crate::config::delete_proxy_password(&entry);
         }
 
-        let tags: Vec<String> = window.add_host_dialog.tags
+        let tags: Vec<String> = window
+            .add_host_dialog
+            .tags
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
@@ -1391,21 +1903,36 @@ pub fn render_add_host_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &
 /// Paint a small "↪ N" badge after the host name showing how many of the
 /// host's configured port forwards are currently active (green) vs configured
 /// but inactive (dim). No-op when the host has no forwards configured.
-fn forward_badge(ui: &egui::Ui, window: &AppWindow, host: &HostEntry, x: f32, y: f32, theme: &crate::ui::theme::ThemeColors) -> f32 {
+fn forward_badge(
+    ui: &egui::Ui,
+    window: &AppWindow,
+    host: &HostEntry,
+    x: f32,
+    y: f32,
+    theme: &crate::ui::theme::ThemeColors,
+) -> f32 {
     if host.port_forwards.is_empty() {
         return 0.0;
     }
-    let active = host.port_forwards.iter().filter(|f| {
-        matches!(
-            crate::ui::types::session::forward_state(
-                window.tabs.iter().flat_map(|t| t.sessions.iter()),
-                host,
-                f,
-            ),
-            Some(crate::ssh::port_forward::ForwardState::Active)
-        )
-    }).count();
-    let color = if active > 0 { theme.green } else { theme.fg_dim };
+    let active = host
+        .port_forwards
+        .iter()
+        .filter(|f| {
+            matches!(
+                crate::ui::types::session::forward_state(
+                    window.tabs.iter().flat_map(|t| t.sessions.iter()),
+                    host,
+                    f,
+                ),
+                Some(crate::ssh::port_forward::ForwardState::Active)
+            )
+        })
+        .count();
+    let color = if active > 0 {
+        theme.green
+    } else {
+        theme.fg_dim
+    };
     let text = format!("\u{21AA}{}", active);
     ui.painter().text(
         egui::pos2(x, y),
@@ -1414,24 +1941,18 @@ fn forward_badge(ui: &egui::Ui, window: &AppWindow, host: &HostEntry, x: f32, y:
         egui::FontId::proportional(10.0),
         color,
     );
-    ui.fonts(|f| f.layout_no_wrap(
-        text, egui::FontId::proportional(10.0), egui::Color32::WHITE,
-    ).rect.width()) + 8.0
+    ui.fonts(|f| {
+        f.layout_no_wrap(text, egui::FontId::proportional(10.0), egui::Color32::WHITE)
+            .rect
+            .width()
+    }) + 8.0
 }
 
 /// "No SFTP" marker after the host name when the connect-time probe found
 /// the server without an SFTP subsystem. Returns advance width (0 hidden).
-fn sftp_badge(
-    ui: &egui::Ui,
-    cx: &WindowContext,
-    host: &HostEntry,
-    x: f32,
-    y: f32,
-) -> f32 {
+fn sftp_badge(ui: &egui::Ui, cx: &WindowContext, host: &HostEntry, x: f32, y: f32) -> f32 {
     let key = format!("{}:{}", host.host, host.port);
-    if cx.host_sftp_support.get(&key)
-        != Some(&crate::ssh::capability::HostCapability::Missing)
-    {
+    if cx.host_sftp_support.get(&key) != Some(&crate::ssh::capability::HostCapability::Missing) {
         return 0.0;
     }
     let text = cx.language.t("host_no_sftp");
@@ -1442,14 +1963,26 @@ fn sftp_badge(
         egui::FontId::proportional(9.0),
         cx.theme.red,
     );
-    ui.fonts(|f| f.layout_no_wrap(
-        text.to_string(), egui::FontId::proportional(9.0), egui::Color32::WHITE,
-    ).rect.width()) + 8.0
+    ui.fonts(|f| {
+        f.layout_no_wrap(
+            text.to_string(),
+            egui::FontId::proportional(9.0),
+            egui::Color32::WHITE,
+        )
+        .rect
+        .width()
+    }) + 8.0
 }
 
 /// Lock glyph after the host name when the host is protected (connecting,
 /// editing, or viewing it requires local owner verification).
-fn protected_badge(ui: &egui::Ui, host: &HostEntry, x: f32, y: f32, theme: &crate::ui::theme::ThemeColors) {
+fn protected_badge(
+    ui: &egui::Ui,
+    host: &HostEntry,
+    x: f32,
+    y: f32,
+    theme: &crate::ui::theme::ThemeColors,
+) {
     if !host.protected {
         return;
     }
@@ -1464,7 +1997,12 @@ fn protected_badge(ui: &egui::Ui, host: &HostEntry, x: f32, y: f32, theme: &crat
 
 /// Paint a "\u{25cf} REC" badge at the row's right edge when the host is
 /// configured to auto-record its sessions.
-fn record_badge(ui: &egui::Ui, host: &HostEntry, rect: egui::Rect, theme: &crate::ui::theme::ThemeColors) {
+fn record_badge(
+    ui: &egui::Ui,
+    host: &HostEntry,
+    rect: egui::Rect,
+    theme: &crate::ui::theme::ThemeColors,
+) {
     if !host.auto_record {
         return;
     }

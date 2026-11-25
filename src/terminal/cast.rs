@@ -135,7 +135,10 @@ impl CastRecorder {
             // A half-failed recording is not worth UI noise: stop writing and
             // log once; Drop still flushes what made it to the buffer.
             self.failed = true;
-            log::warn!("cast recording write failed; stopping capture: {}", self.path.display());
+            log::warn!(
+                "cast recording write failed; stopping capture: {}",
+                self.path.display()
+            );
         }
         self.flush_if_due();
     }
@@ -226,7 +229,7 @@ pub fn set_header_title(path: &Path, title: &str) -> std::io::Result<()> {
     // Preserve everything after the old header (dropping its line terminator,
     // which we just wrote back ourselves).
     out.push_str(text[header_line.len()..].trim_start_matches(['\r', '\n']));
-    std::fs::write(path, out)
+    crate::config::atomic_write_private_file(path, out.as_bytes())
 }
 
 /// Delete recordings per retention policy: drop files older than `days`
@@ -248,9 +251,7 @@ pub fn enforce_retention(dir: &Path, days: u32, max_total_mb: u32) -> Vec<PathBu
             continue;
         }
         let Ok(meta) = entry.metadata() else { continue };
-        let modified = meta
-            .modified()
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        let modified = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
         files.push((modified, meta.len(), path));
     }
     if files.is_empty() {
@@ -291,8 +292,8 @@ pub fn enforce_retention(dir: &Path, days: u32, max_total_mb: u32) -> Vec<PathBu
 /// Parse a `.cast` file for replay. Malformed event lines are skipped
 /// silently; a missing/invalid header is a hard error.
 pub fn parse_cast(path: &Path) -> Result<CastRecording, String> {
-    let meta = std::fs::metadata(path)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let meta =
+        std::fs::metadata(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     if meta.len() > MAX_CAST_BYTES {
         return Err(format!(
             "recording exceeds {} MB limit",
@@ -310,11 +311,17 @@ pub fn parse_cast(path: &Path) -> Result<CastRecording, String> {
 
     let mut events = Vec::new();
     for line in lines {
-        let Some(event) = parse_event_line(line) else { continue };
+        let Some(event) = parse_event_line(line) else {
+            continue;
+        };
         events.push(event);
     }
     let duration = events.last().map(|e| e.time).unwrap_or(0.0);
-    Ok(CastRecording { header, events, duration })
+    Ok(CastRecording {
+        header,
+        events,
+        duration,
+    })
 }
 
 fn parse_header(line: &str) -> Result<CastHeader, String> {
@@ -484,7 +491,10 @@ mod tests {
             "{\"version\":2,\"width\":10,\"height\":5,\"title\":\"u@h\"}\n[0.0,\"o\",\"a\"]\n",
         )
         .unwrap();
-        assert_eq!(parse_cast(&path).unwrap().header.title.as_deref(), Some("u@h"));
+        assert_eq!(
+            parse_cast(&path).unwrap().header.title.as_deref(),
+            Some("u@h")
+        );
 
         // Old/external files without a title still parse, as None.
         let path = dir.path().join("untitled.cast");
@@ -584,7 +594,8 @@ mod tests {
     fn backdate(path: &Path, age: std::time::Duration) {
         let f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
         let modified = std::time::SystemTime::now() - age;
-        f.set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+        f.set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
     }
 
     #[test]

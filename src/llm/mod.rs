@@ -7,6 +7,6 @@
 
 pub mod types;
 
-pub mod openai;
 pub mod anthropic;
+pub mod openai;
 pub mod stream;

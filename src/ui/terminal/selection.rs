@@ -42,7 +42,11 @@ pub fn is_cjk(cp: u32) -> bool {
 /// encountering a continuation cell, potentially over-extending the selection
 /// into adjacent characters. The fix is to include the continuation cell and
 /// immediately break, as continuation cells mark the right edge of wide characters.
-pub fn find_word_boundaries_in_row(cells: &[crate::terminal::TerminalCell], cols: usize, col: usize) -> (usize, usize) {
+pub fn find_word_boundaries_in_row(
+    cells: &[crate::terminal::TerminalCell],
+    cols: usize,
+    col: usize,
+) -> (usize, usize) {
     let cell = cells.get(col);
 
     // If we landed on a continuation cell, walk back to the owning main cell
@@ -63,7 +67,9 @@ pub fn find_word_boundaries_in_row(cells: &[crate::terminal::TerminalCell], cols
     let ch = cells.get(actual_col).map(|c| c.c).unwrap_or(' ');
 
     let is_word_char = |c: char| -> bool {
-        if c.is_ascii_alphanumeric() || c == '_' { return true; }
+        if c.is_ascii_alphanumeric() || c == '_' {
+            return true;
+        }
         is_cjk(c as u32)
     };
 
@@ -136,7 +142,11 @@ pub fn find_word_boundaries_in_row(cells: &[crate::terminal::TerminalCell], cols
 /// This function only works for visible grid rows. For scrollback rows,
 /// use `find_word_boundaries_in_row` with the actual cell row.
 #[allow(dead_code)]
-pub fn find_word_boundaries(grid: &terminal::TerminalGrid, row: usize, col: usize) -> (usize, usize) {
+pub fn find_word_boundaries(
+    grid: &terminal::TerminalGrid,
+    row: usize,
+    col: usize,
+) -> (usize, usize) {
     if row >= grid.rows {
         return (col, col);
     }

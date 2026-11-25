@@ -3,13 +3,15 @@
 //! This module contains the file panel rendering logic for the SFTP view,
 //! including the breadcrumb navigation and file listing panel.
 
-use eframe::egui;
 use crate::sftp::{FileSelection, SftpEntry, SftpEntryKind};
-use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
-use crate::ui::views::sftp::{DragEntry, DragPayload, SelectionAction, MoveToDirRequest, ClipboardRequest};
-use crate::ui::views::sftp::format::{format_file_size, format_modified, format_permissions};
+use crate::ui::theme::ThemeColors;
 use crate::ui::types::sftp_types::SftpPanel;
+use crate::ui::views::sftp::format::{format_file_size, format_modified, format_permissions};
+use crate::ui::views::sftp::{
+    ClipboardRequest, DragEntry, DragPayload, MoveToDirRequest, SelectionAction,
+};
+use eframe::egui;
 
 /// Maximum characters shown for a single breadcrumb segment before it is
 /// middle-truncated. Keeps long segments (e.g. UUIDs) from blowing out the
@@ -57,7 +59,15 @@ pub fn render_breadcrumbs(
 
     // Root "/"
     if ui
-        .add(egui::Button::new(egui::RichText::new("/").color(theme.fg_dim).size(12.0).family(egui::FontFamily::Monospace)).frame(false))
+        .add(
+            egui::Button::new(
+                egui::RichText::new("/")
+                    .color(theme.fg_dim)
+                    .size(12.0)
+                    .family(egui::FontFamily::Monospace),
+            )
+            .frame(false),
+        )
         .clicked()
     {
         *navigate_to = Some("/".to_string());
@@ -74,10 +84,17 @@ pub fn render_breadcrumbs(
 
     // Measure rendered text width via a memoized single-line galley.
     let text_w = |fid: &egui::FontId, text: &str| -> f32 {
-        ui.fonts(|f| f.layout_no_wrap(text.to_string(), fid.clone(), egui::Color32::PLACEHOLDER).size().x)
+        ui.fonts(|f| {
+            f.layout_no_wrap(text.to_string(), fid.clone(), egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+        })
     };
 
-    let displays: Vec<String> = parts.iter().map(|p| truncate_segment(p, MAX_SEGMENT_CHARS)).collect();
+    let displays: Vec<String> = parts
+        .iter()
+        .map(|p| truncate_segment(p, MAX_SEGMENT_CHARS))
+        .collect();
     let seg_widths: Vec<f32> = (0..n).map(|i| text_w(&seg_font, &displays[i])).collect();
     let sep_w = text_w(&sep_font, "/");
     let root_w = text_w(&seg_font, "/");
@@ -197,7 +214,11 @@ pub fn render_breadcrumbs(
 }
 
 /// Apply a SelectionAction to a FileSelection.
-pub fn apply_selection_action(selection: &mut FileSelection, action: SelectionAction, entry_count: usize) {
+pub fn apply_selection_action(
+    selection: &mut FileSelection,
+    action: SelectionAction,
+    entry_count: usize,
+) {
     match action {
         SelectionAction::Single(i) => selection.select_one(i),
         SelectionAction::Toggle(i) => selection.toggle(i),
@@ -247,7 +268,8 @@ pub fn render_file_panel(
     );
 
     // Keyboard handling (only for active panel and no other UI wants keyboard input and editor is not open)
-    if is_active_panel && !entries.is_empty() && !ui.ctx().wants_keyboard_input() && !editor_is_open {
+    if is_active_panel && !entries.is_empty() && !ui.ctx().wants_keyboard_input() && !editor_is_open
+    {
         let modifiers = ui.ctx().input(|i| i.modifiers);
         let cmd = modifiers.command; // Cmd on macOS, Ctrl on others
         let shift = modifiers.shift;
@@ -259,24 +281,22 @@ pub fn render_file_panel(
 
         // Arrow keys
         let focus = selection.focus.unwrap_or(0);
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowUp))
-            && focus > 0 {
-                let new_focus = focus - 1;
-                if shift {
-                    *selection_action = Some(SelectionAction::FocusExtend(new_focus));
-                } else {
-                    *selection_action = Some(SelectionAction::FocusMove(new_focus));
-                }
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowUp)) && focus > 0 {
+            let new_focus = focus - 1;
+            if shift {
+                *selection_action = Some(SelectionAction::FocusExtend(new_focus));
+            } else {
+                *selection_action = Some(SelectionAction::FocusMove(new_focus));
             }
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowDown))
-            && focus + 1 < entries.len() {
-                let new_focus = focus + 1;
-                if shift {
-                    *selection_action = Some(SelectionAction::FocusExtend(new_focus));
-                } else {
-                    *selection_action = Some(SelectionAction::FocusMove(new_focus));
-                }
+        }
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowDown)) && focus + 1 < entries.len() {
+            let new_focus = focus + 1;
+            if shift {
+                *selection_action = Some(SelectionAction::FocusExtend(new_focus));
+            } else {
+                *selection_action = Some(SelectionAction::FocusMove(new_focus));
             }
+        }
 
         // Enter → open focused entry
         if ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -292,10 +312,13 @@ pub fn render_file_panel(
         }
 
         // Delete / Backspace → request delete
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
-            && !selection.is_empty() {
-                *delete_request = true;
-            }
+        if ui
+            .ctx()
+            .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+            && !selection.is_empty()
+        {
+            *delete_request = true;
+        }
 
         // Cmd/Ctrl+C → snapshot the selection into the app clipboard
         if cmd && ui.ctx().input(|i| i.key_pressed(egui::Key::C)) && !selection.is_empty() {
@@ -312,244 +335,259 @@ pub fn render_file_panel(
         egui::ScrollArea::vertical()
             .id_salt(panel_id)
             .show(ui, |ui| {
-            for (i, entry) in entries.iter().enumerate() {
-                let is_selected = selection.is_selected(i);
-                let is_focus = selection.focus == Some(i);
-                let is_dir = entry.kind == SftpEntryKind::Directory;
+                for (i, entry) in entries.iter().enumerate() {
+                    let is_selected = selection.is_selected(i);
+                    let is_focus = selection.focus == Some(i);
+                    let is_dir = entry.kind == SftpEntryKind::Directory;
 
-                let width = ui.available_width();
-                let (rect, resp) = ui.allocate_exact_size(
-                    egui::vec2(width, row_height),
-                    egui::Sense::click_and_drag(),
-                );
+                    let width = ui.available_width();
+                    let (rect, resp) = ui.allocate_exact_size(
+                        egui::vec2(width, row_height),
+                        egui::Sense::click_and_drag(),
+                    );
 
-                // Check if dragging over this directory entry (for move-to-folder)
-                let is_drop_target = is_dir && !is_selected && {
-                    let ctx = ui.ctx();
-                    if let Some(payload) = egui::DragAndDrop::payload::<DragPayload>(ctx) {
-                        if payload.is_local == is_local {
-                            if let Some(hover_pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                                rect.contains(hover_pos)
+                    // Check if dragging over this directory entry (for move-to-folder)
+                    let is_drop_target = is_dir && !is_selected && {
+                        let ctx = ui.ctx();
+                        if let Some(payload) = egui::DragAndDrop::payload::<DragPayload>(ctx) {
+                            if payload.is_local == is_local {
+                                if let Some(hover_pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                                    rect.contains(hover_pos)
+                                } else {
+                                    false
+                                }
                             } else {
                                 false
                             }
                         } else {
                             false
                         }
-                    } else {
-                        false
-                    }
-                };
+                    };
 
-                // Handle drop on directory (move files to this folder)
-                if is_drop_target && ui.ctx().input(|i| i.pointer.any_released()) {
-                    let ctx = ui.ctx();
-                    if let Some(payload) = egui::DragAndDrop::take_payload::<DragPayload>(ctx) {
-                        if payload.is_local == is_local && !payload.entries.is_empty() {
-                            // Don't move if the only item being dragged is this directory itself
-                            let can_move = payload.entries.len() > 1 ||
-                                payload.entries[0].entry_name != entry.name;
-                            if can_move {
-                                *move_to_dir_request = Some(MoveToDirRequest {
-                                    source_entries: payload.entries.clone(),
-                                    target_dir: entry.name.clone(),
-                                });
+                    // Handle drop on directory (move files to this folder)
+                    if is_drop_target && ui.ctx().input(|i| i.pointer.any_released()) {
+                        let ctx = ui.ctx();
+                        if let Some(payload) = egui::DragAndDrop::take_payload::<DragPayload>(ctx) {
+                            if payload.is_local == is_local && !payload.entries.is_empty() {
+                                // Don't move if the only item being dragged is this directory itself
+                                let can_move = payload.entries.len() > 1
+                                    || payload.entries[0].entry_name != entry.name;
+                                if can_move {
+                                    *move_to_dir_request = Some(MoveToDirRequest {
+                                        source_entries: payload.entries.clone(),
+                                        target_dir: entry.name.clone(),
+                                    });
+                                }
                             }
+                        }
+                    }
+
+                    // Background: selected, focused, hovered, or drop target
+                    if is_selected || resp.hovered() || is_drop_target {
+                        let bg = if is_drop_target {
+                            theme.accent_alpha(50)
+                        } else if is_selected {
+                            theme.accent_alpha(30)
+                        } else {
+                            theme.hover_bg
+                        };
+                        ui.painter().rect_filled(rect, 0.0, bg);
+                    }
+
+                    // Drop target indicator (left border)
+                    if is_drop_target {
+                        let indicator_rect =
+                            egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height()));
+                        ui.painter().rect_filled(indicator_rect, 0.0, theme.accent);
+                    }
+
+                    // Focus indicator (subtle left border)
+                    if is_focus && is_active_panel {
+                        let focus_rect =
+                            egui::Rect::from_min_size(rect.min, egui::vec2(2.0, rect.height()));
+                        ui.painter().rect_filled(focus_rect, 0.0, theme.accent);
+                    }
+
+                    // Icon
+                    let icon = match entry.kind {
+                        SftpEntryKind::Directory => "\u{1F4C1}",
+                        SftpEntryKind::Symlink => "\u{1F517}",
+                        _ => "\u{1F4C4}",
+                    };
+                    ui.painter().text(
+                        egui::pos2(rect.min.x + 8.0, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        icon,
+                        egui::FontId::proportional(11.0),
+                        theme.fg_dim,
+                    );
+
+                    // Name (truncated to not overlap with permissions/size)
+                    let name_color = if is_dir {
+                        theme.accent
+                    } else {
+                        theme.fg_primary
+                    };
+                    let display_name = if is_dir {
+                        format!("{}/", entry.name)
+                    } else {
+                        entry.name.clone()
+                    };
+                    let name_x = rect.min.x + 28.0;
+                    // Permissions are right-aligned at rect.max.x - 75.0, text extends left
+                    // "drwxrwxrwx" is ~60px wide, so permissions end around rect.max.x - 135.0
+                    // Leave some padding, name should not extend past rect.max.x - 145.0
+                    let name_max_x = (rect.max.x - 250.0).max(name_x + 40.0);
+                    let max_name_width = name_max_x - name_x;
+
+                    // Create a layout job that doesn't wrap but truncates with ellipsis
+                    let mut job = egui::text::LayoutJob::simple_singleline(
+                        display_name.clone(),
+                        egui::FontId::proportional(12.0),
+                        name_color,
+                    );
+                    job.wrap = egui::text::TextWrapping::truncate_at_width(max_name_width);
+
+                    let galley = ui.fonts(|f| f.layout_job(job));
+
+                    ui.painter().galley(
+                        egui::pos2(name_x, rect.center().y - galley.size().y * 0.5),
+                        galley,
+                        name_color,
+                    );
+
+                    // Size (right-aligned)
+                    if !is_dir {
+                        if let Some(s) = entry.size {
+                            ui.painter().text(
+                                egui::pos2(rect.max.x - 8.0, rect.center().y),
+                                egui::Align2::RIGHT_CENTER,
+                                format_file_size(s),
+                                egui::FontId::proportional(11.0),
+                                theme.fg_dim,
+                            );
+                        }
+                    }
+
+                    // Permissions (right-aligned, before size)
+                    if let Some(mode) = entry.permissions {
+                        ui.painter().text(
+                            egui::pos2(rect.max.x - 75.0, rect.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            format_permissions(mode),
+                            egui::FontId::monospace(10.0),
+                            theme.fg_dim,
+                        );
+                    }
+
+                    // Modified time (right-aligned, before permissions) — shown on every row.
+                    ui.painter().text(
+                        egui::pos2(rect.max.x - 145.0, rect.center().y),
+                        egui::Align2::RIGHT_CENTER,
+                        format_modified(entry.modified),
+                        egui::FontId::monospace(10.0),
+                        theme.fg_dim,
+                    );
+
+                    // Drag payload (multi-select aware) — only set when dragging
+                    if resp.dragged() {
+                        if is_selected && selection.count() > 1 {
+                            // Dragging from a selected item → pack all selected entries
+                            let drag_entries: Vec<DragEntry> = selection
+                                .selected
+                                .iter()
+                                .filter_map(|&idx| {
+                                    entries.get(idx).map(|e| DragEntry {
+                                        full_path: format!(
+                                            "{}/{}",
+                                            current_path.trim_end_matches('/'),
+                                            e.name
+                                        ),
+                                        entry_name: e.name.clone(),
+                                        is_dir: e.kind == SftpEntryKind::Directory,
+                                    })
+                                })
+                                .collect();
+                            resp.dnd_set_drag_payload(DragPayload {
+                                is_local,
+                                origin: panel,
+                                entries: drag_entries,
+                            });
+                        } else {
+                            // Single item drag
+                            let full_path =
+                                format!("{}/{}", current_path.trim_end_matches('/'), entry.name);
+                            resp.dnd_set_drag_payload(DragPayload {
+                                is_local,
+                                origin: panel,
+                                entries: vec![DragEntry {
+                                    full_path,
+                                    entry_name: entry.name.clone(),
+                                    is_dir,
+                                }],
+                            });
+                        }
+                    }
+
+                    if resp.secondary_clicked() {
+                        if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
+                            *context_menu_request = Some((pos, Some(i)));
+                        }
+                    } else if resp.double_clicked() {
+                        if is_dir {
+                            *navigate_to = Some(entry.name.clone());
+                        } else {
+                            *open_file_request = Some(i);
+                        }
+                    } else if resp.clicked() {
+                        let modifiers = ui.ctx().input(|i| i.modifiers);
+                        if modifiers.command {
+                            *selection_action = Some(SelectionAction::Toggle(i));
+                        } else if modifiers.shift {
+                            *selection_action = Some(SelectionAction::Range(i));
+                        } else {
+                            *selection_action = Some(SelectionAction::Single(i));
                         }
                     }
                 }
 
-                // Background: selected, focused, hovered, or drop target
-                if is_selected || resp.hovered() || is_drop_target {
-                    let bg = if is_drop_target {
-                        theme.accent_alpha(50)
-                    } else if is_selected {
-                        theme.accent_alpha(30)
-                    } else {
-                        theme.hover_bg
-                    };
-                    ui.painter().rect_filled(rect, 0.0, bg);
-                }
-
-                // Drop target indicator (left border)
-                if is_drop_target {
-                    let indicator_rect = egui::Rect::from_min_size(
-                        rect.min,
-                        egui::vec2(3.0, rect.height()),
-                    );
-                    ui.painter().rect_filled(indicator_rect, 0.0, theme.accent);
-                }
-
-                // Focus indicator (subtle left border)
-                if is_focus && is_active_panel {
-                    let focus_rect = egui::Rect::from_min_size(
-                        rect.min,
-                        egui::vec2(2.0, rect.height()),
-                    );
-                    ui.painter().rect_filled(focus_rect, 0.0, theme.accent);
-                }
-
-                // Icon
-                let icon = match entry.kind {
-                    SftpEntryKind::Directory => "\u{1F4C1}",
-                    SftpEntryKind::Symlink => "\u{1F517}",
-                    _ => "\u{1F4C4}",
-                };
-                ui.painter().text(
-                    egui::pos2(rect.min.x + 8.0, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    icon,
-                    egui::FontId::proportional(11.0),
-                    theme.fg_dim,
-                );
-
-                // Name (truncated to not overlap with permissions/size)
-                let name_color = if is_dir { theme.accent } else { theme.fg_primary };
-                let display_name = if is_dir {
-                    format!("{}/", entry.name)
-                } else {
-                    entry.name.clone()
-                };
-                let name_x = rect.min.x + 28.0;
-                // Permissions are right-aligned at rect.max.x - 75.0, text extends left
-                // "drwxrwxrwx" is ~60px wide, so permissions end around rect.max.x - 135.0
-                // Leave some padding, name should not extend past rect.max.x - 145.0
-                let name_max_x = (rect.max.x - 250.0).max(name_x + 40.0);
-                let max_name_width = name_max_x - name_x;
-
-                // Create a layout job that doesn't wrap but truncates with ellipsis
-                let mut job = egui::text::LayoutJob::simple_singleline(
-                    display_name.clone(),
-                    egui::FontId::proportional(12.0),
-                    name_color,
-                );
-                job.wrap = egui::text::TextWrapping::truncate_at_width(max_name_width);
-
-                let galley = ui.fonts(|f| f.layout_job(job));
-
-                ui.painter().galley(
-                    egui::pos2(name_x, rect.center().y - galley.size().y * 0.5),
-                    galley,
-                    name_color,
-                );
-
-                // Size (right-aligned)
-                if !is_dir {
-                    if let Some(s) = entry.size {
-                        ui.painter().text(
-                            egui::pos2(rect.max.x - 8.0, rect.center().y),
-                            egui::Align2::RIGHT_CENTER,
-                            format_file_size(s),
-                            egui::FontId::proportional(11.0),
-                            theme.fg_dim,
-                        );
-                    }
-                }
-
-                // Permissions (right-aligned, before size)
-                if let Some(mode) = entry.permissions {
-                    ui.painter().text(
-                        egui::pos2(rect.max.x - 75.0, rect.center().y),
-                        egui::Align2::RIGHT_CENTER,
-                        format_permissions(mode),
-                        egui::FontId::monospace(10.0),
-                        theme.fg_dim,
-                    );
-                }
-
-                // Modified time (right-aligned, before permissions) — shown on every row.
-                ui.painter().text(
-                    egui::pos2(rect.max.x - 145.0, rect.center().y),
-                    egui::Align2::RIGHT_CENTER,
-                    format_modified(entry.modified),
-                    egui::FontId::monospace(10.0),
-                    theme.fg_dim,
-                );
-
-                // Drag payload (multi-select aware) — only set when dragging
-                if resp.dragged() {
-                    if is_selected && selection.count() > 1 {
-                        // Dragging from a selected item → pack all selected entries
-                        let drag_entries: Vec<DragEntry> = selection.selected.iter()
-                            .filter_map(|&idx| entries.get(idx).map(|e| DragEntry {
-                                full_path: format!("{}/{}", current_path.trim_end_matches('/'), e.name),
-                                entry_name: e.name.clone(),
-                                is_dir: e.kind == SftpEntryKind::Directory,
-                            }))
-                            .collect();
-                        resp.dnd_set_drag_payload(DragPayload {
-                            is_local,
-                            origin: panel,
-                            entries: drag_entries,
-                        });
-                    } else {
-                        // Single item drag
-                        let full_path = format!(
-                            "{}/{}",
-                            current_path.trim_end_matches('/'),
-                            entry.name
-                        );
-                        resp.dnd_set_drag_payload(DragPayload {
-                            is_local,
-                            origin: panel,
-                            entries: vec![DragEntry {
-                                full_path,
-                                entry_name: entry.name.clone(),
-                                is_dir,
-                            }],
-                        });
-                    }
-                }
-
-                if resp.secondary_clicked() {
+                // Click on blank area → deselect all
+                let remaining = ui.available_rect_before_wrap();
+                let blank_resp = ui.allocate_rect(remaining, egui::Sense::click());
+                if blank_resp.secondary_clicked() {
                     if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
-                        *context_menu_request = Some((pos, Some(i)));
+                        *context_menu_request = Some((pos, None));
                     }
-                } else if resp.double_clicked() {
-                    if is_dir {
-                        *navigate_to = Some(entry.name.clone());
-                    } else {
-                        *open_file_request = Some(i);
-                    }
-                } else if resp.clicked() {
-                    let modifiers = ui.ctx().input(|i| i.modifiers);
-                    if modifiers.command {
-                        *selection_action = Some(SelectionAction::Toggle(i));
-                    } else if modifiers.shift {
-                        *selection_action = Some(SelectionAction::Range(i));
-                    } else {
-                        *selection_action = Some(SelectionAction::Single(i));
-                    }
+                } else if blank_resp.clicked() {
+                    *selection_action = Some(SelectionAction::DeselectAll);
                 }
-            }
-
-            // Click on blank area → deselect all
-            let remaining = ui.available_rect_before_wrap();
-            let blank_resp = ui.allocate_rect(remaining, egui::Sense::click());
-            if blank_resp.secondary_clicked() {
-                if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
-                    *context_menu_request = Some((pos, None));
-                }
-            } else if blank_resp.clicked() {
-                *selection_action = Some(SelectionAction::DeselectAll);
-            }
-        });
+            });
     });
 
     // Status bar at the bottom
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(status_rect), |ui| {
-        ui.painter().rect_filled(status_rect, 0.0, theme.bg_secondary);
+        ui.painter()
+            .rect_filled(status_rect, 0.0, theme.bg_secondary);
 
         let sel_count = selection.count();
-        let dir_count = entries.iter().filter(|e| e.kind == SftpEntryKind::Directory).count();
-        let file_count = entries.iter().filter(|e| e.kind == SftpEntryKind::File).count();
-        let total_size: u64 = entries.iter()
+        let dir_count = entries
+            .iter()
+            .filter(|e| e.kind == SftpEntryKind::Directory)
+            .count();
+        let file_count = entries
+            .iter()
+            .filter(|e| e.kind == SftpEntryKind::File)
+            .count();
+        let total_size: u64 = entries
+            .iter()
             .filter(|e| e.kind == SftpEntryKind::File)
             .filter_map(|e| e.size)
             .sum();
 
         let status_text = if sel_count > 0 {
-            let sel_size: u64 = selection.selected.iter()
+            let sel_size: u64 = selection
+                .selected
+                .iter()
                 .filter_map(|&i| entries.get(i))
                 .filter(|e| e.kind == SftpEntryKind::File)
                 .filter_map(|e| e.size)

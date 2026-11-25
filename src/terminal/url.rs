@@ -3,13 +3,7 @@
 use super::types::TerminalCell;
 
 /// URL scheme prefixes to detect
-const URL_PREFIXES: &[&str] = &[
-    "https://",
-    "http://",
-    "ftp://",
-    "ssh://",
-    "git://",
-];
+const URL_PREFIXES: &[&str] = &["https://", "http://", "ftp://", "ssh://", "git://"];
 
 /// Characters that terminate a URL
 fn is_url_char(c: char) -> bool {
@@ -18,8 +12,28 @@ fn is_url_char(c: char) -> bool {
     c.is_alphanumeric()
         || matches!(
             c,
-            '.' | '-' | '_' | '~' | ':' | '/' | '?' | '#' | '[' | ']' | '@'
-                | '!' | '$' | '&' | '\'' | '(' | ')' | '*' | '+' | ',' | ';' | '=' | '%'
+            '.' | '-'
+                | '_'
+                | '~'
+                | ':'
+                | '/'
+                | '?'
+                | '#'
+                | '['
+                | ']'
+                | '@'
+                | '!'
+                | '$'
+                | '&'
+                | '\''
+                | '('
+                | ')'
+                | '*'
+                | '+'
+                | ','
+                | ';'
+                | '='
+                | '%'
         )
 }
 

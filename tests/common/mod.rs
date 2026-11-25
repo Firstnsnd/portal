@@ -21,8 +21,7 @@ pub struct TempDir {
 impl TempDir {
     /// Create a new temporary directory
     pub fn new() -> Self {
-        let path = std::env::temp_dir()
-            .join(format!("portal-test-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("portal-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).expect("Failed to create temp dir");
         Self {
             path,

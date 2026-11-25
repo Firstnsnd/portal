@@ -11,19 +11,19 @@
 //! `config::write_private_file` (all on-disk config/session files) and
 //! `terminal::cast::CastRecorder::create` (session recordings).
 
-#[cfg(target_os = "macos")]
-mod macos;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(windows)]
 mod windows;
 
-#[cfg(target_os = "macos")]
-pub use macos::restrict_to_owner;
 #[cfg(all(unix, not(target_os = "macos")))]
-pub use linux::restrict_to_owner;
+pub use linux::{preserve_existing_mode, restrict_to_owner};
+#[cfg(target_os = "macos")]
+pub use macos::{preserve_existing_mode, restrict_to_owner};
 #[cfg(windows)]
-pub use windows::restrict_to_owner;
+pub use windows::{preserve_existing_mode, restrict_to_owner};
 
 #[cfg(test)]
 mod tests {
@@ -36,5 +36,26 @@ mod tests {
         let file = std::fs::File::create(&path).unwrap();
         super::restrict_to_owner(&file);
         assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preserve_existing_mode_keeps_the_destination_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("script.sh");
+        std::fs::write(&dest, b"old").unwrap();
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // The temp replacement inherits the destination's mode…
+        let temp = dir.path().join("script.sh.tmp");
+        let file = std::fs::File::create(&temp).unwrap();
+        super::preserve_existing_mode(&file, &dest);
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o755);
+        // …whereas a fresh destination leaves the default (0644 minus umask).
+        let fresh = dir.path().join("other.tmp");
+        let file = std::fs::File::create(&fresh).unwrap();
+        let default = file.metadata().unwrap().permissions().mode();
+        super::preserve_existing_mode(&file, &dir.path().join("never-existed"));
+        assert_eq!(file.metadata().unwrap().permissions().mode(), default);
     }
 }

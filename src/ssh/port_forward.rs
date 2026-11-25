@@ -133,7 +133,8 @@ pub async fn start_local_forward(
             if is_addr_in_use {
                 log::warn!(
                     "Port forward conflict: {}:{} already in use, skipping",
-                    config.local_host, config.local_port
+                    config.local_host,
+                    config.local_port
                 );
                 if let Ok(mut s) = state.lock() {
                     *s = ForwardState::Conflict(format!(
@@ -159,7 +160,9 @@ pub async fn start_local_forward(
 
     log::info!(
         "Local forward active: {} -> {}:{}",
-        bind_addr, config.remote_host, config.remote_port
+        bind_addr,
+        config.remote_host,
+        config.remote_port
     );
     if let Ok(mut s) = state.lock() {
         *s = ForwardState::Active;
@@ -247,7 +250,8 @@ pub async fn start_dynamic_forward(
             if is_addr_in_use {
                 log::warn!(
                     "Dynamic forward conflict: {}:{} already in use, skipping",
-                    config.local_host, config.local_port
+                    config.local_host,
+                    config.local_port
                 );
                 if let Ok(mut s) = state.lock() {
                     *s = ForwardState::Conflict(format!(
@@ -418,11 +422,15 @@ where
             Ok((_consumed, request)) => return Ok(request),
             Err(SocksError::Incomplete) => {}
             Err(e @ SocksError::UnsupportedCommand(_)) => {
-                let _ = stream.write_all(&socks5::failure_reply(socks5::REP_CMD_NOT_SUPPORTED)).await;
+                let _ = stream
+                    .write_all(&socks5::failure_reply(socks5::REP_CMD_NOT_SUPPORTED))
+                    .await;
                 return Err(e.to_string());
             }
             Err(e) => {
-                let _ = stream.write_all(&socks5::failure_reply(socks5::REP_GENERAL_FAILURE)).await;
+                let _ = stream
+                    .write_all(&socks5::failure_reply(socks5::REP_GENERAL_FAILURE))
+                    .await;
                 return Err(e.to_string());
             }
         }
@@ -439,7 +447,6 @@ where
         }
     }
 }
-
 
 /// Bridge a single accepted TCP connection through an SSH direct-tcpip channel.
 async fn bridge_local_connection(

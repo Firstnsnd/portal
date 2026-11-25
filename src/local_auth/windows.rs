@@ -11,9 +11,7 @@
 
 use windows::core::{HRESULT, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, ERROR_LOGON_FAILURE, HANDLE};
-use windows::Win32::Security::{
-    LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
-};
+use windows::Win32::Security::{LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT};
 
 pub struct Win32Logon;
 
@@ -46,7 +44,9 @@ impl super::OwnerAuth for Win32Logon {
         match result {
             Ok(()) => {
                 // We only needed the verdict, not the token.
-                unsafe { let _ = CloseHandle(token); };
+                unsafe {
+                    let _ = CloseHandle(token);
+                };
                 Ok(true)
             }
             Err(e) if e.code() == HRESULT::from_win32(ERROR_LOGON_FAILURE.0) => Ok(false),

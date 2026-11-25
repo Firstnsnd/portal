@@ -16,9 +16,7 @@
 
 use std::path::PathBuf;
 
-use crate::sftp::drop_planner::{
-    join_remote_path, DropSide, PlannedTransfer, TransferPlan,
-};
+use crate::sftp::drop_planner::{join_remote_path, DropSide, PlannedTransfer, TransferPlan};
 use crate::sftp::FileSelection;
 use crate::sftp::{SftpCommand, SftpConnectionState, SftpEntry, SftpEntryKind};
 use crate::ui::pane::AppWindow;
@@ -61,26 +59,21 @@ pub(crate) fn capture_clipboard(window: &AppWindow, panel: SftpPanel) -> Option<
         ),
         SftpPanel::LeftRemote => {
             let b = window.sftp_browser_left.as_ref()?;
-            (
-                &b.current_path,
-                &b.selection,
-                b.filtered_entries(),
-            )
+            (&b.current_path, &b.selection, b.filtered_entries())
         }
         SftpPanel::RightRemote => {
             let b = window.sftp_browser.as_ref()?;
-            (
-                &b.current_path,
-                &b.selection,
-                b.filtered_entries(),
-            )
+            (&b.current_path, &b.selection, b.filtered_entries())
         }
     };
     let entries = snapshot_entries(path, selection, &filtered);
     if entries.is_empty() {
         None
     } else {
-        Some(SftpClipboard { origin: panel, entries })
+        Some(SftpClipboard {
+            origin: panel,
+            entries,
+        })
     }
 }
 
@@ -144,8 +137,15 @@ fn parent_dir(path: &str) -> &str {
 /// Directory of a paste target, with the names already present there (remote
 /// rosters come from the listing; local rosters from a best-effort `read_dir`).
 enum PasteTarget {
-    Local { dir: PathBuf, names: Vec<String> },
-    Remote { side: DropSide, dir: String, names: Vec<String> },
+    Local {
+        dir: PathBuf,
+        names: Vec<String>,
+    },
+    Remote {
+        side: DropSide,
+        dir: String,
+        names: Vec<String>,
+    },
 }
 
 fn connected_remote_dir(b: Option<&crate::sftp::SftpBrowser>) -> Option<(String, Vec<String>)> {
@@ -190,9 +190,7 @@ pub(crate) fn execute_paste(
     target: SftpPanel,
     duplicate_suffix: &str,
 ) -> Option<String> {
-    let Some(clip) = window.sftp_clipboard.clone() else {
-        return None;
-    };
+    let clip = window.sftp_clipboard.clone()?;
     if clip.entries.is_empty() {
         return None;
     }
@@ -201,7 +199,9 @@ pub(crate) fn execute_paste(
     let paste_target = match target {
         SftpPanel::LeftLocal => PasteTarget::Local {
             dir: PathBuf::from(&window.local_browser_left.current_path),
-            names: local_dir_names(std::path::Path::new(&window.local_browser_left.current_path)),
+            names: local_dir_names(std::path::Path::new(
+                &window.local_browser_left.current_path,
+            )),
         },
         SftpPanel::RightLocal => PasteTarget::Local {
             dir: PathBuf::from(&window.local_browser_right.current_path),
@@ -211,15 +211,29 @@ pub(crate) fn execute_paste(
         },
         SftpPanel::LeftRemote => {
             let Some((dir, names)) = connected_remote_dir(window.sftp_browser_left.as_ref()) else {
-                return Some(format!("{}: not connected", paste_target_label(window.sftp_browser_left.as_ref())));
+                return Some(format!(
+                    "{}: not connected",
+                    paste_target_label(window.sftp_browser_left.as_ref())
+                ));
             };
-            PasteTarget::Remote { side: DropSide::Left, dir, names }
+            PasteTarget::Remote {
+                side: DropSide::Left,
+                dir,
+                names,
+            }
         }
         SftpPanel::RightRemote => {
             let Some((dir, names)) = connected_remote_dir(window.sftp_browser.as_ref()) else {
-                return Some(format!("{}: not connected", paste_target_label(window.sftp_browser.as_ref())));
+                return Some(format!(
+                    "{}: not connected",
+                    paste_target_label(window.sftp_browser.as_ref())
+                ));
             };
-            PasteTarget::Remote { side: DropSide::Right, dir, names }
+            PasteTarget::Remote {
+                side: DropSide::Right,
+                dir,
+                names,
+            }
         }
     };
 
@@ -250,7 +264,9 @@ pub(crate) fn execute_paste(
     match (origin_local, target_local) {
         // ── local → local: sync fs copies via the shared plan executor ──
         (true, true) => {
-            let PasteTarget::Local { dir, .. } = paste_target else { unreachable!() };
+            let PasteTarget::Local { dir, .. } = paste_target else {
+                unreachable!()
+            };
             let transfers = clip
                 .entries
                 .iter()
@@ -258,9 +274,15 @@ pub(crate) fn execute_paste(
                 .map(|(e, name)| {
                     let dest = dir.join(name);
                     if e.is_dir {
-                        PlannedTransfer::CopyDir { src: PathBuf::from(&e.full_path), dest }
+                        PlannedTransfer::CopyDir {
+                            src: PathBuf::from(&e.full_path),
+                            dest,
+                        }
                     } else {
-                        PlannedTransfer::CopyFile { src: PathBuf::from(&e.full_path), dest }
+                        PlannedTransfer::CopyFile {
+                            src: PathBuf::from(&e.full_path),
+                            dest,
+                        }
                     }
                 })
                 .collect();
@@ -268,7 +290,9 @@ pub(crate) fn execute_paste(
         }
         // ── local → remote: upload through the target side's connection ──
         (true, false) => {
-            let PasteTarget::Remote { side, dir, .. } = paste_target else { unreachable!() };
+            let PasteTarget::Remote { side, dir, .. } = paste_target else {
+                unreachable!()
+            };
             let transfers = clip
                 .entries
                 .iter()
@@ -277,9 +301,17 @@ pub(crate) fn execute_paste(
                     let local = PathBuf::from(&e.full_path);
                     let remote = join_remote_path(&dir, name);
                     if e.is_dir {
-                        PlannedTransfer::UploadDir { local, remote, via: side }
+                        PlannedTransfer::UploadDir {
+                            local,
+                            remote,
+                            via: side,
+                        }
                     } else {
-                        PlannedTransfer::UploadFile { local, remote, via: side }
+                        PlannedTransfer::UploadFile {
+                            local,
+                            remote,
+                            via: side,
+                        }
                     }
                 })
                 .collect();
@@ -287,7 +319,9 @@ pub(crate) fn execute_paste(
         }
         // ── remote → local: download through the origin side's connection ──
         (false, true) => {
-            let PasteTarget::Local { dir, .. } = paste_target else { unreachable!() };
+            let PasteTarget::Local { dir, .. } = paste_target else {
+                unreachable!()
+            };
             let via = match clip.origin {
                 SftpPanel::LeftRemote => DropSide::Left,
                 SftpPanel::RightRemote => DropSide::Right,
@@ -314,12 +348,21 @@ pub(crate) fn execute_paste(
         }
         // ── remote → remote ──
         (false, false) => {
-            let PasteTarget::Remote { dir, .. } = paste_target else { unreachable!() };
+            let PasteTarget::Remote { dir, .. } = paste_target else {
+                unreachable!()
+            };
             if clip.origin == target {
                 paste_same_connection(window, target, &clip.entries, &dest_names, &dir);
                 None
             } else {
-                paste_cross_connection(window, clip.origin, target, &clip.entries, &dest_names, &dir)
+                paste_cross_connection(
+                    window,
+                    clip.origin,
+                    target,
+                    &clip.entries,
+                    &dest_names,
+                    &dir,
+                )
             }
         }
     }
@@ -369,7 +412,11 @@ fn cleanup_staging(item: &RelayItem) {
         std::fs::remove_file(&item.staging)
     };
     if let Err(e) = result {
-        log::warn!("paste relay: failed to clean staging {:?}: {}", item.staging, e);
+        log::warn!(
+            "paste relay: failed to clean staging {:?}: {}",
+            item.staging,
+            e
+        );
     }
 }
 
@@ -409,15 +456,13 @@ fn paste_cross_connection(
         _ => return None,
     };
 
-    let root = std::env::temp_dir()
-        .join("portal-sftp-copy")
-        .join(format!(
-            "{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
+    let root = std::env::temp_dir().join("portal-sftp-copy").join(format!(
+        "{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
     if let Err(e) = std::fs::create_dir_all(&root) {
         return Some(format!("{}: {}", root.display(), e));
     }
@@ -534,11 +579,7 @@ mod tests {
     fn dedupe_appends_suffix_then_counter() {
         let roster: Vec<String> = vec!["a.txt".into(), "a.txt copy".into()];
         assert_eq!(dedupe_name(&roster, "a.txt", "copy"), "a.txt copy 2");
-        let roster: Vec<String> = vec![
-            "a.txt".into(),
-            "a.txt copy".into(),
-            "a.txt copy 2".into(),
-        ];
+        let roster: Vec<String> = vec!["a.txt".into(), "a.txt copy".into(), "a.txt copy 2".into()];
         assert_eq!(dedupe_name(&roster, "a.txt", "copy"), "a.txt copy 3");
     }
 
@@ -575,7 +616,10 @@ mod tests {
         // "a copy": the roster grows as names are assigned.
         let mut roster: Vec<String> = vec!["a".into(), "a copy".into()];
         assert_eq!(paste_dest_name(&mut roster, "a", true, "copy"), "a copy 2");
-        assert_eq!(paste_dest_name(&mut roster, "a copy", true, "copy"), "a copy copy");
+        assert_eq!(
+            paste_dest_name(&mut roster, "a copy", true, "copy"),
+            "a copy copy"
+        );
     }
 
     // ------------------------------------------------------------------

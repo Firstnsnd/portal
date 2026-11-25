@@ -16,34 +16,34 @@ pub struct ThemeColors {
     pub border: egui::Color32,
 
     // Semantic colors derived from base colors
-    pub input_bg: egui::Color32,        // Text input background
-    pub input_border: egui::Color32,    // Text input border
-    pub badge_bg: egui::Color32,        // Tag / badge background
-    pub menu_bg: egui::Color32,         // Dropdown menu / popup background
-    pub focus_ring: egui::Color32,      // Focus indicator
-    pub divider: egui::Color32,         // Section divider line
-    pub overlay_bg: egui::Color32,      // Modal overlay background
-    pub error_dim: egui::Color32,       // Dimmed error (for backgrounds)
-    pub warning: egui::Color32,         // Warning/attention (notifications, in-use state)
-    pub search_match: egui::Color32,     // Search match highlight (non-current)
+    pub input_bg: egui::Color32,             // Text input background
+    pub input_border: egui::Color32,         // Text input border
+    pub badge_bg: egui::Color32,             // Tag / badge background
+    pub menu_bg: egui::Color32,              // Dropdown menu / popup background
+    pub focus_ring: egui::Color32,           // Focus indicator
+    pub divider: egui::Color32,              // Section divider line
+    pub overlay_bg: egui::Color32,           // Modal overlay background
+    pub error_dim: egui::Color32,            // Dimmed error (for backgrounds)
+    pub warning: egui::Color32,              // Warning/attention (notifications, in-use state)
+    pub search_match: egui::Color32,         // Search match highlight (non-current)
     pub search_match_current: egui::Color32, // Search match highlight (current)
-    pub button_text: egui::Color32,     // Contrast text on filled buttons (primary/danger)
-    pub broadcast_bg: egui::Color32,    // Broadcast-enabled tab fill
+    pub button_text: egui::Color32,          // Contrast text on filled buttons (primary/danger)
+    pub broadcast_bg: egui::Color32,         // Broadcast-enabled tab fill
 }
 
 impl ThemeColors {
     pub fn accent_alpha(&self, alpha: u8) -> egui::Color32 {
-        egui::Color32::from_rgba_unmultiplied(self.accent.r(), self.accent.g(), self.accent.b(), alpha)
+        egui::Color32::from_rgba_unmultiplied(
+            self.accent.r(),
+            self.accent.g(),
+            self.accent.b(),
+            alpha,
+        )
     }
 
     /// A very dim color for input placeholder/hint text, clearly distinguishable from real input.
     pub fn hint_color(&self) -> egui::Color32 {
-        egui::Color32::from_rgba_unmultiplied(
-            self.fg_dim.r(),
-            self.fg_dim.g(),
-            self.fg_dim.b(),
-            80,
-        )
+        egui::Color32::from_rgba_unmultiplied(self.fg_dim.r(), self.fg_dim.g(), self.fg_dim.b(), 80)
     }
 }
 
@@ -79,7 +79,7 @@ impl ThemePreset {
                 input_bg: egui::Color32::from_rgb(20, 21, 36),
                 input_border: egui::Color32::from_rgb(56, 60, 79),
                 badge_bg: egui::Color32::from_rgba_unmultiplied(122, 162, 247, 20),
-                menu_bg: egui::Color32::from_rgb(32, 34, 48),          // Dropdown menu background
+                menu_bg: egui::Color32::from_rgb(32, 34, 48), // Dropdown menu background
                 focus_ring: egui::Color32::from_rgba_unmultiplied(122, 162, 247, 120),
                 divider: egui::Color32::from_rgb(45, 47, 65),
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(26, 27, 38, 220),
@@ -107,7 +107,7 @@ impl ThemePreset {
                 input_bg: egui::Color32::from_rgb(34, 34, 58),
                 input_border: egui::Color32::from_rgb(75, 76, 97),
                 badge_bg: egui::Color32::from_rgba_unmultiplied(189, 147, 249, 20),
-                menu_bg: egui::Color32::from_rgb(48, 50, 68),          // Dropdown menu background
+                menu_bg: egui::Color32::from_rgb(48, 50, 68), // Dropdown menu background
                 focus_ring: egui::Color32::from_rgba_unmultiplied(189, 147, 249, 120),
                 divider: egui::Color32::from_rgb(62, 64, 85),
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(40, 42, 54, 220),
@@ -135,7 +135,7 @@ impl ThemePreset {
                 input_bg: egui::Color32::from_rgb(23, 27, 33),
                 input_border: egui::Color32::from_rgb(70, 75, 85),
                 badge_bg: egui::Color32::from_rgba_unmultiplied(97, 175, 239, 20),
-                menu_bg: egui::Color32::from_rgb(46, 50, 60),          // Dropdown menu background
+                menu_bg: egui::Color32::from_rgb(46, 50, 60), // Dropdown menu background
                 focus_ring: egui::Color32::from_rgba_unmultiplied(97, 175, 239, 120),
                 divider: egui::Color32::from_rgb(58, 63, 73),
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(40, 44, 52, 220),
@@ -163,7 +163,7 @@ impl ThemePreset {
                 input_bg: egui::Color32::from_rgb(0, 44, 56),
                 input_border: egui::Color32::from_rgb(34, 85, 98),
                 badge_bg: egui::Color32::from_rgba_unmultiplied(38, 139, 210, 20),
-                menu_bg: egui::Color32::from_rgb(10, 58, 70),          // Dropdown menu background
+                menu_bg: egui::Color32::from_rgb(10, 58, 70), // Dropdown menu background
                 focus_ring: egui::Color32::from_rgba_unmultiplied(38, 139, 210, 120),
                 divider: egui::Color32::from_rgb(18, 68, 80),
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(0, 43, 54, 220),
@@ -191,7 +191,7 @@ impl ThemePreset {
                 input_bg: egui::Color32::from_rgb(49, 56, 72),
                 input_border: egui::Color32::from_rgb(87, 96, 114),
                 badge_bg: egui::Color32::from_rgba_unmultiplied(136, 192, 208, 20),
-                menu_bg: egui::Color32::from_rgb(54, 62, 76),          // Dropdown menu background
+                menu_bg: egui::Color32::from_rgb(54, 62, 76), // Dropdown menu background
                 focus_ring: egui::Color32::from_rgba_unmultiplied(136, 192, 208, 120),
                 divider: egui::Color32::from_rgb(76, 84, 100),
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(46, 52, 64, 220),
@@ -206,7 +206,7 @@ impl ThemePreset {
                 bg_primary: egui::Color32::from_rgb(253, 246, 227),
                 bg_secondary: egui::Color32::from_rgb(245, 235, 205),
                 bg_elevated: egui::Color32::from_rgb(238, 232, 213),
-                fg_primary: egui::Color32::from_rgb(88, 110, 117),         // Dark text
+                fg_primary: egui::Color32::from_rgb(88, 110, 117), // Dark text
                 fg_dim: egui::Color32::from_rgb(131, 148, 150),
                 accent: egui::Color32::from_rgb(38, 139, 210),
                 green: egui::Color32::from_rgb(133, 153, 0),
@@ -219,7 +219,7 @@ impl ThemePreset {
                 input_bg: egui::Color32::from_rgb(255, 255, 255),
                 input_border: egui::Color32::from_rgb(170, 160, 130),
                 badge_bg: egui::Color32::from_rgba_unmultiplied(38, 139, 210, 25),
-                menu_bg: egui::Color32::from_rgb(255, 255, 255),      // Dropdown menu background (white)
+                menu_bg: egui::Color32::from_rgb(255, 255, 255), // Dropdown menu background (white)
                 focus_ring: egui::Color32::from_rgba_unmultiplied(38, 139, 210, 150),
                 divider: egui::Color32::from_rgb(200, 190, 160),
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(253, 246, 227, 240),
@@ -234,7 +234,7 @@ impl ThemePreset {
                 bg_primary: egui::Color32::from_rgb(255, 255, 255),
                 bg_secondary: egui::Color32::from_rgb(246, 248, 250),
                 bg_elevated: egui::Color32::from_rgb(255, 255, 255),
-                fg_primary: egui::Color32::from_rgb(36, 41, 47),             // Dark text
+                fg_primary: egui::Color32::from_rgb(36, 41, 47), // Dark text
                 fg_dim: egui::Color32::from_rgb(88, 96, 105),
                 accent: egui::Color32::from_rgb(31, 111, 235),
                 green: egui::Color32::from_rgb(31, 136, 61),
@@ -247,7 +247,7 @@ impl ThemePreset {
                 input_bg: egui::Color32::from_rgb(255, 255, 255),
                 input_border: egui::Color32::from_rgb(180, 185, 190),
                 badge_bg: egui::Color32::from_rgba_unmultiplied(31, 111, 235, 20),
-                menu_bg: egui::Color32::from_rgb(255, 255, 255),      // Dropdown menu background (white)
+                menu_bg: egui::Color32::from_rgb(255, 255, 255), // Dropdown menu background (white)
                 focus_ring: egui::Color32::from_rgba_unmultiplied(31, 111, 235, 150),
                 divider: egui::Color32::from_rgb(224, 228, 232),
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 240),
@@ -262,7 +262,7 @@ impl ThemePreset {
                 bg_primary: egui::Color32::from_rgb(255, 255, 255),
                 bg_secondary: egui::Color32::from_rgb(245, 245, 245),
                 bg_elevated: egui::Color32::from_rgb(255, 255, 255),
-                fg_primary: egui::Color32::from_rgb(66, 70, 85),             // Dark text
+                fg_primary: egui::Color32::from_rgb(66, 70, 85), // Dark text
                 fg_dim: egui::Color32::from_rgb(140, 143, 160),
                 accent: egui::Color32::from_rgb(97, 175, 239),
                 green: egui::Color32::from_rgb(88, 175, 115),
@@ -275,7 +275,7 @@ impl ThemePreset {
                 input_bg: egui::Color32::from_rgb(255, 255, 255),
                 input_border: egui::Color32::from_rgb(210, 210, 210),
                 badge_bg: egui::Color32::from_rgba_unmultiplied(97, 175, 239, 20),
-                menu_bg: egui::Color32::from_rgb(255, 255, 255),      // Dropdown menu background (white)
+                menu_bg: egui::Color32::from_rgb(255, 255, 255), // Dropdown menu background (white)
                 focus_ring: egui::Color32::from_rgba_unmultiplied(97, 175, 239, 150),
                 divider: egui::Color32::from_rgb(230, 230, 230),
                 overlay_bg: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 240),

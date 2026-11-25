@@ -7,8 +7,7 @@
 //! entry that no longer exists falls back to a local shell + banner line.
 
 use crate::config::session_state::{
-    self as ss, PaneNodeDto, SessionDto, SessionStateFile, SplitDirectionDto, TabState,
-    WindowState,
+    self as ss, PaneNodeDto, SessionDto, SessionStateFile, SplitDirectionDto, TabState, WindowState,
 };
 use crate::config::{resolve_auth, Credential, HostEntry};
 use crate::ui::pane::{AppWindow, PaneNode, SplitDirection, Tab};
@@ -177,9 +176,8 @@ fn build_tab(
                         // a local shell with an explanatory banner line.
                         let shell = default_shell();
                         sessions.push(TerminalSession::new_local_in(*next_id, &shell, None));
-                        let language = crate::ui::Language::from_id(
-                            &crate::config::load_settings().language,
-                        );
+                        let language =
+                            crate::ui::Language::from_id(&crate::config::load_settings().language);
                         banners.push((
                             sessions.len() - 1,
                             format!(
@@ -365,7 +363,10 @@ mod tests {
 
         assert_eq!(tabs.len(), 2);
         assert_eq!(active_tab, 1);
-        assert!(next_id >= 101, "restore consumes ids from 100 up, got {next_id}");
+        assert!(
+            next_id >= 101,
+            "restore consumes ids from 100 up, got {next_id}"
+        );
         assert_eq!(tabs[0].title, "in-tmp");
         assert_eq!(tabs[1].title, "plain");
         // Restored sessions are Local with the recorded cwd.
@@ -415,10 +416,7 @@ mod tests {
         assert!(matches!(tabs[0].sessions[0].kind, SessionKind::Local(_, _)));
         // The banner line is in the grid.
         let grid = tabs[0].sessions[0].grid.lock().unwrap();
-        let row_text: String = grid.cells[0]
-            .iter()
-            .map(|c| c.c)
-            .collect();
+        let row_text: String = grid.cells[0].iter().map(|c| c.c).collect();
         drop(grid);
         assert!(
             row_text.contains("deleted-host"),

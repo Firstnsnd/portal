@@ -11,8 +11,8 @@
 use std::sync::{Arc, Mutex};
 
 use super::{
-    inert_bridge, set_transfer_state, SessionWriter, TransferRequest, ZmodemBridge,
-    ZmodemState, ZmodemSupport, ZmodemTap, ZmodemTransfer,
+    inert_bridge, set_transfer_state, SessionWriter, TransferRequest, ZmodemBridge, ZmodemState,
+    ZmodemSupport, ZmodemTap, ZmodemTransfer,
 };
 
 impl ZmodemBridge {

@@ -6,25 +6,39 @@
 //! loop before it reaches VTE/scrollback.
 
 use std::io;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use vte::Parser;
 
-use super::RealPtySession;
 use super::super::{Pty, PtySize, Result};
+use super::RealPtySession;
 use crate::terminal::grid::TerminalGrid;
 use crate::terminal::types::CellAttrs;
 
 pub use crate::terminal::unix_pty::PtyWriter;
 
 impl RealPtySession {
-    pub fn with_scrollback_limit(id: usize, cols: u16, rows: u16, shell: &str, scrollback_limit_bytes: usize, cwd: Option<&str>, record: bool) -> Result<Self> {
+    pub fn with_scrollback_limit(
+        id: usize,
+        cols: u16,
+        rows: u16,
+        shell: &str,
+        scrollback_limit_bytes: usize,
+        cwd: Option<&str>,
+        record: bool,
+    ) -> Result<Self> {
         let _ = id;
 
-        let grid: Arc<Mutex<TerminalGrid>> = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols as usize, rows as usize, scrollback_limit_bytes)));
-        let pty = crate::terminal::UnixPty::spawn_in(shell, &["-l"], PtySize::new(rows, cols), cwd)?;
+        let grid: Arc<Mutex<TerminalGrid>> =
+            Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
+                cols as usize,
+                rows as usize,
+                scrollback_limit_bytes,
+            )));
+        let pty =
+            crate::terminal::UnixPty::spawn_in(shell, &["-l"], PtySize::new(rows, cols), cwd)?;
         let pty: Arc<Mutex<Box<dyn Pty>>> = Arc::new(Mutex::new(Box::new(pty)));
 
         let fd = {
@@ -35,7 +49,9 @@ impl RealPtySession {
         };
         let fd_dup = unsafe { libc::dup(fd) };
         if fd_dup < 0 {
-            return Err(super::super::Error::SpawnFailed("Failed to dup fd".to_string()));
+            return Err(super::super::Error::SpawnFailed(
+                "Failed to dup fd".to_string(),
+            ));
         }
 
         let writer = PtyWriter { fd: fd_dup };
@@ -47,8 +63,7 @@ impl RealPtySession {
         // thread spawns so capture starts at the very first byte.
         let recorder = super::make_recorder_slot(record, shell, cols, rows);
         let recorder_clone = Arc::clone(&recorder);
-        let ai_capture: crate::terminal::ai_capture::AiCaptureSlot =
-            Arc::new(Mutex::new(None));
+        let ai_capture: crate::terminal::ai_capture::AiCaptureSlot = Arc::new(Mutex::new(None));
         let ai_capture_clone = Arc::clone(&ai_capture);
 
         // ZMODEM slots — cloned into the reader thread like the recorder.
@@ -218,7 +233,9 @@ impl RealPtySession {
                     }
                 }
             })
-            .map_err(|_| super::super::Error::SpawnFailed("Failed to spawn reader thread".to_string()))?;
+            .map_err(|_| {
+                super::super::Error::SpawnFailed("Failed to spawn reader thread".to_string())
+            })?;
 
         let cached_shell_name = Arc::new(Mutex::new(None));
         let last_shell_check = Arc::new(Mutex::new(std::time::Instant::now()));
@@ -251,7 +268,10 @@ impl RealPtySession {
         if let Some(ref writer) = self.writer {
             return writer.write(data);
         }
-        Err(io::Error::new(io::ErrorKind::NotConnected, "PTY not available"))
+        Err(io::Error::new(
+            io::ErrorKind::NotConnected,
+            "PTY not available",
+        ))
     }
 
     /// Kick off a shell-name refresh on a background thread. The detection
@@ -260,19 +280,14 @@ impl RealPtySession {
     /// would stall keystroke writes. The fresh name lands in the cache
     /// asynchronously — callers keep seeing the stale value until then.
     pub(super) fn refresh_shell_name(&self) -> Option<String> {
-        let Some(ref pty) = self.pty else {
-            return None;
-        };
-        let pty = Arc::clone(pty);
+        let pty = Arc::clone(self.pty.as_ref()?);
         let cache = Arc::clone(&self.cached_shell_name);
         let _ = thread::Builder::new()
             .name("shell-name-detect".to_string())
             .spawn(move || {
                 let pid = pty.lock().unwrap().child_pid();
                 if let Some(pid) = pid {
-                    if let Some(name) =
-                        crate::terminal::unix_pty::detect_shell_name(pid as i32)
-                    {
+                    if let Some(name) = crate::terminal::unix_pty::detect_shell_name(pid as i32) {
                         *cache.lock().unwrap() = Some(name);
                     }
                 }

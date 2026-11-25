@@ -119,7 +119,10 @@ mod tests {
         let full = uv(0.0, 0.0, 1.0, 1.0);
         assert_eq!(cover_uv(egui::Vec2::ZERO, egui::vec2(100.0, 100.0)), full);
         assert_eq!(cover_uv(egui::vec2(100.0, 100.0), egui::Vec2::ZERO), full);
-        assert_eq!(cover_uv(egui::vec2(-1.0, 100.0), egui::vec2(10.0, 10.0)), full);
+        assert_eq!(
+            cover_uv(egui::vec2(-1.0, 100.0), egui::vec2(10.0, 10.0)),
+            full
+        );
     }
 
     #[test]
@@ -134,8 +137,7 @@ mod tests {
             image::ImageFormat::Png,
         )
         .unwrap();
-        let decoded =
-            load_background_image(path.to_str().unwrap()).expect("decode should succeed");
+        let decoded = load_background_image(path.to_str().unwrap()).expect("decode should succeed");
         assert_eq!(decoded.size, [2, 2]);
     }
 

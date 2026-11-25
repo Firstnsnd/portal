@@ -10,9 +10,9 @@ use std::sync::{Mutex, Once, OnceLock};
 use cocoa::appkit::NSApp;
 use cocoa::base::{id, nil};
 use cocoa::foundation::{NSArray, NSAutoreleasePool, NSPoint, NSRect, NSSize, NSString};
-use objc::{class, msg_send, sel, sel_impl};
 use objc::declare::ClassDecl;
 use objc::runtime::{Object, Sel};
+use objc::{class, msg_send, sel, sel_impl};
 
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -129,7 +129,10 @@ unsafe fn deliver_promise(
     provider: id,
     url: id,
 ) -> Result<oneshot::Receiver<Result<(), String>>, String> {
-    let pending = registry().lock().unwrap().take_for_delivery(provider as usize);
+    let pending = registry()
+        .lock()
+        .unwrap()
+        .take_for_delivery(provider as usize);
     let Some(p) = pending else {
         // Promise was already delivered (or never registered) — nothing to do.
         let (_tx, rx) = oneshot::channel();
@@ -327,8 +330,7 @@ unsafe fn ensure_delegate_class() -> id {
         let mut decl = decl;
         decl.add_method(
             sel!(draggingSession:sourceOperationMaskForDraggingContext:),
-            source_operation_mask
-                as extern "C" fn(&mut Object, Sel, id, usize) -> i64,
+            source_operation_mask as extern "C" fn(&mut Object, Sel, id, usize) -> i64,
         );
         decl.add_method(
             sel!(draggingSession:endedAtPoint:operation:),
@@ -411,7 +413,8 @@ unsafe fn make_badge(label: &str) -> id {
         // The attribute key is literally the string "NSFont" —
         // +[NSFont fontAttributeName] throws on modern Foundation.
         let font_key: id = NSString::alloc(nil).init_str("NSFont");
-        let attrs: id = msg_send![class!(NSDictionary), dictionaryWithObject: font forKey: font_key];
+        let attrs: id =
+            msg_send![class!(NSDictionary), dictionaryWithObject: font forKey: font_key];
         let _: () = msg_send![
             text,
             drawAtPoint: NSPoint::new(8.0, 6.0)
@@ -475,10 +478,7 @@ unsafe fn begin_session(specs: &[PromiseSpec], cmd_tx: UnboundedSender<SftpComma
         // unless it gets a real mouse event.
         let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
         let frame: NSRect = msg_send![window, frame];
-        let loc = NSPoint::new(
-            mouse.x - frame.origin.x,
-            mouse.y - frame.origin.y,
-        );
+        let loc = NSPoint::new(mouse.x - frame.origin.x, mouse.y - frame.origin.y);
         let win_num: isize = msg_send![window, windowNumber];
         // NSLeftMouseDragged = 6 (NSEventType: 1=down, 2=up, 5=moved, 6=dragged).
         // Note the runtime signature has an extra `eventNumber:` parameter

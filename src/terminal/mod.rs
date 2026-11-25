@@ -1,14 +1,14 @@
 //! Terminal PTY abstraction layer
 
-mod color;
-mod types;
-mod grid;
-mod vte;
-mod session;
-pub mod cast;
-pub mod url;
-pub mod metrics;
 pub mod ai_capture;
+pub mod cast;
+mod color;
+mod grid;
+pub mod metrics;
+mod session;
+mod types;
+pub mod url;
+mod vte;
 
 // ZMODEM bridge — cross-platform facade (types + routing); the rzsz engine
 // lives in zmodem/unix.rs, Windows gets inert no-ops (zmodem/windows.rs).
@@ -22,9 +22,9 @@ mod windows_pty;
 // Re-export core types for external use
 pub use color::DEFAULT_BG;
 pub use grid::TerminalGrid;
-pub use types::{TerminalCell, CellAttrs};
-pub use vte::VteHandler;
 pub use session::RealPtySession;
+pub use types::{CellAttrs, TerminalCell};
+pub use vte::VteHandler;
 
 // PTY abstraction types
 use std::process::ExitStatus;
@@ -133,12 +133,7 @@ pub trait Pty: Send {
     /// Spawn a new PTY with an explicit working directory for the child.
     /// `None` means the platform default ($HOME). Implementations that cannot
     /// honor `cwd` may ignore it.
-    fn spawn_in(
-        command: &str,
-        args: &[&str],
-        size: PtySize,
-        cwd: Option<&str>,
-    ) -> Result<Self>
+    fn spawn_in(command: &str, args: &[&str], size: PtySize, cwd: Option<&str>) -> Result<Self>
     where
         Self: Sized,
     {
@@ -189,11 +184,11 @@ pub trait Pty: Send {
 }
 
 // Export platform-specific PTY implementation
-#[cfg(unix)]
-pub use unix_pty::UnixPty;
 /// Signal-time cleanup: SIGKILL exactly the PTY children we spawned.
 #[cfg(unix)]
 pub use unix_pty::kill_registered_children;
+#[cfg(unix)]
+pub use unix_pty::UnixPty;
 
 #[cfg(windows)]
 pub use windows_pty::WindowsPty;

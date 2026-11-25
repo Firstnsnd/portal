@@ -11,7 +11,7 @@ use crate::config::ResolvedAuth;
 
 use super::port_forward::PortForwardConfig;
 
-use super::auth_prompt::{AuthPromptField, AuthPromptBridge, PromptError};
+use super::auth_prompt::{AuthPromptBridge, AuthPromptField, PromptError};
 use super::session::SshClient;
 
 /// Cap on keyboard-interactive rounds. Real servers use 1-3; a malicious
@@ -92,13 +92,14 @@ pub async fn authenticate(
     bridge: &AuthPromptBridge,
 ) -> Result<(), String> {
     let result: russh::client::AuthResult = match auth {
-        ResolvedAuth::Password { password } => {
-            handle
-                .authenticate_password(username, password)
-                .await
-                .map_err(|e| format!("Auth error: {}", e))?
-        }
-        ResolvedAuth::Key { key_content, passphrase } => {
+        ResolvedAuth::Password { password } => handle
+            .authenticate_password(username, password)
+            .await
+            .map_err(|e| format!("Auth error: {}", e))?,
+        ResolvedAuth::Key {
+            key_content,
+            passphrase,
+        } => {
             let pw = passphrase.as_deref();
 
             let key_pair = if !key_content.is_empty() {
@@ -137,7 +138,9 @@ pub async fn authenticate(
 
     match result {
         russh::client::AuthResult::Success => Ok(()),
-        russh::client::AuthResult::Failure { remaining_methods, .. } => {
+        russh::client::AuthResult::Failure {
+            remaining_methods, ..
+        } => {
             // Rejections are Ok(Failure), not Err — Err means transport.
             if remaining_methods.contains(&russh::MethodKind::KeyboardInteractive) {
                 keyboard_interactive(handle, username, bridge).await
@@ -186,7 +189,10 @@ async fn keyboard_interactive(
                 } else {
                     let fields = prompts
                         .into_iter()
-                        .map(|p| AuthPromptField { prompt: p.prompt, echo: p.echo })
+                        .map(|p| AuthPromptField {
+                            prompt: p.prompt,
+                            echo: p.echo,
+                        })
                         .collect();
                     match bridge.ask(name, instructions, fields).await {
                         Ok(answers) => answers,
@@ -194,11 +200,9 @@ async fn keyboard_interactive(
                             return Err("Authentication cancelled".to_string())
                         }
                         Err(PromptError::Declined) => {
-                            return Err(
-                                "Server requires interactive two-factor authentication; \
+                            return Err("Server requires interactive two-factor authentication; \
                                  open a terminal session to connect"
-                                    .to_string(),
-                            )
+                                .to_string())
                         }
                     }
                 };
@@ -212,8 +216,8 @@ async fn keyboard_interactive(
     Err("Too many authentication rounds".to_string())
 }
 
-/// ssh-agent authentication lives in [`super::agent`]: per-OS transports
-/// (unix socket / Windows OpenSSH pipe + Pageant) behind one shared loop.
+// ssh-agent authentication lives in [`super::agent`]: per-OS transports
+// (unix socket / Windows OpenSSH pipe + Pageant) behind one shared loop.
 
 /// Connect and authenticate an SSH session, returning the handle.
 /// Shared by SshSession, test_connection, and SFTP.

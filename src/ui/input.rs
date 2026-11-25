@@ -1,5 +1,5 @@
-use eframe::egui;
 use crate::config::{KeyBinding, ShortcutAction};
+use eframe::egui;
 
 #[derive(Clone)]
 pub struct ShortcutResolver {
@@ -125,41 +125,82 @@ impl ShortcutResolver {
 
     pub fn key_to_string(key: egui::Key) -> String {
         match key {
-            egui::Key::A => "A".into(), egui::Key::B => "B".into(), egui::Key::C => "C".into(),
-            egui::Key::D => "D".into(), egui::Key::E => "E".into(), egui::Key::F => "F".into(),
-            egui::Key::G => "G".into(), egui::Key::H => "H".into(), egui::Key::I => "I".into(),
-            egui::Key::J => "J".into(), egui::Key::K => "K".into(), egui::Key::L => "L".into(),
-            egui::Key::M => "M".into(), egui::Key::N => "N".into(), egui::Key::O => "O".into(),
-            egui::Key::P => "P".into(), egui::Key::Q => "Q".into(), egui::Key::R => "R".into(),
-            egui::Key::S => "S".into(), egui::Key::T => "T".into(), egui::Key::U => "U".into(),
-            egui::Key::V => "V".into(), egui::Key::W => "W".into(), egui::Key::X => "X".into(),
-            egui::Key::Y => "Y".into(), egui::Key::Z => "Z".into(),
-            egui::Key::Num0 => "0".into(), egui::Key::Num1 => "1".into(),
-            egui::Key::Num2 => "2".into(), egui::Key::Num3 => "3".into(),
-            egui::Key::Num4 => "4".into(), egui::Key::Num5 => "5".into(),
-            egui::Key::Num6 => "6".into(), egui::Key::Num7 => "7".into(),
-            egui::Key::Num8 => "8".into(), egui::Key::Num9 => "9".into(),
-            egui::Key::F1 => "F1".into(), egui::Key::F2 => "F2".into(),
-            egui::Key::F3 => "F3".into(), egui::Key::F4 => "F4".into(),
-            egui::Key::F5 => "F5".into(), egui::Key::F6 => "F6".into(),
-            egui::Key::F7 => "F7".into(), egui::Key::F8 => "F8".into(),
-            egui::Key::F9 => "F9".into(), egui::Key::F10 => "F10".into(),
-            egui::Key::F11 => "F11".into(), egui::Key::F12 => "F12".into(),
-            egui::Key::Space => "Space".into(), egui::Key::Enter => "Enter".into(),
-            egui::Key::Escape => "Escape".into(), egui::Key::Tab => "Tab".into(),
-            egui::Key::Backspace => "Backspace".into(), egui::Key::Delete => "Delete".into(),
-            egui::Key::Insert => "Insert".into(), egui::Key::Home => "Home".into(),
-            egui::Key::End => "End".into(), egui::Key::PageUp => "PageUp".into(),
+            egui::Key::A => "A".into(),
+            egui::Key::B => "B".into(),
+            egui::Key::C => "C".into(),
+            egui::Key::D => "D".into(),
+            egui::Key::E => "E".into(),
+            egui::Key::F => "F".into(),
+            egui::Key::G => "G".into(),
+            egui::Key::H => "H".into(),
+            egui::Key::I => "I".into(),
+            egui::Key::J => "J".into(),
+            egui::Key::K => "K".into(),
+            egui::Key::L => "L".into(),
+            egui::Key::M => "M".into(),
+            egui::Key::N => "N".into(),
+            egui::Key::O => "O".into(),
+            egui::Key::P => "P".into(),
+            egui::Key::Q => "Q".into(),
+            egui::Key::R => "R".into(),
+            egui::Key::S => "S".into(),
+            egui::Key::T => "T".into(),
+            egui::Key::U => "U".into(),
+            egui::Key::V => "V".into(),
+            egui::Key::W => "W".into(),
+            egui::Key::X => "X".into(),
+            egui::Key::Y => "Y".into(),
+            egui::Key::Z => "Z".into(),
+            egui::Key::Num0 => "0".into(),
+            egui::Key::Num1 => "1".into(),
+            egui::Key::Num2 => "2".into(),
+            egui::Key::Num3 => "3".into(),
+            egui::Key::Num4 => "4".into(),
+            egui::Key::Num5 => "5".into(),
+            egui::Key::Num6 => "6".into(),
+            egui::Key::Num7 => "7".into(),
+            egui::Key::Num8 => "8".into(),
+            egui::Key::Num9 => "9".into(),
+            egui::Key::F1 => "F1".into(),
+            egui::Key::F2 => "F2".into(),
+            egui::Key::F3 => "F3".into(),
+            egui::Key::F4 => "F4".into(),
+            egui::Key::F5 => "F5".into(),
+            egui::Key::F6 => "F6".into(),
+            egui::Key::F7 => "F7".into(),
+            egui::Key::F8 => "F8".into(),
+            egui::Key::F9 => "F9".into(),
+            egui::Key::F10 => "F10".into(),
+            egui::Key::F11 => "F11".into(),
+            egui::Key::F12 => "F12".into(),
+            egui::Key::Space => "Space".into(),
+            egui::Key::Enter => "Enter".into(),
+            egui::Key::Escape => "Escape".into(),
+            egui::Key::Tab => "Tab".into(),
+            egui::Key::Backspace => "Backspace".into(),
+            egui::Key::Delete => "Delete".into(),
+            egui::Key::Insert => "Insert".into(),
+            egui::Key::Home => "Home".into(),
+            egui::Key::End => "End".into(),
+            egui::Key::PageUp => "PageUp".into(),
             egui::Key::PageDown => "PageDown".into(),
-            egui::Key::ArrowUp => "ArrowUp".into(), egui::Key::ArrowDown => "ArrowDown".into(),
-            egui::Key::ArrowLeft => "ArrowLeft".into(), egui::Key::ArrowRight => "ArrowRight".into(),
-            egui::Key::Minus => "Minus".into(), egui::Key::Plus => "Plus".into(),
+            egui::Key::ArrowUp => "ArrowUp".into(),
+            egui::Key::ArrowDown => "ArrowDown".into(),
+            egui::Key::ArrowLeft => "ArrowLeft".into(),
+            egui::Key::ArrowRight => "ArrowRight".into(),
+            egui::Key::Minus => "Minus".into(),
+            egui::Key::Plus => "Plus".into(),
             egui::Key::Equals => "Equals".into(),
-            egui::Key::OpenBracket => "LeftBracket".into(), egui::Key::CloseBracket => "RightBracket".into(),
-            egui::Key::Backslash => "Backslash".into(), egui::Key::Semicolon => "Semicolon".into(),
-            egui::Key::Colon => "Colon".into(), egui::Key::Quote => "Quote".into(),
-            egui::Key::Comma => "Comma".into(), egui::Key::Period => "Period".into(),
-            egui::Key::Slash => "Slash".into(), egui::Key::Backtick => "Backtick".into(),
+            egui::Key::OpenBracket => "LeftBracket".into(),
+            egui::Key::CloseBracket => "RightBracket".into(),
+            egui::Key::Backslash => "Backslash".into(),
+            egui::Key::Semicolon => "Semicolon".into(),
+            egui::Key::Colon => "Colon".into(),
+            egui::Key::Quote => "Quote".into(),
+            egui::Key::Comma => "Comma".into(),
+            egui::Key::Period => "Period".into(),
+            egui::Key::Slash => "Slash".into(),
+            egui::Key::Backtick => "Backtick".into(),
             egui::Key::Pipe => "Pipe".into(),
             _ => format!("{:?}", key),
         }
@@ -167,10 +208,18 @@ impl ShortcutResolver {
 
     pub fn display_binding(binding: &KeyBinding) -> String {
         let mut parts = Vec::new();
-        if binding.ctrl { parts.push("\u{2303}"); }
-        if binding.alt { parts.push("\u{2325}"); }
-        if binding.shift { parts.push("\u{21e7}"); }
-        if binding.command { parts.push("\u{2318}"); }
+        if binding.ctrl {
+            parts.push("\u{2303}");
+        }
+        if binding.alt {
+            parts.push("\u{2325}");
+        }
+        if binding.shift {
+            parts.push("\u{21e7}");
+        }
+        if binding.command {
+            parts.push("\u{2318}");
+        }
         let key_display = match binding.key.as_str() {
             "LeftBracket" | "OpenBracket" => "[".to_string(),
             "RightBracket" | "CloseBracket" => "]".to_string(),

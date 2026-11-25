@@ -16,7 +16,11 @@
 //! An armed capture therefore also rewrites the *display* stream (only the
 //! grid parse — the capture and asciicast taps still see raw bytes): the
 //! shell's echo of the wrapped command is replaced by the bare command, and
-//! the executed sentinel lines are never rendered.
+//! the executed sentinel lines are never rendered. The rewrite matches the
+//! known echo byte-for-byte while skipping whatever the shell interleaves
+//! (prompts, ANSI highlighting, redraws) — it can never fall back to
+//! showing the wrapper: the worst a divergent stream can do is end the
+//! rewrite with the bare command anyway.
 
 /// Marker printed before the command runs; capture starts at the first byte
 /// after it.
@@ -34,9 +38,8 @@ pub const FEEDBACK_MAX_CHARS: usize = 4000;
 /// A session's capture slot: `Some` while an AI-run capture is active. Both
 /// backends hold one; the reader thread feeds the capture through it and the
 /// watcher thread detaches its own run when done.
-pub type AiCaptureSlot = std::sync::Arc<
-    std::sync::Mutex<Option<std::sync::Arc<std::sync::Mutex<AiCapture>>>>,
->;
+pub type AiCaptureSlot =
+    std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<std::sync::Mutex<AiCapture>>>>>;
 
 /// Wrap a user-confirmed command in the sentinel printers. Executed through
 /// the interactive shell (unchanged UX: the command still runs exactly where
@@ -97,24 +100,25 @@ impl AiCapture {
     /// rewritten so the shell's echo of the wrapper shows as the bare
     /// command and the executed sentinel lines are never rendered.
     pub fn for_wrapped(cmd: &str, wrapped: &str) -> Self {
+        let mut expected = normalize_newlines(wrapped).into_bytes();
+        expected.extend_from_slice(b"\r\n"); // echo of the typed Enter
+        debug_assert!(expected.starts_with(WRAPPER_ANCHOR));
         Self {
             display: Some(DisplayRewrite {
-                // The shell splits the typed text at any newline; each piece
-                // comes back echoed as a line terminated by `\r\n` (ICRNL +
-                // ONLCR) — optionally preceded by a continuation prompt
-                // (bash's PS2 `> `), matched as part of each line unit.
-                lines: wrapped
-                    .split(|c| c == '\n' || c == '\r')
-                    .map(|l| l.as_bytes().to_vec())
-                    .collect(),
+                expected,
                 replacement: {
                     let mut r = normalize_newlines(cmd).into_bytes();
                     r.extend_from_slice(b"\r\n");
                     r
                 },
-                line: 0,
-                unit_start: 0,
+                ei: 0,
+                cr_pending: false,
+                noise_run: 0,
+                noise_total: 0,
                 pending: Vec::new(),
+                done: 0,
+                drop_line_end: 0,
+                esc: EscSkip::default(),
                 echo_settled: false,
                 hold: None,
             }),
@@ -184,7 +188,9 @@ impl AiCapture {
             while i < self.out.len() && self.out[i].is_ascii_digit() {
                 i += 1;
             }
-            if i > digits_start && i < self.out.len() && (self.out[i] == b'\r' || self.out[i] == b'\n')
+            if i > digits_start
+                && i < self.out.len()
+                && (self.out[i] == b'\r' || self.out[i] == b'\n')
             {
                 let code: i64 = std::str::from_utf8(&self.out[digits_start..i])
                     .ok()
@@ -255,39 +261,136 @@ fn normalize_newlines(s: &str) -> String {
     out
 }
 
-/// Longest continuation prompt (bash's PS2, default `> `; zsh prints none)
-/// tolerated between two echoed lines of the wrapper. Anything longer or
-/// exotic falls back to verbatim display.
-const MAX_PROMPT_SKIP: usize = 16;
+/// Byte prefix of the wrapper's first echoed line. The echo is recognized by
+/// this anchor; a mangled `printf '` prefix is still accepted via the bare
+/// `__PORTAL_AI_` signature — ordinary output carries neither.
+const WRAPPER_ANCHOR: &[u8] = b"printf '__PORTAL_AI_";
+const WRAPPER_SIGNATURE: &[u8] = b"__PORTAL_AI_";
 
-/// Result of trying to resolve one echo line unit from the pending bytes.
-enum UnitProbe {
-    /// Unit matched; this many pending bytes belong to it (prompt + line +
-    /// terminator echo) and can be dropped.
-    Commit(usize),
-    /// Consistent so far — wait for more echo bytes before deciding.
-    Alive,
-    /// No tolerated prompt length can lead to a match — not our echo.
-    Dead,
+/// Lead budget: bytes that may pass without any wrapper signature before the
+/// rewrite decides the echo never came (echo disabled) and flows verbatim.
+const LEAD_BUDGET: usize = 512;
+/// Body: longest stretch of plain noise (no expected byte matching) before
+/// the rewrite gives up. Real prompts — bash's `> `, colored `cursh> `,
+/// multi-line PS1/PS2, highlighting redraws — are far below this; the cap
+/// exists only so a stream that is genuinely not the echo can't be held
+/// forever.
+const BODY_RUN_CAP: usize = 2048;
+/// Body: total noise budget (plain + escape bytes) across the whole echo.
+const BODY_BUDGET: usize = 64 * 1024;
+/// Bytes swallowed after an executed BEGIN marker spotted in the lead (the
+/// marker's own line terminator).
+const DROP_LINE_END_CAP: usize = 4;
+
+/// Incremental ANSI escape-sequence skipper. Feed bytes; `true` means the
+/// byte is part of an escape sequence and is transparent to the matcher.
+/// State spans chunk boundaries.
+#[derive(Default)]
+struct EscSkip {
+    state: EscState,
+}
+
+#[derive(Default)]
+enum EscState {
+    #[default]
+    None,
+    /// ESC seen, next byte decides the kind.
+    Esc,
+    /// CSI: parameters/intermediates then a final byte.
+    Csi,
+    /// OSC string, terminated by BEL or ST (ESC \).
+    Osc,
+    /// Got the ESC of an ST inside an OSC.
+    OscEsc,
+}
+
+impl EscSkip {
+    fn feed(&mut self, b: u8) -> bool {
+        match self.state {
+            EscState::None => {
+                if b == 0x1b {
+                    self.state = EscState::Esc;
+                    true
+                } else {
+                    false
+                }
+            }
+            EscState::Esc => {
+                match b {
+                    b'[' => self.state = EscState::Csi,
+                    b']' => self.state = EscState::Osc,
+                    _ => self.state = EscState::None, // two-byte sequence
+                }
+                true
+            }
+            EscState::Csi => {
+                match b {
+                    0x20..=0x3f => true, // parameter / intermediate
+                    0x40..=0x7e => {
+                        self.state = EscState::None; // final byte
+                        true
+                    }
+                    _ => {
+                        self.state = EscState::None;
+                        false // control byte inside CSI — reprocess it
+                    }
+                }
+            }
+            EscState::Osc => {
+                match b {
+                    0x07 => self.state = EscState::None, // BEL
+                    0x1b => self.state = EscState::OscEsc,
+                    _ => {}
+                }
+                true
+            }
+            EscState::OscEsc => {
+                self.state = EscState::None;
+                b == b'\\' // ST complete; anything else is reprocessed
+            }
+        }
+    }
 }
 
 /// Display-side rewrite state for an armed AI run: swallow the shell's echo
 /// of the wrapped command and show only the bare command instead, then hide
-/// the executed sentinel lines. Any divergence (echo off, shell redraw,
-/// interleaved output) falls back to showing bytes as they come.
+/// the executed sentinel lines.
+///
+/// The echo is never shown, whatever the shell does around it. Bytes before
+/// the wrapper signature are dropped outright (the shell's prompt is already
+/// on screen from before the Run). From the signature on, every byte that
+/// doesn't continue the expected sequence is prompt/highlight/redraw noise
+/// and is skipped (ANSI sequences whole; plain noise bounded by generous
+/// budgets). The rewrite ends with the bare command on screen — on a clean
+/// match, and on budget exhaustion alike. There is deliberately no "fall
+/// back to verbatim" path for the echo itself: divergence can at worst drop
+/// noise bytes, never resurrect the wrapper.
 struct DisplayRewrite {
-    /// The wrapper's lines, in order (newlines stripped — each is echoed as
-    /// a line unit: optional prompt + bytes + `\r\n`-style terminator).
-    lines: Vec<Vec<u8>>,
+    /// The exact byte sequence we expect the shell to echo back: the wrapper
+    /// with every newline expanded to `\r\n`, plus the echo of the typed
+    /// Enter. ANSI decorations and prompts are skipped as noise around it.
+    expected: Vec<u8>,
     /// What to render once the whole echo has been swallowed.
     replacement: Vec<u8>,
-    /// Index into `lines` of the unit currently being matched.
-    line: usize,
-    /// Offset within `pending` where the current unit starts.
-    unit_start: usize,
-    /// Echo bytes held back from the grid until the match resolves.
+    /// Match position within `expected`.
+    ei: usize,
+    /// `expected[ei - 1]` was the `\r` of a `\r\n` pair, awaiting its `\n`.
+    cr_pending: bool,
+    /// Contiguous plain-noise bytes in the echo body.
+    noise_run: usize,
+    /// Total noise bytes (plain + escape) in the echo body.
+    noise_total: usize,
+    /// Bytes held while deciding (pre-signature search, mid-match holds).
     pending: Vec<u8>,
-    /// The echo phase is over (matched or diverged) — raw flow from here.
+    /// How much of `pending` has been decided.
+    done: usize,
+    /// Remaining bytes to swallow right after a lead-spotted BEGIN marker
+    /// (its line terminator) before suppression takes over.
+    drop_line_end: usize,
+    /// In-flight ANSI escape sequence (transparent to matching).
+    esc: EscSkip,
+    /// The echo phase is over (matched or gave up) — raw flow, sentinel
+    /// lines suppressed.
     echo_settled: bool,
     /// Tail bytes that might be the start of an executed sentinel line.
     hold: Option<Vec<u8>>,
@@ -296,70 +399,144 @@ struct DisplayRewrite {
 impl DisplayRewrite {
     fn run(&mut self, bytes: &[u8]) -> Vec<u8> {
         let mut out = Vec::with_capacity(bytes.len());
-        if !self.echo_settled {
-            self.pending.extend_from_slice(bytes);
-            loop {
-                if self.line >= self.lines.len() {
-                    // Whole echo swallowed — render the bare command, then
-                    // anything that already followed in the same chunk.
-                    let rest = self.pending[self.unit_start..].to_vec();
-                    self.pending.clear();
-                    self.echo_settled = true;
-                    out.extend_from_slice(&self.replacement);
-                    suppress_sentinel_lines(&mut out, &mut self.hold, &rest);
-                    return out;
-                }
-                match self.resolve_unit() {
-                    UnitProbe::Commit(consumed) => {
-                        self.unit_start += consumed;
-                        self.line += 1;
-                    }
-                    UnitProbe::Alive => return out, // keep holding
-                    UnitProbe::Dead => {
-                        // Not our echo (custom PS2, readline redraw, echo
-                        // off, …) — show it all verbatim and stop rewriting.
-                        let all = std::mem::take(&mut self.pending);
-                        self.echo_settled = true;
-                        out.extend_from_slice(&all);
-                        return out;
-                    }
-                }
-            }
+        if self.echo_settled {
+            self.emit_tail(&mut out, bytes);
+            return out;
         }
-        suppress_sentinel_lines(&mut out, &mut self.hold, bytes);
+        self.pending.extend_from_slice(bytes);
+        self.progress(&mut out);
+        if self.echo_settled && self.done < self.pending.len() {
+            let tail = self.pending[self.done..].to_vec();
+            self.done = self.pending.len();
+            self.emit_tail(&mut out, &tail);
+        }
+        if self.done >= self.pending.len() {
+            self.pending.clear();
+            self.done = 0;
+        } else if self.done > 8192 {
+            self.pending.drain(..self.done);
+            self.done = 0;
+        }
         out
     }
 
-    /// Try to resolve the current echo unit from `pending[unit_start..]`: an
-    /// optional continuation prompt (≤ [`MAX_PROMPT_SKIP`] bytes), then the
-    /// line's bytes, then the terminator echo (`\r\n` or `\n`).
-    ///
-    /// The prompt length is resolved by full-line lookahead: the smallest
-    /// skip whose remainder still matches the whole unit wins (so a command
-    /// line that itself starts with `>` can't be mistaken for the prompt).
-    fn resolve_unit(&self) -> UnitProbe {
-        let tail = &self.pending[self.unit_start..];
-        let line = &self.lines[self.line];
-        let crlf = [line.as_slice(), b"\r\n".as_slice()].concat();
-        let lf = [line.as_slice(), b"\n".as_slice()].concat();
-        let mut alive = false;
-        for pat in [&crlf, &lf] {
-            for k in 0..=MAX_PROMPT_SKIP {
-                let Some(s) = tail.get(k..) else {
-                    alive = true; // prompt not fully arrived yet
-                    break;
+    /// Emit settled-phase bytes: drop a lead-spotted BEGIN marker's line end,
+    /// suppress executed sentinel lines, pass everything else through.
+    fn emit_tail(&mut self, out: &mut Vec<u8>, bytes: &[u8]) {
+        for &b in bytes {
+            if self.drop_line_end > 0 {
+                self.drop_line_end -= 1;
+                if b == b'\n' {
+                    self.drop_line_end = 0;
+                }
+                continue;
+            }
+            suppress_sentinel_lines(out, &mut self.hold, std::slice::from_ref(&b));
+        }
+    }
+
+    /// Advance the undecided prefix of `pending`.
+    fn progress(&mut self, out: &mut Vec<u8>) {
+        while self.done < self.pending.len() && !self.echo_settled {
+            if self.ei == 0 {
+                // Lead: hold bytes while scanning for our signature.
+                let stream = &self.pending[self.done..];
+                let (hit, width) = if let Some(p) = find_sub(stream, WRAPPER_ANCHOR) {
+                    (p, WRAPPER_ANCHOR.len())
+                } else if let Some(p) = find_sub(stream, BEGIN) {
+                    // Checked before the bare signature — BEGIN contains it.
+                    // The executed marker can only come from execution: the
+                    // shell has echo disabled and the run already started.
+                    // Swallow the marker line end, then flow.
+                    self.done += p + BEGIN.len();
+                    self.drop_line_end = DROP_LINE_END_CAP;
+                    self.echo_settled = true;
+                    continue;
+                } else if let Some(p) = find_sub(stream, WRAPPER_SIGNATURE) {
+                    // `printf '` mangled but the signature survived — still
+                    // our echo; resume aligned just past the signature.
+                    (p, WRAPPER_SIGNATURE.len())
+                } else if stream.len() > LEAD_BUDGET {
+                    // No echo showed up at all (echo off, input swallowed by
+                    // a program) — pass what arrived through, markers still
+                    // suppressed.
+                    out.extend_from_slice(stream);
+                    self.done = self.pending.len();
+                    self.echo_settled = true;
+                    continue;
+                } else {
+                    return; // keep holding until a decision is possible
                 };
-                let n = s.len().min(pat.len());
-                if s[..n] != pat[..n] {
-                    continue; // this skip length is dead
+                self.done += hit + width;
+                self.ei = WRAPPER_ANCHOR.len();
+                continue;
+            }
+
+            let b = self.pending[self.done];
+            if self.esc.feed(b) {
+                // ANSI sequence bytes are transparent: syntax-highlighted
+                // echoes carry SGR between the tokens of the command itself.
+                self.done += 1;
+                self.noise_total += 1;
+                continue;
+            }
+            let matched = self.match_byte(b);
+            self.done += 1;
+            if matched {
+                self.noise_run = 0;
+            } else {
+                // Prompts, redraws and stray control bytes are noise.
+                // Bounded, so a genuinely alien stream can't be held forever
+                // — and even then the rewrite ends with the bare command,
+                // never the wrapper; the unconsumed remainder is dropped.
+                self.noise_run += 1;
+                self.noise_total += 1;
+                if self.noise_run > BODY_RUN_CAP || self.noise_total > BODY_BUDGET {
+                    self.ei = self.expected.len();
                 }
-                if s.len() >= pat.len() {
-                    return UnitProbe::Commit(k + pat.len());
+            }
+            if self.ei >= self.expected.len() {
+                // Whole echo swallowed (or given up on) — the bare command
+                // takes its place; whatever followed it flows on (markers
+                // suppressed). On a budget give-up the unconsumed remainder
+                // is dropped with the wrapper.
+                if self.noise_run > 0 {
+                    self.done = self.pending.len();
                 }
-                alive = true;
+                self.echo_settled = true;
+                out.extend_from_slice(&self.replacement);
             }
         }
-        if alive { UnitProbe::Alive } else { UnitProbe::Dead }
+    }
+
+    /// Try to consume `b` at the current position; `false` = noise.
+    fn match_byte(&mut self, b: u8) -> bool {
+        if self.ei >= self.expected.len() {
+            return false;
+        }
+        if self.cr_pending {
+            self.cr_pending = false;
+            if b == b'\n' {
+                self.ei += 1;
+                return true;
+            }
+            // CR-only line end (no ONLCR): the newline half of the expected
+            // pair is skipped and this byte re-matches at the next position.
+            self.ei += 1;
+        }
+        if self.expected.get(self.ei) != Some(&b) {
+            // A lone LF standing in for an expected `\r\n` pair.
+            if b == b'\n' && self.expected[self.ei..].starts_with(b"\r\n") {
+                self.ei += 2;
+                return true;
+            }
+            return false;
+        }
+        self.ei += 1;
+        if self.expected.get(self.ei) == Some(&b'\n') && self.expected[self.ei - 1] == b'\r' {
+            self.cr_pending = true; // matched `\r` of a pair — await the `\n`
+        }
+        true
     }
 }
 
@@ -600,9 +777,7 @@ mod tests {
 
     #[test]
     fn non_digit_or_missing_code_does_not_complete() {
-        let cap = fed(&[
-            b"__PORTAL_AI_BEGIN__\nabc\n__PORTAL_AI_DONE__:xyz\n",
-        ]);
+        let cap = fed(&[b"__PORTAL_AI_BEGIN__\nabc\n__PORTAL_AI_DONE__:xyz\n"]);
         assert!(!cap.done);
         let cap = fed(&[b"__PORTAL_AI_BEGIN__\nabc\n__PORTAL_AI_DONE__:\n"]);
         assert!(!cap.done);
@@ -696,14 +871,41 @@ mod tests {
     }
 
     #[test]
-    fn display_diverged_echo_falls_back_verbatim() {
+    fn display_diverged_echo_still_shows_bare_command() {
+        // First byte mangled (echo quirk / redraw): the rewrite must never
+        // fall back to showing the wrapper — the bare command still renders.
         let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
         let mut echo = echoed_wrapper();
-        echo[0] = b'X'; // not our echo (echo off / redraw / …)
-        assert_eq!(cap.rewrite_display(&echo), echo);
+        echo[0] = b'X';
+        assert_eq!(cap.rewrite_display(&echo), b"echo hi\r\n");
         // From here on bytes flow as they come, sentinels still suppressed.
         let d = cap.rewrite_display(b"__PORTAL_AI_BEGIN__\r\nx");
         assert_eq!(d, b"x");
+    }
+
+    #[test]
+    fn display_mangled_anchor_prefix_still_shows_bare_command() {
+        // A byte inside the `printf '` prefix gets mangled (echo quirk) —
+        // the bare `__PORTAL_AI_` signature still recognizes the echo, the
+        // junk prefix is dropped, and only the bare command renders.
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let mut echo = echoed_wrapper();
+        echo[2] = b'@'; // breaks `printf '…` — signature still present
+        assert_eq!(cap.rewrite_display(&echo), b"echo hi\r\n");
+    }
+
+    #[test]
+    fn display_lookalike_output_without_signature_flows_verbatim() {
+        // Ordinary output (no wrapper signature) before the lead budget is
+        // passed through untouched once the rewrite gives up.
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let mut noise = Vec::new();
+        for i in 0..80 {
+            noise.extend_from_slice(format!("out {i}\r\n").as_bytes());
+        }
+        let d = cap.rewrite_display(&noise);
+        cap.feed(&noise);
+        assert_eq!(d, noise);
     }
 
     #[test]
@@ -741,13 +943,19 @@ mod tests {
         cap.feed(b"__PORTAL_AI_BEGIN__\nout\n__PORTAL_AI_DONE__:0\n");
         assert!(cap.done);
         // Once the run completed, even marker-shaped bytes render verbatim.
-        assert_eq!(cap.rewrite_display(b"__PORTAL_AI_BEGIN__"), b"__PORTAL_AI_BEGIN__");
+        assert_eq!(
+            cap.rewrite_display(b"__PORTAL_AI_BEGIN__"),
+            b"__PORTAL_AI_BEGIN__"
+        );
     }
 
     #[test]
     fn bare_capture_display_is_verbatim() {
         let mut cap = AiCapture::new();
-        assert_eq!(cap.rewrite_display(b"__PORTAL_AI_BEGIN__\r\n"), b"__PORTAL_AI_BEGIN__\r\n");
+        assert_eq!(
+            cap.rewrite_display(b"__PORTAL_AI_BEGIN__\r\n"),
+            b"__PORTAL_AI_BEGIN__\r\n"
+        );
     }
 
     #[test]
@@ -816,5 +1024,200 @@ mod tests {
         let d = cap.rewrite_display(&echo);
         cap.feed(&echo);
         assert_eq!(d, b"echo a\r\necho b\r\n");
+    }
+
+    /// ANSI-decorated PS2 (a colored `cursh> `): the escape sequences
+    /// inflate the prompt to 22 bytes — past the old 16-byte blind cap,
+    /// which made the rewriter bail out and show the raw wrapper echo.
+    fn echoed_wrapper_colored_ps2(cmd: &str) -> Vec<u8> {
+        let prompt = "\u{1b}[38;5;208mcursh> \u{1b}[0m"; // 11 + 7 + 4 = 22 bytes
+        let mut e = Vec::new();
+        for (i, line) in wrap_command(cmd).split('\n').enumerate() {
+            if i > 0 {
+                e.extend_from_slice(prompt.as_bytes());
+            }
+            e.extend_from_slice(line.as_bytes());
+            e.extend_from_slice(b"\r\n");
+        }
+        e
+    }
+
+    #[test]
+    fn display_ansi_colored_ps2_prompt_is_tolerated() {
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let echo = echoed_wrapper_colored_ps2("echo hi");
+        let d = cap.rewrite_display(&echo);
+        cap.feed(&echo);
+        assert_eq!(d, b"echo hi\r\n");
+    }
+
+    #[test]
+    fn display_colored_ps2_split_across_chunks_is_replaced() {
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let echo = echoed_wrapper_colored_ps2("echo hi");
+        let (a, b) = echo.split_at(echo.len() / 2);
+        assert_eq!(cap.rewrite_display(a), b""); // held mid-match
+        assert_eq!(cap.rewrite_display(b), b"echo hi\r\n");
+    }
+
+    #[test]
+    fn display_blank_line_noise_is_tolerated() {
+        // A stray blank line between two echo lines (multi-line prompt
+        // jitter) is noise — matching resumes after it; the wrapper never
+        // shows.
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let mut echo = echoed_wrapper();
+        let at = echo.iter().position(|&b| b == b'\n').unwrap() + 1;
+        echo.splice(at..at, b"\r\n".to_vec());
+        assert_eq!(cap.rewrite_display(&echo), b"echo hi\r\n");
+    }
+
+    /// A heavily decorated prompt (truecolor + bold, ~80 bytes) — the old
+    /// 48-byte cap made exactly this shape bail out and show the raw echo.
+    fn echoed_wrapper_fancy_ps2(cmd: &str) -> Vec<u8> {
+        let prompt = "\u{1b}[1m\u{1b}[38;2;255;165;0muser\u{1b}[0m@\u{1b}[38;5;39mhost\u{1b}[0m \u{1b}[38;5;208mcursh\u{1b}[0m\u{1b}[38;5;46m❯\u{1b}[0m ";
+        let mut e = Vec::new();
+        for (i, line) in wrap_command(cmd).split('\n').enumerate() {
+            if i > 0 {
+                e.extend_from_slice(prompt.as_bytes());
+            }
+            e.extend_from_slice(line.as_bytes());
+            e.extend_from_slice(b"\r\n");
+        }
+        e
+    }
+
+    #[test]
+    fn display_long_fancy_ps2_prompt_is_tolerated() {
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let echo = echoed_wrapper_fancy_ps2("echo hi");
+        assert!(echo.len() > 240);
+        let d = cap.rewrite_display(&echo);
+        cap.feed(&echo);
+        assert_eq!(d, b"echo hi\r\n");
+    }
+
+    #[test]
+    fn display_syntax_highlighted_echo_is_tolerated() {
+        // Shells that highlight the line as they echo it (zsh ZLE,
+        // prompt_toolkit) interleave SGR sequences BETWEEN the tokens of the
+        // wrapper itself — the whole way through.
+        let sgr = b"\x1b[32m";
+        let reset = b"\x1b[0m";
+        let mut echo = Vec::new();
+        for line in wrap_command("echo hi").split('\n') {
+            echo.extend_from_slice(sgr);
+            echo.extend_from_slice(line.as_bytes());
+            echo.extend_from_slice(reset);
+            echo.extend_from_slice(b"\r\n");
+        }
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let d = cap.rewrite_display(&echo);
+        cap.feed(&echo);
+        assert_eq!(d, b"echo hi\r\n");
+    }
+
+    #[test]
+    fn display_readline_redraw_noise_is_tolerated() {
+        // Horizontal-scroll redraws: `\r` + clear-to-EOL + re-rendered
+        // prompt right in the middle of the echo.
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let mut echo = echoed_wrapper();
+        let at = echo.iter().position(|&b| b == b'\n').unwrap() + 1;
+        echo.splice(at..at, b"\r\x1b[2K\x1b[1mcursh> \x1b[0m".to_vec());
+        let d = cap.rewrite_display(&echo);
+        cap.feed(&echo);
+        assert_eq!(d, b"echo hi\r\n");
+    }
+
+    #[test]
+    fn display_lf_only_line_ends_are_matched() {
+        let echo = echoed_wrapper()
+            .iter()
+            .copied()
+            .filter(|&b| b != b'\r')
+            .collect::<Vec<u8>>();
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let d = cap.rewrite_display(&echo);
+        cap.feed(&echo);
+        assert_eq!(d, b"echo hi\r\n");
+    }
+
+    #[test]
+    fn display_cr_only_line_ends_are_matched() {
+        let echo = echoed_wrapper()
+            .iter()
+            .map(|&b| if b == b'\n' { 0u8 } else { b })
+            .collect::<Vec<u8>>();
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let d = cap.rewrite_display(&echo);
+        cap.feed(&echo);
+        assert_eq!(d, b"echo hi\r\n");
+    }
+
+    #[test]
+    fn display_prompt_before_echo_is_dropped() {
+        // The shell's PS1 was still in flight when the Run was confirmed —
+        // pre-signature bytes are dropped with the wrapper; the bare
+        // command is the only thing that renders.
+        let prompt = b"\x1b[38;5;208mcursh> \x1b[0m";
+        let mut echo = prompt.to_vec();
+        echo.extend_from_slice(&echoed_wrapper());
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let d = cap.rewrite_display(&echo);
+        cap.feed(&echo);
+        assert_eq!(d, b"echo hi\r\n");
+    }
+
+    #[test]
+    fn display_echo_off_output_flows_and_markers_stay_hidden() {
+        // Echo disabled: the wrapper never comes back. Pre-signature output
+        // is dropped with it, the run's own output renders, and no wrapper
+        // text ever does.
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let mut stream = Vec::new();
+        for i in 0..40 {
+            stream.extend_from_slice(format!("line {i}\r\n").as_bytes());
+        }
+        stream.extend_from_slice(b"__PORTAL_AI_BEGIN__\r\nhi\r\n__PORTAL_AI_DONE__:0\r\n");
+        let d = cap.rewrite_display(&stream);
+        cap.feed(&stream);
+        let text = String::from_utf8_lossy(&d).into_owned();
+        assert!(!text.contains("PORTAL_AI"));
+        assert!(!text.contains("printf"));
+        assert_eq!(text, "hi\r\n");
+        // Capture side still saw everything raw.
+        assert!(cap.done);
+        assert_eq!(cap.take_output(), "hi");
+    }
+
+    #[test]
+    fn display_begin_in_lead_never_renders() {
+        // Execution output arrives with no echo at all — BEGIN in the very
+        // first bytes discards the pre-anchor buffer instead of showing it.
+        let mut cap = AiCapture::for_wrapped("true", &wrap_command("true"));
+        let raw = &b"__PORTAL_AI_BEGIN__\r\nok\r\n__PORTAL_AI_DONE__:2\r\n"[..];
+        let d = cap.rewrite_display(raw);
+        cap.feed(raw);
+        assert_eq!(d, b"ok\r\n");
+        assert!(cap.done);
+        assert_eq!(cap.exit_code, Some(2));
+    }
+
+    #[test]
+    fn display_split_mid_escape_sequence_is_replaced() {
+        // Chunk boundary lands inside a prompt's ANSI sequence.
+        let mut cap = AiCapture::for_wrapped("echo hi", &wrap_command("echo hi"));
+        let echo = echoed_wrapper_fancy_ps2("echo hi");
+        // Split right after the ESC of the second line's prompt.
+        let second_esc = echo
+            .windows(2)
+            .enumerate()
+            .find(|(i, w)| w == b"\x1b[" && *i > echo.len() / 2)
+            .map(|(i, _)| i + 1)
+            .unwrap();
+        let (a, b) = echo.split_at(second_esc);
+        assert_eq!(cap.rewrite_display(a), b""); // held (mid-escape + mid-match)
+        assert_eq!(cap.rewrite_display(b), b"echo hi\r\n");
     }
 }

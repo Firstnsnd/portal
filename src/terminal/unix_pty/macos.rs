@@ -11,7 +11,8 @@ pub fn pid_executable_name(pid: i32) -> Option<String> {
             pid,
             path.as_mut_ptr() as *mut libc::c_void,
             path.len() as u32,
-        ) > 0 {
+        ) > 0
+        {
             let null_pos = path.iter().position(|&b| b == 0).unwrap_or(path.len());
             let path_str = std::str::from_utf8(&path[..null_pos]).ok()?;
             PathBuf::from(path_str)

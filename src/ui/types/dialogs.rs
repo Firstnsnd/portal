@@ -173,11 +173,16 @@ impl AddHostDialog {
         if host.is_empty() || port == 0 {
             return None;
         }
-        let username = (!self.proxy_username.trim().is_empty())
-            .then(|| self.proxy_username.trim().to_owned());
-        let password =
-            (!self.proxy_password.is_empty()).then(|| self.proxy_password.clone());
-        Some(crate::config::ResolvedProxy { kind, host: host.to_owned(), port, username, password })
+        let username =
+            (!self.proxy_username.trim().is_empty()).then(|| self.proxy_username.trim().to_owned());
+        let password = (!self.proxy_password.is_empty()).then(|| self.proxy_password.clone());
+        Some(crate::config::ResolvedProxy {
+            kind,
+            host: host.to_owned(),
+            port,
+            username,
+            password,
+        })
     }
 
     pub fn reset(&mut self) {
@@ -269,9 +274,21 @@ impl AddHostDialog {
         // Proxy config: host/port/username live in hosts.json; the password
         // stays in the keychain and is not echoed back into the form.
         self.proxy_kind = host.proxy.as_ref().map(|p| p.kind);
-        self.proxy_host = host.proxy.as_ref().map(|p| p.host.clone()).unwrap_or_default();
-        self.proxy_port = host.proxy.as_ref().map(|p| p.port.to_string()).unwrap_or_default();
-        self.proxy_username = host.proxy.as_ref().map(|p| p.username.clone()).unwrap_or_default();
+        self.proxy_host = host
+            .proxy
+            .as_ref()
+            .map(|p| p.host.clone())
+            .unwrap_or_default();
+        self.proxy_port = host
+            .proxy
+            .as_ref()
+            .map(|p| p.port.to_string())
+            .unwrap_or_default();
+        self.proxy_username = host
+            .proxy
+            .as_ref()
+            .map(|p| p.username.clone())
+            .unwrap_or_default();
         self.proxy_password.clear();
         self.proxy_password_in_keychain = host
             .proxy
@@ -294,7 +311,12 @@ impl AddHostDialog {
                     self.auth_method = AuthMethodChoice::Password;
                     self.password = password.clone();
                 }
-                crate::config::AuthMethod::Key { key_path, key_content, passphrase, key_in_keychain } => {
+                crate::config::AuthMethod::Key {
+                    key_path,
+                    key_content,
+                    passphrase,
+                    key_in_keychain,
+                } => {
                     self.auth_method = AuthMethodChoice::Key;
                     self.key_path = key_path.clone();
                     self.key_content = key_content.clone();
@@ -396,10 +418,15 @@ impl CredentialDialog {
                 self.cred_type = CredentialTypeChoice::Password;
                 self.username = username.clone();
                 // Load password from keychain for display
-                self.password = crate::config::load_credential_secret(&cred.id, &cred.name, "password")
-                    .unwrap_or_default();
+                self.password =
+                    crate::config::load_credential_secret(&cred.id, &cred.name, "password")
+                        .unwrap_or_default();
             }
-            crate::config::CredentialType::SshKey { key_path, has_passphrase, .. } => {
+            crate::config::CredentialType::SshKey {
+                key_path,
+                has_passphrase,
+                ..
+            } => {
                 self.cred_type = CredentialTypeChoice::SshKey;
                 self.key_path = key_path.clone();
                 self.key_source = if key_path.is_empty() {
@@ -425,15 +452,15 @@ impl CredentialDialog {
 /// Snippet view state for Command Snippets feature
 #[derive(Default)]
 pub struct SnippetViewState {
-    pub group_filter: String,  // Filter by group (empty = show all)
-    pub editing: Option<String>,  // id of snippet being edited
+    pub group_filter: String,    // Filter by group (empty = show all)
+    pub editing: Option<String>, // id of snippet being edited
     // Drawer state for add/edit snippet
     pub open: bool,
     pub new_name: String,
     pub new_command: String,
     pub new_group: String,
     pub error: String,
-    pub confirm_delete: Option<String>,  // id of snippet pending delete confirmation
+    pub confirm_delete: Option<String>, // id of snippet pending delete confirmation
 }
 
 impl SnippetViewState {
@@ -456,9 +483,7 @@ impl SnippetViewState {
         self.new_group = group.to_string();
         self.error.clear();
     }
-
 }
-
 
 /// Connection-history page view state (dedicated History page): the
 /// search box filtering the day-grouped record list.
@@ -494,16 +519,14 @@ impl HostFilter {
         }
 
         // Apply tag filter
-        if !self.tag.is_empty()
-            && !host.tags.iter().any(|t| t.eq_ignore_ascii_case(&self.tag)) {
-                return false;
-            }
+        if !self.tag.is_empty() && !host.tags.iter().any(|t| t.eq_ignore_ascii_case(&self.tag)) {
+            return false;
+        }
 
         // Apply group filter
-        if !self.group.is_empty()
-            && host.group != self.group {
-                return false;
-            }
+        if !self.group.is_empty() && host.group != self.group {
+            return false;
+        }
 
         true
     }

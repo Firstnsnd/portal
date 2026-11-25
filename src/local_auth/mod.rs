@@ -4,10 +4,10 @@
 //! hosts. [`OwnerAuth`] is the contract; each OS ships its own implementation
 //! in a sibling module:
 //!
-//! - [`macos`]:   LocalAuthentication (`LAContext`, Touch ID with automatic
-//!                password fallback via the system sheet)
-//! - [`linux`]:   PAM (`pam_authenticate`, service "login")
-//! - [`windows`]: Win32 `LogonUserW` against the current user's password
+//! - `macos`:   LocalAuthentication (`LAContext`, Touch ID with automatic
+//!   password fallback via the system sheet)
+//! - `linux`:   PAM (`pam_authenticate`, service "login")
+//! - `windows`: Win32 `LogonUserW` against the current user's password
 //!
 //! Callers go through [`begin_system_prompt`]/[`verify_owner_password`] and
 //! never know which backend is live. Two collection styles exist: macOS owns
@@ -17,10 +17,10 @@
 
 use std::sync::mpsc;
 
-#[cfg(target_os = "macos")]
-pub mod macos;
 #[cfg(target_os = "linux")]
 pub mod linux;
+#[cfg(target_os = "macos")]
+pub mod macos;
 #[cfg(windows)]
 pub mod windows;
 

@@ -4,9 +4,9 @@
 
 use eframe::egui;
 
-use crate::ui::types::dialogs::AppView;
-use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
+use crate::ui::theme::ThemeColors;
+use crate::ui::types::dialogs::AppView;
 
 /// Render the left navigation panel.
 ///
@@ -42,92 +42,143 @@ pub fn show_nav_panel(
         .show(ctx, |ui| {
             ui.add_space(32.0);
 
-            if nav_button(ui, "☰", language.t("hosts"), current_view == AppView::Hosts, theme) {
+            if nav_button(
+                ui,
+                "☰",
+                language.t("hosts"),
+                current_view == AppView::Hosts,
+                theme,
+            ) {
                 clicked_view = Some(AppView::Hosts);
             }
-            if nav_button(ui, ">_", language.t("terminal"), current_view == AppView::Terminal, theme) {
+            if nav_button(
+                ui,
+                ">_",
+                language.t("terminal"),
+                current_view == AppView::Terminal,
+                theme,
+            ) {
                 clicked_view = Some(AppView::Terminal);
             }
-            if nav_button(ui, "\u{2195}", language.t("sftp"), current_view == AppView::Sftp, theme) {
+            if nav_button(
+                ui,
+                "\u{2195}",
+                language.t("sftp"),
+                current_view == AppView::Sftp,
+                theme,
+            ) {
                 clicked_view = Some(AppView::Sftp);
             }
-            if nav_button(ui, "\u{1f511}", language.t("keychain"), current_view == AppView::Keychain, theme) {
+            if nav_button(
+                ui,
+                "\u{1f511}",
+                language.t("keychain"),
+                current_view == AppView::Keychain,
+                theme,
+            ) {
                 clicked_view = Some(AppView::Keychain);
             }
-            if nav_button(ui, "\u{1f559}", language.t("connection_history"), current_view == AppView::History, theme) {
+            if nav_button(
+                ui,
+                "\u{1f559}",
+                language.t("connection_history"),
+                current_view == AppView::History,
+                theme,
+            ) {
                 clicked_view = Some(AppView::History);
             }
-            if nav_button(ui, "\u{2318}", language.t("snippets"), current_view == AppView::Snippets, theme) {
+            if nav_button(
+                ui,
+                "\u{2318}",
+                language.t("snippets"),
+                current_view == AppView::Snippets,
+                theme,
+            ) {
                 clicked_view = Some(AppView::Snippets);
             }
-            if nav_button(ui, "\u{25b6}", language.t("replay"), current_view == AppView::Replay, theme) {
+            if nav_button(
+                ui,
+                "\u{25b6}",
+                language.t("replay"),
+                current_view == AppView::Replay,
+                theme,
+            ) {
                 clicked_view = Some(AppView::Replay);
             }
 
             // Settings button at bottom - fill remaining space to reach window bottom
             let available_size = ui.available_size();
-            egui::Frame::none()
-                .fill(theme.bg_secondary)
-                .show(ui, |ui| {
-                    ui.allocate_ui_with_layout(
-                        available_size,
-                        egui::Layout::bottom_up(egui::Align::LEFT),
-                        |ui| {
-                            // Settings row: icon+label on left, version on right
-                            let (rect, response) = ui.allocate_exact_size(
-                                egui::vec2(ui.available_width(), 36.0),
-                                egui::Sense::click(),
+            egui::Frame::none().fill(theme.bg_secondary).show(ui, |ui| {
+                ui.allocate_ui_with_layout(
+                    available_size,
+                    egui::Layout::bottom_up(egui::Align::LEFT),
+                    |ui| {
+                        // Settings row: icon+label on left, version on right
+                        let (rect, response) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), 36.0),
+                            egui::Sense::click(),
+                        );
+                        let is_active = current_view == AppView::Settings;
+
+                        if is_active {
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(rect.min, egui::vec2(4.0, 36.0)),
+                                0.0,
+                                theme.accent,
                             );
-                            let is_active = current_view == AppView::Settings;
-
-                            if is_active {
-                                ui.painter().rect_filled(
-                                    egui::Rect::from_min_size(rect.min, egui::vec2(4.0, 36.0)),
-                                    0.0,
-                                    theme.accent,
-                                );
-                            }
-                            if response.hovered() {
-                                ui.painter().rect_filled(
-                                    egui::Rect::from_min_size(rect.min, egui::vec2(ui.available_width(), 36.0)),
-                                    0.0,
-                                    theme.hover_bg,
-                                );
-                            }
-
-                            let icon_color = if is_active { theme.accent } else { theme.fg_dim };
-                            let label_color = if is_active { theme.fg_primary } else { theme.fg_dim };
-
-                            ui.painter().text(
-                                egui::pos2(rect.min.x + 16.0, rect.center().y),
-                                egui::Align2::LEFT_CENTER,
-                                "⚙",
-                                egui::FontId::proportional(14.0),
-                                icon_color,
+                        }
+                        if response.hovered() {
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    rect.min,
+                                    egui::vec2(ui.available_width(), 36.0),
+                                ),
+                                0.0,
+                                theme.hover_bg,
                             );
-                            ui.painter().text(
-                                egui::pos2(rect.min.x + 40.0, rect.center().y),
-                                egui::Align2::LEFT_CENTER,
-                                language.t("settings"),
-                                egui::FontId::proportional(12.0),
-                                label_color,
-                            );
+                        }
 
-                            // Version on the right
-                            ui.painter().text(
-                                egui::pos2(rect.max.x - 10.0, rect.center().y),
-                                egui::Align2::RIGHT_CENTER,
-                                format!("v{}", env!("CARGO_PKG_VERSION")),
-                                egui::FontId::proportional(10.0),
-                                theme.fg_dim,
-                            );
+                        let icon_color = if is_active {
+                            theme.accent
+                        } else {
+                            theme.fg_dim
+                        };
+                        let label_color = if is_active {
+                            theme.fg_primary
+                        } else {
+                            theme.fg_dim
+                        };
 
-                            if response.clicked() {
-                                clicked_view = Some(AppView::Settings);
-                            }
-                        },
-                    );
-                });
+                        ui.painter().text(
+                            egui::pos2(rect.min.x + 16.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            "⚙",
+                            egui::FontId::proportional(14.0),
+                            icon_color,
+                        );
+                        ui.painter().text(
+                            egui::pos2(rect.min.x + 40.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            language.t("settings"),
+                            egui::FontId::proportional(12.0),
+                            label_color,
+                        );
+
+                        // Version on the right
+                        ui.painter().text(
+                            egui::pos2(rect.max.x - 10.0, rect.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            format!("v{}", env!("CARGO_PKG_VERSION")),
+                            egui::FontId::proportional(10.0),
+                            theme.fg_dim,
+                        );
+
+                        if response.clicked() {
+                            clicked_view = Some(AppView::Settings);
+                        }
+                    },
+                );
+            });
         });
 
     clicked_view
@@ -141,10 +192,8 @@ fn nav_button(
     is_active: bool,
     theme: &ThemeColors,
 ) -> bool {
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 36.0),
-        egui::Sense::click(),
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 36.0), egui::Sense::click());
 
     // Background for active state
     if is_active {
@@ -165,8 +214,16 @@ fn nav_button(
     }
 
     // Icon and label
-    let icon_color = if is_active { theme.accent } else { theme.fg_dim };
-    let label_color = if is_active { theme.fg_primary } else { theme.fg_dim };
+    let icon_color = if is_active {
+        theme.accent
+    } else {
+        theme.fg_dim
+    };
+    let label_color = if is_active {
+        theme.fg_primary
+    } else {
+        theme.fg_dim
+    };
 
     ui.painter().text(
         egui::pos2(rect.min.x + 16.0, rect.center().y),

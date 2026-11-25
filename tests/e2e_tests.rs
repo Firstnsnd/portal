@@ -5,8 +5,8 @@
 use std::time::Duration;
 use tokio::time::timeout;
 
-mod mock_ssh_server;
 mod common;
+mod mock_ssh_server;
 
 pub use mock_ssh_server::*;
 
@@ -31,7 +31,8 @@ mod e2e_tests {
 
         // Create components that would normally be in the app
         let hosts = portal::config::load_hosts(&portal::config::hosts_file_path());
-        let _credentials = portal::config::load_credentials(&portal::config::credentials_file_path());
+        let _credentials =
+            portal::config::load_credentials(&portal::config::credentials_file_path());
 
         assert!(!hosts.is_empty());
     }
@@ -41,12 +42,8 @@ mod e2e_tests {
     async fn test_terminal_session_lifecycle() {
         // Use an interactive shell so the child STAYS ALIVE (a one-shot command
         // like /bin/echo exits immediately and is_alive() is correctly false).
-        let session = portal::terminal::RealPtySession::new(
-            1,
-            80,
-            24,
-            "/bin/zsh"
-        ).expect("Failed to create PTY session");
+        let session = portal::terminal::RealPtySession::new(1, 80, 24, "/bin/zsh")
+            .expect("Failed to create PTY session");
 
         // Check session is alive
         assert!(session.is_alive(), "interactive shell must stay alive");
@@ -59,18 +56,22 @@ mod e2e_tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // Check session is still alive
-        assert!(session.is_alive(), "interactive shell still alive after write");
+        assert!(
+            session.is_alive(),
+            "interactive shell still alive after write"
+        );
     }
 
     /// Test: One-shot command exits after completion
     #[tokio::test]
     async fn test_one_shot_command_exits() {
-        let session = portal::terminal::RealPtySession::new(
-            2, 80, 24, "/bin/echo"
-        ).expect("Failed to create PTY session");
+        let session = portal::terminal::RealPtySession::new(2, 80, 24, "/bin/echo")
+            .expect("Failed to create PTY session");
         tokio::time::sleep(Duration::from_millis(200)).await;
-        assert!(!session.is_alive(),
-            "a one-shot command must exit so is_alive() returns false");
+        assert!(
+            !session.is_alive(),
+            "a one-shot command must exit so is_alive() returns false"
+        );
     }
 
     /// Regression: a long-lived interactive shell must NEVER report
@@ -83,20 +84,23 @@ mod e2e_tests {
     /// thread confirms a real child exit.
     #[tokio::test]
     async fn test_local_shell_never_reports_false_disconnect() {
-        let session = portal::terminal::RealPtySession::new(
-            42, 80, 24, "/bin/zsh"
-        ).expect("Failed to create PTY session");
+        let session = portal::terminal::RealPtySession::new(42, 80, 24, "/bin/zsh")
+            .expect("Failed to create PTY session");
 
         // Immediately after spawn, before any output: must be connected.
-        assert!(session.is_connected(),
-            "freshly spawned interactive shell must report connected");
+        assert!(
+            session.is_connected(),
+            "freshly spawned interactive shell must report connected"
+        );
 
         // Poll repeatedly — simulating render frames over ~1s. None may report
         // disconnected, since the shell has not exited.
         for _ in 0..20 {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            assert!(session.is_connected(),
-                "interactive shell falsely reported disconnected while running");
+            assert!(
+                session.is_connected(),
+                "interactive shell falsely reported disconnected while running"
+            );
         }
 
         // Sanity: the shell really is alive (so a true result is meaningful).
@@ -109,19 +113,22 @@ mod e2e_tests {
     #[tokio::test]
     async fn test_local_session_disconnects_only_after_real_exit() {
         // /bin/true exits immediately with status 0.
-        let session = portal::terminal::RealPtySession::new(
-            43, 80, 24, "/bin/true"
-        ).expect("Failed to create PTY session");
+        let session = portal::terminal::RealPtySession::new(43, 80, 24, "/bin/true")
+            .expect("Failed to create PTY session");
 
         // Wait long enough for the reader thread to observe EOF + reap the child.
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        assert!(!session.is_connected(),
-            "after /bin/true exits, is_connected() must report false (once, permanently)");
+        assert!(
+            !session.is_connected(),
+            "after /bin/true exits, is_connected() must report false (once, permanently)"
+        );
         // Poll again: must not flap back to true.
         tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(!session.is_connected(),
-            "is_connected() must not flap back to true after a confirmed exit");
+        assert!(
+            !session.is_connected(),
+            "is_connected() must not flap back to true after a confirmed exit"
+        );
     }
 
     /// Regression: keystrokes must survive a full PTY input queue. The master
@@ -133,9 +140,8 @@ mod e2e_tests {
     /// path now polls POLLOUT and retries, so every write lands.
     #[tokio::test]
     async fn test_write_survives_full_pty_input_queue() {
-        let session = portal::terminal::RealPtySession::new(
-            44, 80, 24, "/bin/zsh"
-        ).expect("Failed to create PTY session");
+        let session = portal::terminal::RealPtySession::new(44, 80, 24, "/bin/zsh")
+            .expect("Failed to create PTY session");
 
         // A foreground `sleep` does not read stdin, so the tty input queue
         // stops draining. Flood it several times over (a typical queue is
@@ -147,18 +153,26 @@ mod e2e_tests {
         let chunk = vec![b'#'; 8192];
         let start = std::time::Instant::now();
         for _ in 0..8 {
-            session.write(&chunk)
+            session
+                .write(&chunk)
                 .expect("write into a full PTY queue must not drop data");
         }
         // The queue drains again once `sleep` exits and zsh resumes reading;
         // total time must be on the order of the sleep, never an error.
-        assert!(start.elapsed() < Duration::from_secs(15),
-            "PTY writes should complete shortly after the foreground command exits");
+        assert!(
+            start.elapsed() < Duration::from_secs(15),
+            "PTY writes should complete shortly after the foreground command exits"
+        );
 
         // Sanity: the shell still accepts input after the flood.
         tokio::time::sleep(Duration::from_millis(300)).await;
-        session.write(b"true\n").expect("shell accepts input after the flood");
-        assert!(session.is_alive(), "shell must stay alive after queue flood");
+        session
+            .write(b"true\n")
+            .expect("shell accepts input after the flood");
+        assert!(
+            session.is_alive(),
+            "shell must stay alive after queue flood"
+        );
     }
 
     /// Regression: `curl -s https://vaniot.net` produces ~5K of single-line
@@ -184,9 +198,8 @@ mod e2e_tests {
         html.push_str("</body></html>");
         std::fs::write(&fixture, html.as_bytes()).expect("write fixture");
 
-        let session = portal::terminal::RealPtySession::new(
-            100, 80, 24, "/bin/zsh"
-        ).expect("Failed to create PTY session");
+        let session = portal::terminal::RealPtySession::new(100, 80, 24, "/bin/zsh")
+            .expect("Failed to create PTY session");
         tokio::time::sleep(Duration::from_millis(2500)).await;
 
         let cmd = format!("cat '{}' 2>&1\n", fixture.display());
@@ -198,14 +211,21 @@ mod e2e_tests {
         let sb = g.scrollback_len();
 
         let has_html_in_visible = (0..g.rows).any(|r| {
-            let t: String = g.cells[r].iter()
-                .filter(|c| !c.wide_continuation).map(|c| c.c).collect();
+            let t: String = g.cells[r]
+                .iter()
+                .filter(|c| !c.wide_continuation)
+                .map(|c| c.c)
+                .collect();
             t.contains('<') || t.contains('>') || t.contains("DOCTYPE") || t.contains("script")
         });
 
-        assert!(has_html_in_visible,
+        assert!(
+            has_html_in_visible,
             "HTML content must be visible after cat+prompt cycle. content_rows={} sb={sb}",
-            (0..g.rows).filter(|&r| g.cells[r].iter().any(|c| c.c != ' ' && c.c != '\0')).count());
+            (0..g.rows)
+                .filter(|&r| g.cells[r].iter().any(|c| c.c != ' ' && c.c != '\0'))
+                .count()
+        );
         assert!(sb > 0, "scrollback must contain wrapped HTML rows");
     }
 
@@ -234,38 +254,32 @@ mod e2e_tests {
     /// Test: Config serialization round-trip
     #[test]
     fn test_config_roundtrip() {
-        
-
         let (_temp_file, path) = create_test_temp_file();
 
-        let original_hosts = vec![
-            portal::config::HostEntry {
-                name: "Test Host".to_string(),
-                host: "example.com".to_string(),
-                port: 2222,
-                username: "user".to_string(),
-                group: "Test Group".to_string(),
-                tags: vec!["test".to_string()],
-                is_local: false,
-                credential_id: None,
-                auth: portal::config::AuthMethod::None,
-                startup_commands: vec![],
-                agent_forwarding: false,
-                auto_record: false,
-                jump_host: None,
-                port_forwards: vec![
-                    portal::config::PortForwardConfig {
-                        kind: portal::config::ForwardKind::Local,
-                        local_host: "127.0.0.1".to_string(),
-                        local_port: 8080,
-                        remote_host: "localhost".to_string(),
-                        remote_port: 3000,
-                    }
-                ],
-                proxy: None,
-                protected: false,
-            },
-        ];
+        let original_hosts = vec![portal::config::HostEntry {
+            name: "Test Host".to_string(),
+            host: "example.com".to_string(),
+            port: 2222,
+            username: "user".to_string(),
+            group: "Test Group".to_string(),
+            tags: vec!["test".to_string()],
+            is_local: false,
+            credential_id: None,
+            auth: portal::config::AuthMethod::None,
+            startup_commands: vec![],
+            agent_forwarding: false,
+            auto_record: false,
+            jump_host: None,
+            port_forwards: vec![portal::config::PortForwardConfig {
+                kind: portal::config::ForwardKind::Local,
+                local_host: "127.0.0.1".to_string(),
+                local_port: 8080,
+                remote_host: "localhost".to_string(),
+                remote_port: 3000,
+            }],
+            proxy: None,
+            protected: false,
+        }];
 
         // Save hosts
         portal::config::save_hosts(&path, &original_hosts);
@@ -296,14 +310,12 @@ mod e2e_tests {
         let (_temp_file, path) = create_test_temp_file();
 
         // Save some snippets
-        let snippets = vec![
-            portal::config::Snippet {
-                id: uuid::Uuid::new_v4().to_string(),
-                name: "Test Snippet".to_string(),
-                command: "echo 'Hello, World!'".to_string(),
-                group: "Test".to_string(),
-            },
-        ];
+        let snippets = vec![portal::config::Snippet {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Test Snippet".to_string(),
+            command: "echo 'Hello, World!'".to_string(),
+            group: "Test".to_string(),
+        }];
 
         portal::config::save_snippets(&path, &snippets);
         let loaded = portal::config::load_snippets(&path);
@@ -322,7 +334,10 @@ mod ssh_integration_tests {
     /// Test: Mock SSH server can be created and bound to a port
     #[tokio::test]
     async fn test_mock_ssh_server_creation() {
-        let server = with_timeout(Duration::from_secs(5), MockSshServer::new()).await.unwrap().unwrap();
+        let server = with_timeout(Duration::from_secs(5), MockSshServer::new())
+            .await
+            .unwrap()
+            .unwrap();
 
         assert_eq!(server.host(), "127.0.0.1");
         assert!(server.port() > 0);
@@ -333,7 +348,10 @@ mod ssh_integration_tests {
     /// Test: Mock SSH server shutdown
     #[tokio::test]
     async fn test_mock_ssh_server_shutdown() {
-        let server = with_timeout(Duration::from_secs(5), MockSshServer::new()).await.unwrap().unwrap();
+        let server = with_timeout(Duration::from_secs(5), MockSshServer::new())
+            .await
+            .unwrap()
+            .unwrap();
 
         // Should not panic
         server.shutdown().await;
@@ -343,7 +361,13 @@ mod ssh_integration_tests {
     /// Test: Password mock server creation
     #[tokio::test]
     async fn test_password_server_creation() {
-        let server = with_timeout(Duration::from_secs(5), MockPasswordAuthServer::new("testpass")).await.unwrap().unwrap();
+        let server = with_timeout(
+            Duration::from_secs(5),
+            MockPasswordAuthServer::new("testpass"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
 
         assert_eq!(server.expected_password(), "testpass");
         assert_eq!(server.host(), "127.0.0.1");
@@ -355,9 +379,18 @@ mod ssh_integration_tests {
     /// Test: Failing server creation
     #[tokio::test]
     async fn test_failing_server_creation() {
-        let server = with_timeout(Duration::from_secs(5), FailingSshServer::new(FailureMode::RejectAllAuth)).await.unwrap().unwrap();
+        let server = with_timeout(
+            Duration::from_secs(5),
+            FailingSshServer::new(FailureMode::RejectAllAuth),
+        )
+        .await
+        .unwrap()
+        .unwrap();
 
-        assert_eq!(server.connection_string(), format!("127.0.0.1:{}", server.port()));
+        assert_eq!(
+            server.connection_string(),
+            format!("127.0.0.1:{}", server.port())
+        );
         assert!(matches!(server.failure_mode, FailureMode::RejectAllAuth));
 
         server.server.shutdown().await;
@@ -366,7 +399,9 @@ mod ssh_integration_tests {
     /// Test: Port forward creation and lifecycle
     #[test]
     fn test_port_forward_lifecycle() {
-        use portal::ssh::port_forward::{PortForward, ForwardState, PortForwardConfig, ForwardKind};
+        use portal::ssh::port_forward::{
+            ForwardKind, ForwardState, PortForward, PortForwardConfig,
+        };
 
         let config = PortForwardConfig {
             kind: ForwardKind::Local,
@@ -395,7 +430,7 @@ mod ssh_integration_tests {
     /// leaving the fixture record behind (reported 2026-11-24).
     #[test]
     fn test_connection_history() {
-        use portal::config::{ConnectionRecord, append_history, load_history, history_file_path};
+        use portal::config::{append_history, history_file_path, load_history, ConnectionRecord};
 
         struct RestoreHistory(Vec<u8>);
         impl Drop for RestoreHistory {

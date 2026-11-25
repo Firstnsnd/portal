@@ -7,9 +7,9 @@ use std::sync::{
 
 use tokio::sync::mpsc;
 
-use crate::terminal::{CellAttrs, TerminalGrid, VteHandler};
 use crate::config::{ResolvedAuth, ResolvedProxy};
 use crate::terminal::metrics::MetricsSnapshot;
+use crate::terminal::{CellAttrs, TerminalGrid, VteHandler};
 
 #[derive(Clone)]
 pub struct JumpHostInfo {
@@ -21,11 +21,11 @@ pub struct JumpHostInfo {
     /// jump's direct-tcpip tunnel, so it needs no proxy of its own).
     pub proxy: Option<ResolvedProxy>,
 }
-use super::port_forward::{
-    PortForwardConfig, PortForward, ForwardKind, ForwardState,
-    start_local_forward, start_dynamic_forward, AppNotification,
-};
 use super::auth::connect_and_authenticate;
+use super::port_forward::{
+    start_dynamic_forward, start_local_forward, AppNotification, ForwardKind, ForwardState,
+    PortForward, PortForwardConfig,
+};
 
 /// Commands sent from the synchronous GUI thread to the async SSH task
 enum SshCommand {
@@ -106,13 +106,16 @@ impl russh::client::Handler for SshClient {
                             existing.len(),
                             existing[0].0
                         );
-                        Err(russh::Error::Keys(russh::keys::Error::KeyChanged { line: existing[0].0 }))
+                        Err(russh::Error::Keys(russh::keys::Error::KeyChanged {
+                            line: existing[0].0,
+                        }))
                     }
                     Ok(_) => {
                         // Host not in known_hosts — auto-learn the key
                         log::info!(
                             "New host key for {}:{}, adding to known_hosts",
-                            self.host, self.port
+                            self.host,
+                            self.port
                         );
                         if let Err(e) = russh::keys::known_hosts::learn_known_hosts(
                             &self.host,
@@ -127,7 +130,9 @@ impl russh::client::Handler for SshClient {
                         // Cannot enumerate recorded keys → cannot verify → refuse.
                         log::error!(
                             "Refusing {}:{} — known_hosts could not be read: {}",
-                            self.host, self.port, e
+                            self.host,
+                            self.port,
+                            e
                         );
                         Err(russh::Error::Keys(e))
                     }
@@ -141,12 +146,16 @@ impl russh::client::Handler for SshClient {
                 if let russh::keys::Error::KeyChanged { line } = &e {
                     log::error!(
                         "HOST KEY CHANGED for {}:{} at known_hosts line {}!",
-                        self.host, self.port, line
+                        self.host,
+                        self.port,
+                        line
                     );
                 } else {
                     log::error!(
                         "Refusing {}:{} — known_hosts verification failed: {}",
-                        self.host, self.port, e
+                        self.host,
+                        self.port,
+                        e
                     );
                 }
                 Err(russh::Error::Keys(e))
@@ -166,26 +175,32 @@ impl russh::client::Handler for SshClient {
     ) -> Result<(), Self::Error> {
         // Look up the remote forward config to find the local target
         let local_target = self.remote_forwards.lock().ok().and_then(|fwds| {
-            fwds.iter().find(|c| {
-                c.kind == ForwardKind::Remote
-                    && c.remote_port == connected_port as u16
-            }).map(|c| (c.local_host.clone(), c.local_port))
+            fwds.iter()
+                .find(|c| c.kind == ForwardKind::Remote && c.remote_port == connected_port as u16)
+                .map(|c| (c.local_host.clone(), c.local_port))
         });
 
         if let Some((local_host, local_port)) = local_target {
             log::info!(
                 "Remote forward connection: {}:{} -> {}:{}",
-                connected_address, connected_port, local_host, local_port
+                connected_address,
+                connected_port,
+                local_host,
+                local_port
             );
             tokio::spawn(async move {
                 super::port_forward::handle_remote_forward_connection(
-                    channel, &local_host, local_port,
-                ).await;
+                    channel,
+                    &local_host,
+                    local_port,
+                )
+                .await;
             });
         } else {
             log::warn!(
                 "Received forwarded-tcpip for {}:{} but no matching remote forward config",
-                connected_address, connected_port
+                connected_address,
+                connected_port
             );
         }
         Ok(())
@@ -244,11 +259,12 @@ pub async fn connect_via_jump(
     let config = Arc::new(config);
 
     let mut handle = russh::client::connect_stream(
-        config, stream, SshClient::with_policy(
-            target_host, target_port, host_key_policy,
-            remote_forwards,
-        ),
-    ).await.map_err(|e| format!("SSH handshake through jump host failed: {}", e))?;
+        config,
+        stream,
+        SshClient::with_policy(target_host, target_port, host_key_policy, remote_forwards),
+    )
+    .await
+    .map_err(|e| format!("SSH handshake through jump host failed: {}", e))?;
 
     super::auth::authenticate(&mut handle, target_username, target_auth, bridge)
         .await
@@ -274,9 +290,7 @@ async fn exec_command(
     loop {
         match channel.wait().await {
             Some(russh::ChannelMsg::Data { data }) => output.extend_from_slice(&data),
-            Some(russh::ChannelMsg::Eof)
-            | Some(russh::ChannelMsg::Close)
-            | None => break,
+            Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => break,
             _ => {}
         }
     }
@@ -415,32 +429,33 @@ impl SshSession {
         let metrics_enabled_clone = Arc::clone(&metrics_enabled);
         let auth_prompt = Arc::new(super::auth_prompt::AuthPromptBridge::new());
         let auth_prompt_clone = Arc::clone(&auth_prompt);
-        let recorder = Arc::new(Mutex::new(
-            if record {
-                // Zero-loss auto-record: create the recorder BEFORE ssh_task
-                // spawns so capture starts at the very first byte of output.
-                let title = format!("{username}@{host}");
-                let portal_host = if username.is_empty() {
-                    format!("{host}:{port}")
-                } else {
-                    format!("{username}@{host}:{port}")
-                };
-                match crate::terminal::cast::new_recording_path(&host)
-                    .and_then(|path| {
-                        crate::terminal::cast::CastRecorder::create(
-                            &path, cols, rows, Some(title), Some(portal_host),
-                        )
-                    }) {
-                    Ok(rec) => Some(rec),
-                    Err(e) => {
-                        log::warn!("auto-record: failed to open recording file: {e}");
-                        None
-                    }
-                }
+        let recorder = Arc::new(Mutex::new(if record {
+            // Zero-loss auto-record: create the recorder BEFORE ssh_task
+            // spawns so capture starts at the very first byte of output.
+            let title = format!("{username}@{host}");
+            let portal_host = if username.is_empty() {
+                format!("{host}:{port}")
             } else {
-                None
-            },
-        ));
+                format!("{username}@{host}:{port}")
+            };
+            match crate::terminal::cast::new_recording_path(&host).and_then(|path| {
+                crate::terminal::cast::CastRecorder::create(
+                    &path,
+                    cols,
+                    rows,
+                    Some(title),
+                    Some(portal_host),
+                )
+            }) {
+                Ok(rec) => Some(rec),
+                Err(e) => {
+                    log::warn!("auto-record: failed to open recording file: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        }));
         let recorder_clone = Arc::clone(&recorder);
         let ai_capture = Arc::new(Mutex::new(None));
         let ai_capture_task = Arc::clone(&ai_capture);
@@ -456,15 +471,35 @@ impl SshSession {
 
         runtime.spawn(async move {
             Self::ssh_task(
-                host, port, username, auth, cols, rows, grid_clone, cmd_rx,
-                state_clone, alive_clone, shell_hint_clone, os_hint_clone,
-                arch_hint_clone, startup_commands,
-                keepalive_interval, agent_forwarding, port_forward_configs,
-                port_forwards_clone, notifications_clone, metrics_clone,
-                metrics_enabled_clone, auth_prompt_clone, recorder_clone,
+                host,
+                port,
+                username,
+                auth,
+                cols,
+                rows,
+                grid_clone,
+                cmd_rx,
+                state_clone,
+                alive_clone,
+                shell_hint_clone,
+                os_hint_clone,
+                arch_hint_clone,
+                startup_commands,
+                keepalive_interval,
+                agent_forwarding,
+                port_forward_configs,
+                port_forwards_clone,
+                notifications_clone,
+                metrics_clone,
+                metrics_enabled_clone,
+                auth_prompt_clone,
+                recorder_clone,
                 ai_capture_task,
-                zmodem_tap_task, zmodem_bridge_task, zmodem_support_probe,
-                sftp_support_probe, jump_host,
+                zmodem_tap_task,
+                zmodem_bridge_task,
+                zmodem_support_probe,
+                sftp_support_probe,
+                jump_host,
                 proxy,
             )
             .await;
@@ -538,7 +573,8 @@ impl SshSession {
         set_state(SshConnectionState::Authenticating);
 
         // Pre-populate remote forward configs so the Handler callback can route connections
-        let remote_fwd_configs: Vec<PortForwardConfig> = port_forward_configs.iter()
+        let remote_fwd_configs: Vec<PortForwardConfig> = port_forward_configs
+            .iter()
             .filter(|c| c.kind == ForwardKind::Remote)
             .cloned()
             .collect();
@@ -546,11 +582,19 @@ impl SshSession {
 
         let mut handle = if let Some(ref jump) = jump_host {
             match connect_via_jump(
-                jump, &host, port, &username, &auth,
-                keepalive_interval, agent_forwarding, &auth_bridge,
+                jump,
+                &host,
+                port,
+                &username,
+                &auth,
+                keepalive_interval,
+                agent_forwarding,
+                &auth_bridge,
                 super::auth::HostKeyPolicy::Learn,
                 Arc::clone(&remote_fwd_arc),
-            ).await {
+            )
+            .await
+            {
                 Ok(h) => h,
                 Err(e) => {
                     set_state(SshConnectionState::Error(e));
@@ -563,9 +607,18 @@ impl SshSession {
             // directly; with one, the target rides the jump's tunnel and
             // only the jump's own proxy (jump.proxy) matters.
             match connect_and_authenticate(
-                &host, port, &username, &auth, keepalive_interval, agent_forwarding,
-                &auth_bridge, Arc::clone(&remote_fwd_arc), proxy.as_ref(),
-            ).await {
+                &host,
+                port,
+                &username,
+                &auth,
+                keepalive_interval,
+                agent_forwarding,
+                &auth_bridge,
+                Arc::clone(&remote_fwd_arc),
+                proxy.as_ref(),
+            )
+            .await
+            {
                 Ok(h) => h,
                 Err(e) => {
                     set_state(SshConnectionState::Error(e));
@@ -582,9 +635,9 @@ impl SshSession {
                 loop {
                     match exec_ch.wait().await {
                         Some(russh::ChannelMsg::Data { data }) => output.extend_from_slice(&data),
-                        Some(russh::ChannelMsg::Eof)
-                        | Some(russh::ChannelMsg::Close)
-                        | None => break,
+                        Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => {
+                            break
+                        }
                         _ => {}
                     }
                 }
@@ -652,16 +705,29 @@ impl SshSession {
         // forwarded-tcpip channels are routed via SshClient's remote_forwards
         // table (shared above). Local (-L) and dynamic (-D) forwards are
         // started on demand from the Tunnels tab.
-        for cfg in port_forward_configs.iter().filter(|c| c.kind == ForwardKind::Remote) {
-            match handle.tcpip_forward(&cfg.remote_host, cfg.remote_port as u32).await {
+        for cfg in port_forward_configs
+            .iter()
+            .filter(|c| c.kind == ForwardKind::Remote)
+        {
+            match handle
+                .tcpip_forward(&cfg.remote_host, cfg.remote_port as u32)
+                .await
+            {
                 Ok(allocated) => {
                     // RFC 4254: a reply to a specific-port request carries no
                     // port — russh surfaces that as 0, meaning "the port you
                     // asked for". A port-0 request gets the assigned port back.
-                    let bound_port = if allocated == 0 { cfg.remote_port as u32 } else { allocated };
+                    let bound_port = if allocated == 0 {
+                        cfg.remote_port as u32
+                    } else {
+                        allocated
+                    };
                     log::info!(
                         "Remote forward active: {} (port {}) -> {}:{}",
-                        cfg.remote_host, bound_port, cfg.local_host, cfg.local_port
+                        cfg.remote_host,
+                        bound_port,
+                        cfg.local_host,
+                        cfg.local_port
                     );
                     let (pf, _cancel_rx) = PortForward::new(cfg.clone());
                     if let Ok(mut ap) = pf.allocated_port.lock() {
@@ -677,7 +743,9 @@ impl SshSession {
                 Err(e) => {
                     log::warn!(
                         "Remote forward request for {}:{} failed: {}",
-                        cfg.remote_host, cfg.remote_port, e
+                        cfg.remote_host,
+                        cfg.remote_port,
+                        e
                     );
                     let (pf, _cancel_rx) = PortForward::new(cfg.clone());
                     if let Ok(mut s) = pf.state.lock() {
@@ -698,13 +766,17 @@ impl SshSession {
         if let Ok(os) = exec_command(&handle, "uname -s").await {
             let os = os.trim().to_string();
             if !os.is_empty() {
-                if let Ok(mut h) = os_hint.lock() { *h = Some(os); }
+                if let Ok(mut h) = os_hint.lock() {
+                    *h = Some(os);
+                }
             }
         }
         if let Ok(arch) = exec_command(&handle, "uname -m").await {
             let arch = arch.trim().to_string();
             if !arch.is_empty() {
-                if let Ok(mut h) = arch_hint.lock() { *h = Some(arch); }
+                if let Ok(mut h) = arch_hint.lock() {
+                    *h = Some(arch);
+                }
             }
         }
 
@@ -748,11 +820,7 @@ impl SshSession {
             let verdict = if channel.request_subsystem(true, "sftp").await.is_err() {
                 Some(false)
             } else {
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
-                    channel.wait(),
-                )
-                .await
+                match tokio::time::timeout(std::time::Duration::from_secs(10), channel.wait()).await
                 {
                     Ok(Some(russh::ChannelMsg::Success)) => Some(true),
                     Ok(Some(russh::ChannelMsg::Failure)) => Some(false),
@@ -1083,8 +1151,7 @@ impl SshSession {
     /// SFTP subsystem support on the remote host (Unknown until probed).
     pub fn sftp_support(&self) -> crate::ssh::capability::HostCapability {
         crate::ssh::capability::HostCapability::from_u8(
-            self.sftp_support
-                .load(std::sync::atomic::Ordering::Relaxed),
+            self.sftp_support.load(std::sync::atomic::Ordering::Relaxed),
         )
     }
 
@@ -1119,14 +1186,21 @@ impl SshSession {
     /// Get the current list of port forward states
     #[allow(dead_code)] // integration tests (tests/ssh_2fa_tests.rs); bin reads port_forwards directly
     pub fn get_port_forward_states(&self) -> Vec<(PortForwardConfig, ForwardState)> {
-        self.port_forwards.lock().ok().map(|fwds| {
-            fwds.iter().map(|pf| (pf.config.clone(), pf.current_state())).collect()
-        }).unwrap_or_default()
+        self.port_forwards
+            .lock()
+            .ok()
+            .map(|fwds| {
+                fwds.iter()
+                    .map(|pf| (pf.config.clone(), pf.current_state()))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Drain pending notifications from the session
     pub fn drain_notifications(&self) -> Vec<AppNotification> {
-        self.notifications.lock()
+        self.notifications
+            .lock()
             .map(|mut ns| std::mem::take(&mut *ns))
             .unwrap_or_default()
     }
@@ -1154,10 +1228,7 @@ impl SshSession {
         let tx = self.cmd_tx.clone();
         Ok(crate::terminal::zmodem::SessionWriter::new(move |data| {
             tx.send(SshCommand::Write(data.to_vec())).map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::BrokenPipe,
-                    "ssh command channel closed",
-                )
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "ssh command channel closed")
             })
         }))
     }
@@ -1283,12 +1354,18 @@ pub async fn test_connection(
     // The test dialog has no UI for OTP entry: refuse prompts so 2FA
     // hosts report an actionable error instead of hanging.
     let _handle = connect_and_authenticate(
-        &host, port, &username, &auth, keepalive_interval, agent_forwarding,
+        &host,
+        port,
+        &username,
+        &auth,
+        keepalive_interval,
+        agent_forwarding,
         &super::auth_prompt::AuthPromptBridge::decline(),
         // The test dialog never forwards ports.
         Arc::new(Mutex::new(Vec::new())),
         proxy.as_ref(),
-    ).await?;
+    )
+    .await?;
     Ok("Connection successful! Authentication passed.".to_string())
 }
 
@@ -1302,8 +1379,7 @@ pub fn remove_known_hosts_key(host: &str, port: u16) -> Result<usize, String> {
     // Resolve the known_hosts path via dirs::home_dir rather than $HOME —
     // HOME is normally unset on Windows (USERPROFILE is the equivalent),
     // and dirs handles both.
-    let home = dirs::home_dir()
-        .ok_or_else(|| "Failed to get home directory".to_string())?;
+    let home = dirs::home_dir().ok_or_else(|| "Failed to get home directory".to_string())?;
     let known_hosts_path = home.join(".ssh").join("known_hosts");
 
     // Read the existing known_hosts file
@@ -1373,8 +1449,7 @@ pub fn remove_known_hosts_key(host: &str, port: u16) -> Result<usize, String> {
         .map_err(|e| format!("Failed to open known_hosts for writing: {}", e))?;
 
     for line in lines {
-        writeln!(file, "{}", line)
-            .map_err(|e| format!("Failed to write to known_hosts: {}", e))?;
+        writeln!(file, "{}", line).map_err(|e| format!("Failed to write to known_hosts: {}", e))?;
     }
 
     Ok(removed_count)

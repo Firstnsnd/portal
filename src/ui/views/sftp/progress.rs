@@ -2,11 +2,11 @@
 //!
 //! This module contains the transfer progress bar rendering logic for the SFTP view.
 
-use eframe::egui;
 use crate::sftp::TransferProgress;
-use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
-use crate::ui::views::sftp::format::{format_transfer_speed, format_file_size};
+use crate::ui::theme::ThemeColors;
+use crate::ui::views::sftp::format::{format_file_size, format_transfer_speed};
+use eframe::egui;
 
 /// Render the transfer progress bar.
 ///
@@ -62,20 +62,28 @@ pub fn render_transfer_progress(
     );
     let label_w = label_galley.size().x;
     ui.painter().galley(
-        egui::pos2(bar_area.min.x + pad_x, row1_cy - label_galley.size().y / 2.0),
+        egui::pos2(
+            bar_area.min.x + pad_x,
+            row1_cy - label_galley.size().y / 2.0,
+        ),
         label_galley,
         theme.fg_primary,
     );
 
     // Info text (right-aligned, left of stop button): %  speed  size  ETA
     let eta_str = progress.eta_string().unwrap_or_else(|| "--:--".to_string());
-    let info_text = format!("{:.0}%   {}   {}   {}", pct * 100.0, speed_str, size_str, eta_str);
-    let info_galley = ui.painter().layout_no_wrap(
-        info_text,
-        egui::FontId::proportional(11.0),
-        theme.fg_dim,
+    let info_text = format!(
+        "{:.0}%   {}   {}   {}",
+        pct * 100.0,
+        speed_str,
+        size_str,
+        eta_str
     );
-    let info_x = (content_right - info_galley.size().x).max(bar_area.min.x + pad_x + label_w + 12.0);
+    let info_galley =
+        ui.painter()
+            .layout_no_wrap(info_text, egui::FontId::proportional(11.0), theme.fg_dim);
+    let info_x =
+        (content_right - info_galley.size().x).max(bar_area.min.x + pad_x + label_w + 12.0);
     ui.painter().galley(
         egui::pos2(info_x, row1_cy - info_galley.size().y / 2.0),
         info_galley,
@@ -84,11 +92,18 @@ pub fn render_transfer_progress(
 
     // Stop button (vertically centered in bar)
     let stop_rect = egui::Rect::from_min_size(
-        egui::pos2(bar_area.max.x - stop_size - stop_right_pad, bar_area.center().y - stop_size / 2.0),
+        egui::pos2(
+            bar_area.max.x - stop_size - stop_right_pad,
+            bar_area.center().y - stop_size / 2.0,
+        ),
         egui::vec2(stop_size, stop_size),
     );
     let stop_resp = ui.allocate_rect(stop_rect, egui::Sense::click());
-    let stop_color = if stop_resp.hovered() { theme.red } else { theme.fg_dim };
+    let stop_color = if stop_resp.hovered() {
+        theme.red
+    } else {
+        theme.fg_dim
+    };
     ui.painter().text(
         stop_rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -96,7 +111,9 @@ pub fn render_transfer_progress(
         egui::FontId::proportional(14.0),
         stop_color,
     );
-    let should_cancel = stop_resp.on_hover_text(language.t("stop_transfer")).clicked();
+    let should_cancel = stop_resp
+        .on_hover_text(language.t("stop_transfer"))
+        .clicked();
 
     // ── Row 2: full-width progress bar ──
     let row2_cy = bar_area.min.y + bar_h * 0.75;

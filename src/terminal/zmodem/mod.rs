@@ -79,10 +79,15 @@ pub enum ZmodemState {
     Handshaking,
     /// Handshake complete; data flowing (`file` is empty for downloads —
     /// rzsz only names files when `receive_files` returns).
-    Transferring { file: String },
+    Transferring {
+        file: String,
+    },
     /// Data phase done, ZFIN handshake in flight.
     Finishing,
-    Done { files: Vec<String>, bytes: u64 },
+    Done {
+        files: Vec<String>,
+        bytes: u64,
+    },
     Failed(String),
     Cancelled,
 }
@@ -455,10 +460,7 @@ mod tests {
         }
         assert!(tap.is_active());
         // Once active, everything diverts.
-        assert!(matches!(
-            tap.feed(b"deadbeef\r\n"),
-            TapAction::ActiveDivert
-        ));
+        assert!(matches!(tap.feed(b"deadbeef\r\n"), TapAction::ActiveDivert));
     }
 
     /// Every possible split point between two chunks still detects.

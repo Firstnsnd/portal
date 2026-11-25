@@ -1,5 +1,5 @@
-use eframe::egui;
 use super::theme::ThemeColors;
+use eframe::egui;
 
 // ============================================================================
 // Design Tokens for Forms
@@ -16,18 +16,18 @@ pub const FONT_SIZE_INPUT: f32 = 12.0;
 pub const FONT_SIZE_TITLE: f32 = 14.0;
 
 /// Spacing
-pub const SPACING_FIELD: f32 = 12.0;      // Between fields
-pub const SPACING_LABEL: f32 = 4.0;       // Between label and input
-pub const SPACING_INLINE: f32 = 8.0;      // Between inline fields
+pub const SPACING_FIELD: f32 = 12.0; // Between fields
+pub const SPACING_LABEL: f32 = 4.0; // Between label and input
+pub const SPACING_INLINE: f32 = 8.0; // Between inline fields
 
 /// Input dimensions
-pub const INPUT_HEIGHT: f32 = 20.0;       // Standard input height (compact)
-pub const INPUT_ROUNDING: f32 = 6.0;      // Standard border radius
+pub const INPUT_HEIGHT: f32 = 20.0; // Standard input height (compact)
+pub const INPUT_ROUNDING: f32 = 6.0; // Standard border radius
 pub const INPUT_PADDING_X: f32 = 8.0;
 pub const INPUT_PADDING_Y: f32 = 3.0;
 
 /// Form layout
-pub const FORM_LEFT_MARGIN: f32 = 12.0;   // Left margin for form content
+pub const FORM_LEFT_MARGIN: f32 = 12.0; // Left margin for form content
 
 /// Height to reserve below a drawer's scrolling form for its fixed action
 /// footer: item spacing (8) + gap above buttons (12) + button row (32) +
@@ -54,14 +54,10 @@ pub fn primary_button<'a>(text: &'a str, theme: &'a ThemeColors) -> egui::Button
 
 /// Secondary / cancel button (elevated bg, dim text).
 pub fn secondary_button<'a>(text: &'a str, theme: &'a ThemeColors) -> egui::Button<'a> {
-    egui::Button::new(
-        egui::RichText::new(text)
-            .color(theme.fg_dim)
-            .size(13.0),
-    )
-    .fill(theme.bg_elevated)
-    .rounding(6.0)
-    .min_size(egui::vec2(80.0, 32.0))
+    egui::Button::new(egui::RichText::new(text).color(theme.fg_dim).size(13.0))
+        .fill(theme.bg_elevated)
+        .rounding(6.0)
+        .min_size(egui::vec2(80.0, 32.0))
 }
 
 /// Danger / destructive action button (red fill, white text).
@@ -78,12 +74,7 @@ pub fn danger_button<'a>(text: &'a str, theme: &'a ThemeColors) -> egui::Button<
 
 /// Text-only button with no background frame.
 pub fn text_button(text: &str, color: egui::Color32) -> egui::Button<'_> {
-    egui::Button::new(
-        egui::RichText::new(text)
-            .color(color)
-            .size(12.0),
-    )
-    .frame(false)
+    egui::Button::new(egui::RichText::new(text).color(color).size(12.0)).frame(false)
 }
 
 // ============================================================================
@@ -144,7 +135,11 @@ pub fn dropdown_item(
     selected: bool,
 ) -> egui::Response {
     let label = egui::RichText::new(text.into())
-        .color(if selected { theme.accent } else { theme.fg_primary })
+        .color(if selected {
+            theme.accent
+        } else {
+            theme.fg_primary
+        })
         .size(FONT_SIZE_INPUT);
     ui.add(egui::Button::new(label).frame(false))
 }
@@ -169,7 +164,11 @@ pub fn form_label(ui: &mut egui::Ui, text: &str, required: bool, theme: &ThemeCo
 
     ui.horizontal(|ui| {
         if required {
-            ui.label(egui::RichText::new("*").color(theme.red).size(FONT_SIZE_LABEL));
+            ui.label(
+                egui::RichText::new("*")
+                    .color(theme.red)
+                    .size(FONT_SIZE_LABEL),
+            );
         }
         ui.label(label);
     });
@@ -189,12 +188,14 @@ pub fn text_input(
         .inner_margin(egui::Margin::symmetric(INPUT_PADDING_X, INPUT_PADDING_Y))
         .show(ui, |ui| {
             let available_width = ui.available_width();
-            ui.add_sized([available_width, INPUT_HEIGHT],
+            ui.add_sized(
+                [available_width, INPUT_HEIGHT],
                 egui::TextEdit::singleline(content)
                     .hint_text(hint_text_style(hint, theme))
-                    .frame(false)
+                    .frame(false),
             )
-        }).inner
+        })
+        .inner
 }
 
 /// Password input field
@@ -211,13 +212,15 @@ pub fn password_input(
         .inner_margin(egui::Margin::symmetric(INPUT_PADDING_X, INPUT_PADDING_Y))
         .show(ui, |ui| {
             let available_width = ui.available_width();
-            ui.add_sized([available_width, INPUT_HEIGHT],
+            ui.add_sized(
+                [available_width, INPUT_HEIGHT],
                 egui::TextEdit::singleline(content)
                     .password(true)
                     .hint_text(hint_text_style(hint, theme))
-                    .frame(false)
+                    .frame(false),
             )
-        }).inner
+        })
+        .inner
 }
 
 /// Multiline text area
@@ -234,10 +237,11 @@ pub fn text_area(
         .rounding(INPUT_ROUNDING)
         .inner_margin(egui::Margin::symmetric(INPUT_PADDING_X, INPUT_PADDING_Y))
         .show(ui, |ui| {
-            ui.add_sized([ui.available_width(), height],
+            ui.add_sized(
+                [ui.available_width(), height],
                 egui::TextEdit::multiline(content)
                     .hint_text(hint_text_style(hint, theme))
-                    .frame(false)
+                    .frame(false),
             );
         });
 }
@@ -256,10 +260,11 @@ pub fn fixed_input(
         .rounding(INPUT_ROUNDING)
         .inner_margin(egui::Margin::symmetric(INPUT_PADDING_X, INPUT_PADDING_Y))
         .show(ui, |ui| {
-            ui.add_sized([width, INPUT_HEIGHT],
+            ui.add_sized(
+                [width, INPUT_HEIGHT],
                 egui::TextEdit::singleline(content)
                     .hint_text(hint_text_style(hint, theme))
-                    .frame(false)
+                    .frame(false),
             );
         });
 }
@@ -278,11 +283,12 @@ pub fn fixed_password_input(
         .rounding(INPUT_ROUNDING)
         .inner_margin(egui::Margin::symmetric(INPUT_PADDING_X, INPUT_PADDING_Y))
         .show(ui, |ui| {
-            ui.add_sized([width, INPUT_HEIGHT],
+            ui.add_sized(
+                [width, INPUT_HEIGHT],
                 egui::TextEdit::singleline(content)
                     .password(true)
                     .hint_text(hint_text_style(hint, theme))
-                    .frame(false)
+                    .frame(false),
             );
         });
 }
@@ -427,8 +433,5 @@ pub fn section_header(text: &str, theme: &ThemeColors) -> egui::RichText {
 
 /// Form field label (alias for compatibility)
 pub fn field_label(text: &str, theme: &ThemeColors) -> egui::RichText {
-    egui::RichText::new(text)
-        .color(theme.fg_dim)
-        .size(12.0)
+    egui::RichText::new(text).color(theme.fg_dim).size(12.0)
 }
-

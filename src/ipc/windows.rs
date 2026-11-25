@@ -8,12 +8,12 @@
 
 use windows::core::{HRESULT, PCWSTR};
 use windows::Win32::Foundation::{
-    CloseHandle, GENERIC_READ, GENERIC_WRITE, GetLastError, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
+    CloseHandle, GetLastError, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GENERIC_READ, GENERIC_WRITE,
     HANDLE,
 };
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_SHARE_MODE, FILE_FLAGS_AND_ATTRIBUTES,
-    FlushFileBuffers, OPEN_EXISTING, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
+    CreateFileW, FlushFileBuffers, ReadFile, WriteFile, FILE_FLAGS_AND_ATTRIBUTES,
+    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_SHARE_MODE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
 };
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, WaitNamedPipeW, NAMED_PIPE_MODE,
@@ -34,7 +34,13 @@ fn pipe_name() -> String {
     // display name with spaces or a domain suffix can't break the path.
     let safe: String = user
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     format!(r"\\.\pipe\portal-{safe}")
 }
@@ -259,7 +265,11 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert_eq!(&*got.lock().unwrap(), &reqs, "forwarded requests should reach the sink verbatim");
+        assert_eq!(
+            &*got.lock().unwrap(),
+            &reqs,
+            "forwarded requests should reach the sink verbatim"
+        );
     }
 
     /// An unread pipe is not a listener: forward must fail cleanly.

@@ -11,10 +11,10 @@
 //! live. The naming scheme (which service/account strings stand for which
 //! entity) lives in `config`, not here.
 
-#[cfg(target_os = "macos")]
-pub mod macos;
 #[cfg(target_os = "linux")]
 pub mod linux;
+#[cfg(target_os = "macos")]
+pub mod macos;
 #[cfg(windows)]
 pub mod windows;
 

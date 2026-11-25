@@ -36,6 +36,9 @@ env_logger = "0.11"
 
 # HTTP client for update checks (rustls TLS, no system OpenSSL)
 ureq = { version = "2", features = ["tls", "gzip"] }
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
 
 # Terminal background image decoding (image already in the tree via
 # arboard/eframe; keep default features off to skip rayon/ravif/exr)
@@ -180,4 +183,3 @@ criterion = "0.5"
 [profile.release]
 lto = "thin"
 codegen-units = 1
-

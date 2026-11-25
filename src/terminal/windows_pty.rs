@@ -19,9 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::{
-    CloseHandle, HANDLE, WAIT_OBJECT_0,
-};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows::Win32::System::Console::{
     ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, COORD, HPCON,
@@ -29,9 +27,9 @@ use windows::Win32::System::Console::{
 use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
-    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
-    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT, STARTUPINFOEXW, STARTUPINFOW,
+    InitializeProcThreadAttributeList, TerminateProcess, UpdateProcThreadAttribute,
+    WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST,
+    PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, STARTUPINFOEXW, STARTUPINFOW,
 };
 
 /// Null-terminated UTF-16 encoding for `PCWSTR` parameters. The returned
@@ -80,9 +78,8 @@ impl Pty for WindowsPty {
         let mut out_read = HANDLE::default();
         let mut out_write = HANDLE::default();
         unsafe {
-            CreatePipe(&mut in_read, &mut in_write, None, 0).map_err(|e| {
-                Error::SpawnFailed(format!("CreatePipe (input): {e}"))
-            })?;
+            CreatePipe(&mut in_read, &mut in_write, None, 0)
+                .map_err(|e| Error::SpawnFailed(format!("CreatePipe (input): {e}")))?;
             CreatePipe(&mut out_read, &mut out_write, None, 0).map_err(|e| {
                 // Don't leak the first pair if the second fails.
                 let _ = CloseHandle(in_read);
@@ -94,7 +91,10 @@ impl Pty for WindowsPty {
         // ── 2. The pseudoconsole ──────────────────────────────────────────
         let hpc = unsafe {
             CreatePseudoConsole(
-                COORD { X: size.cols as i16, Y: size.rows as i16 },
+                COORD {
+                    X: size.cols as i16,
+                    Y: size.rows as i16,
+                },
                 in_read,
                 out_write,
                 0,
@@ -142,8 +142,10 @@ impl Pty for WindowsPty {
         let cmdline_str = if args.is_empty() {
             format!("\"{command}\"")
         } else {
-            let quoted_args: Vec<String> =
-                args.iter().map(|a| format!("\"{}\"", a.replace('"', "\\\""))).collect();
+            let quoted_args: Vec<String> = args
+                .iter()
+                .map(|a| format!("\"{}\"", a.replace('"', "\\\"")))
+                .collect();
             format!("\"{command}\" {}", quoted_args.join(" "))
         };
         let mut cmdline = to_wide(&cmdline_str);
@@ -273,7 +275,12 @@ impl Pty for WindowsPty {
         while total < data.len() {
             let mut n: u32 = 0;
             let res = unsafe {
-                WriteFile(self.conin, Some(&data[total..]), Some(&mut n as *mut u32), None)
+                WriteFile(
+                    self.conin,
+                    Some(&data[total..]),
+                    Some(&mut n as *mut u32),
+                    None,
+                )
             };
             if let Err(e) = res {
                 return Err(Error::WriteFailed(format!("WriteFile: {e}")));
@@ -306,7 +313,13 @@ impl Pty for WindowsPty {
             return Err(Error::AlreadyClosed);
         };
         unsafe {
-            ResizePseudoConsole(hpc, COORD { X: size.cols as i16, Y: size.rows as i16 })
+            ResizePseudoConsole(
+                hpc,
+                COORD {
+                    X: size.cols as i16,
+                    Y: size.rows as i16,
+                },
+            )
         }
         .map_err(|e| Error::ResizeFailed(format!("ResizePseudoConsole: {e}")))
     }
@@ -325,9 +338,7 @@ impl Pty for WindowsPty {
             unsafe {
                 let _ = GetExitCodeProcess(self.h_process, &mut code);
             }
-            log::warn!(
-                "[pty] child terminated (exit code {code}) — marking local session dead"
-            );
+            log::warn!("[pty] child terminated (exit code {code}) — marking local session dead");
             self.alive.store(false, Ordering::Relaxed);
             false
         } else {

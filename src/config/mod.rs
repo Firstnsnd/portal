@@ -153,11 +153,9 @@ impl std::fmt::Display for PortForwardConfig {
                 "-R {}:{}:{}:{}",
                 self.remote_host, self.remote_port, self.local_host, self.local_port
             ),
-            ForwardKind::Dynamic => write!(
-                f,
-                "-D {}:{} (SOCKS5)",
-                self.local_host, self.local_port
-            ),
+            ForwardKind::Dynamic => {
+                write!(f, "-D {}:{} (SOCKS5)", self.local_host, self.local_port)
+            }
         }
     }
 }
@@ -238,11 +236,20 @@ impl Credential {
         }
     }
 
-    pub fn new_ssh_key(name: String, key_path: String, key_in_keychain: bool, has_passphrase: bool) -> Self {
+    pub fn new_ssh_key(
+        name: String,
+        key_path: String,
+        key_in_keychain: bool,
+        has_passphrase: bool,
+    ) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             name,
-            credential_type: CredentialType::SshKey { key_path, key_in_keychain, has_passphrase },
+            credential_type: CredentialType::SshKey {
+                key_path,
+                key_in_keychain,
+                has_passphrase,
+            },
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -268,8 +275,13 @@ impl Credential {
 #[derive(Debug, Clone)]
 pub enum ResolvedAuth {
     None,
-    Password { password: String },
-    Key { key_content: String, passphrase: Option<String> },
+    Password {
+        password: String,
+    },
+    Key {
+        key_content: String,
+        passphrase: Option<String>,
+    },
     /// Try the keys held by the local ssh-agent (SSH_AUTH_SOCK).
     Agent,
 }
@@ -381,7 +393,15 @@ impl HostEntry {
         }
     }
 
-    pub fn new_ssh(name: String, host: String, port: u16, username: String, group: String, credential_id: Option<String>, startup_commands: Vec<String>) -> Self {
+    pub fn new_ssh(
+        name: String,
+        host: String,
+        port: u16,
+        username: String,
+        group: String,
+        credential_id: Option<String>,
+        startup_commands: Vec<String>,
+    ) -> Self {
         Self {
             name,
             host,
@@ -457,7 +477,14 @@ fn secret_delete(service: &str, account: &str) {
 }
 
 /// Store a host-keyed credential in the system keychain.
-fn store_host_credential(host: &str, port: u16, username: &str, kind: &str, secret: &str, display_name: &str) -> bool {
+fn store_host_credential(
+    host: &str,
+    port: u16,
+    username: &str,
+    kind: &str,
+    secret: &str,
+    display_name: &str,
+) -> bool {
     let account = keyring_key(host, port, username, kind);
     let service = keyring_service(display_name);
 
@@ -473,7 +500,13 @@ fn store_host_credential(host: &str, port: u16, username: &str, kind: &str, secr
 /// Tries new per-host service first, then falls back to legacy "portal-ssh"
 /// (that service only ever holds entries on macOS, but the lookup is
 /// harmless everywhere).
-pub fn load_host_credential(host: &str, port: u16, username: &str, kind: &str, display_name: &str) -> Option<String> {
+pub fn load_host_credential(
+    host: &str,
+    port: u16,
+    username: &str,
+    kind: &str,
+    display_name: &str,
+) -> Option<String> {
     let account = keyring_key(host, port, username, kind);
 
     // Try per-host service first
@@ -492,7 +525,13 @@ pub fn load_host_credential(host: &str, port: u16, username: &str, kind: &str, d
 }
 
 /// Delete a host-based credential from the system keychain (both new and legacy service).
-pub fn delete_host_credential(host: &str, port: u16, username: &str, kind: &str, display_name: &str) {
+pub fn delete_host_credential(
+    host: &str,
+    port: u16,
+    username: &str,
+    kind: &str,
+    display_name: &str,
+) {
     let account = keyring_key(host, port, username, kind);
     secret_delete(&keyring_service(display_name), &account);
     secret_delete(KEYRING_SERVICE_LEGACY, &account);
@@ -502,11 +541,29 @@ pub fn delete_host_credential(host: &str, port: u16, username: &str, kind: &str,
 pub fn delete_host_credentials(host: &HostEntry) {
     match &host.auth {
         AuthMethod::Password { .. } => {
-            delete_host_credential(&host.host, host.port, &host.username, "password", &host.name);
+            delete_host_credential(
+                &host.host,
+                host.port,
+                &host.username,
+                "password",
+                &host.name,
+            );
         }
         AuthMethod::Key { .. } => {
-            delete_host_credential(&host.host, host.port, &host.username, "passphrase", &host.name);
-            delete_host_credential(&host.host, host.port, &host.username, "privatekey", &host.name);
+            delete_host_credential(
+                &host.host,
+                host.port,
+                &host.username,
+                "passphrase",
+                &host.name,
+            );
+            delete_host_credential(
+                &host.host,
+                host.port,
+                &host.username,
+                "privatekey",
+                &host.name,
+            );
         }
         AuthMethod::Agent | AuthMethod::None => {}
     }
@@ -567,7 +624,12 @@ fn llm_keychain_account(backend: &str) -> String {
 /// Store the LLM API key for the given `backend` (`"openai"` / `"anthropic"`)
 /// in the system keychain. Returns `true` on success.
 pub fn store_llm_api_key(backend: &str, key: &str) -> bool {
-    secret_set(LLM_KEYCHAIN_SERVICE, &llm_keychain_account(backend), key, "LLM API key")
+    secret_set(
+        LLM_KEYCHAIN_SERVICE,
+        &llm_keychain_account(backend),
+        key,
+        "LLM API key",
+    )
 }
 
 /// Load the LLM API key for the given `backend`, if one is stored.
@@ -618,7 +680,11 @@ pub fn resolve_credential(cred: &Credential) -> ResolvedAuth {
                 ResolvedAuth::None
             }
         }
-        CredentialType::SshKey { key_path, key_in_keychain, has_passphrase } => {
+        CredentialType::SshKey {
+            key_path,
+            key_in_keychain,
+            has_passphrase,
+        } => {
             let key_content = if *key_in_keychain {
                 load_credential_secret(&cred.id, &cred.name, "privatekey").unwrap_or_default()
             } else if !key_path.is_empty() {
@@ -635,7 +701,10 @@ pub fn resolve_credential(cred: &Credential) -> ResolvedAuth {
             if key_content.is_empty() && passphrase.is_none() {
                 ResolvedAuth::None
             } else {
-                ResolvedAuth::Key { key_content, passphrase }
+                ResolvedAuth::Key {
+                    key_content,
+                    passphrase,
+                }
             }
         }
         // Nothing to resolve — the agent holds the keys at connect time.
@@ -644,12 +713,19 @@ pub fn resolve_credential(cred: &Credential) -> ResolvedAuth {
 }
 
 /// Resolve legacy AuthMethod from host-based keychain scheme.
-fn resolve_legacy_auth(host: &HostEntry) -> ResolvedAuth {    match &host.auth {
+fn resolve_legacy_auth(host: &HostEntry) -> ResolvedAuth {
+    match &host.auth {
         AuthMethod::None => ResolvedAuth::None,
         AuthMethod::Password { password } => {
             let pw = if password.is_empty() {
-                load_host_credential(&host.host, host.port, &host.username, "password", &host.name)
-                    .unwrap_or_default()
+                load_host_credential(
+                    &host.host,
+                    host.port,
+                    &host.username,
+                    "password",
+                    &host.name,
+                )
+                .unwrap_or_default()
             } else {
                 password.clone()
             };
@@ -659,10 +735,21 @@ fn resolve_legacy_auth(host: &HostEntry) -> ResolvedAuth {    match &host.auth {
                 ResolvedAuth::Password { password: pw }
             }
         }
-        AuthMethod::Key { key_path, key_content, passphrase, key_in_keychain } => {
+        AuthMethod::Key {
+            key_path,
+            key_content,
+            passphrase,
+            key_in_keychain,
+        } => {
             let key_data = if *key_in_keychain {
-                load_host_credential(&host.host, host.port, &host.username, "privatekey", &host.name)
-                    .unwrap_or_default()
+                load_host_credential(
+                    &host.host,
+                    host.port,
+                    &host.username,
+                    "privatekey",
+                    &host.name,
+                )
+                .unwrap_or_default()
             } else if !key_content.is_empty() {
                 key_content.clone()
             } else if !key_path.is_empty() {
@@ -672,12 +759,21 @@ fn resolve_legacy_auth(host: &HostEntry) -> ResolvedAuth {    match &host.auth {
             };
 
             let pp = if passphrase.is_empty() {
-                load_host_credential(&host.host, host.port, &host.username, "passphrase", &host.name)
+                load_host_credential(
+                    &host.host,
+                    host.port,
+                    &host.username,
+                    "passphrase",
+                    &host.name,
+                )
             } else {
                 Some(passphrase.clone())
             };
 
-            ResolvedAuth::Key { key_content: key_data, passphrase: pp }
+            ResolvedAuth::Key {
+                key_content: key_data,
+                passphrase: pp,
+            }
         }
         AuthMethod::Agent => ResolvedAuth::Agent,
     }
@@ -699,7 +795,13 @@ pub fn resolve_proxy(host: &HostEntry) -> Option<ResolvedProxy> {
         return None;
     }
     let password = if cfg.password_in_keychain {
-        load_host_credential(&host.host, host.port, "proxy", PROXY_KEYCHAIN_KIND, &host.name)
+        load_host_credential(
+            &host.host,
+            host.port,
+            "proxy",
+            PROXY_KEYCHAIN_KIND,
+            &host.name,
+        )
     } else {
         None
     };
@@ -707,19 +809,36 @@ pub fn resolve_proxy(host: &HostEntry) -> Option<ResolvedProxy> {
         kind: cfg.kind,
         host: cfg.host.clone(),
         port: cfg.port,
-        username: if cfg.username.is_empty() { None } else { Some(cfg.username.clone()) },
+        username: if cfg.username.is_empty() {
+            None
+        } else {
+            Some(cfg.username.clone())
+        },
         password,
     })
 }
 
 /// Store the proxy password for a host in the keychain.
 pub fn store_proxy_password(host: &HostEntry, password: &str) -> bool {
-    store_host_credential(&host.host, host.port, "proxy", PROXY_KEYCHAIN_KIND, password, &host.name)
+    store_host_credential(
+        &host.host,
+        host.port,
+        "proxy",
+        PROXY_KEYCHAIN_KIND,
+        password,
+        &host.name,
+    )
 }
 
 /// Delete the proxy password of a host from the keychain.
 pub fn delete_proxy_password(host: &HostEntry) {
-    delete_host_credential(&host.host, host.port, "proxy", PROXY_KEYCHAIN_KIND, &host.name);
+    delete_host_credential(
+        &host.host,
+        host.port,
+        "proxy",
+        PROXY_KEYCHAIN_KIND,
+        &host.name,
+    );
 }
 
 // ── Credentials persistence ─────────────────────────────────────────
@@ -729,12 +848,18 @@ pub fn credentials_file_path() -> PathBuf {
     config_dir().join("credentials.json")
 }
 
-/// Load credentials from JSON file.
+/// Load credentials from JSON file. A missing file is empty; a corrupt file
+/// is quarantined as `.bad` (preserving the original) and loads as empty.
 pub fn load_credentials(path: &Path) -> Vec<Credential> {
-    if let Ok(data) = std::fs::read_to_string(path) {
-        serde_json::from_str(&data).unwrap_or_default()
-    } else {
-        Vec::new()
+    match std::fs::read_to_string(path) {
+        Ok(data) => match serde_json::from_str(&data) {
+            Ok(credentials) => credentials,
+            Err(e) => {
+                quarantine_corrupt_file(path, "credentials", &e);
+                Vec::new()
+            }
+        },
+        Err(_) => Vec::new(),
     }
 }
 
@@ -769,7 +894,13 @@ pub fn migrate_hosts_to_credentials(hosts: &mut [HostEntry], credentials: &mut V
                 );
 
                 // Re-key: load from old scheme, store to new scheme
-                if let Some(pw) = load_host_credential(&host.host, host.port, &host.username, "password", &host.name) {
+                if let Some(pw) = load_host_credential(
+                    &host.host,
+                    host.port,
+                    &host.username,
+                    "password",
+                    &host.name,
+                ) {
                     store_credential_secret(&cred.id, &cred.name, "password", &pw);
                 }
 
@@ -777,9 +908,21 @@ pub fn migrate_hosts_to_credentials(hosts: &mut [HostEntry], credentials: &mut V
                 credentials.push(cred);
                 changed = true;
             }
-            AuthMethod::Key { key_path, key_in_keychain, passphrase, .. } => {
-                let has_passphrase = !passphrase.is_empty() ||
-                    load_host_credential(&host.host, host.port, &host.username, "passphrase", &host.name).is_some();
+            AuthMethod::Key {
+                key_path,
+                key_in_keychain,
+                passphrase,
+                ..
+            } => {
+                let has_passphrase = !passphrase.is_empty()
+                    || load_host_credential(
+                        &host.host,
+                        host.port,
+                        &host.username,
+                        "passphrase",
+                        &host.name,
+                    )
+                    .is_some();
 
                 let cred = Credential::new_ssh_key(
                     format!("{} (key)", host.name),
@@ -790,14 +933,26 @@ pub fn migrate_hosts_to_credentials(hosts: &mut [HostEntry], credentials: &mut V
 
                 // Re-key private key
                 if *key_in_keychain {
-                    if let Some(key_data) = load_host_credential(&host.host, host.port, &host.username, "privatekey", &host.name) {
+                    if let Some(key_data) = load_host_credential(
+                        &host.host,
+                        host.port,
+                        &host.username,
+                        "privatekey",
+                        &host.name,
+                    ) {
                         store_credential_secret(&cred.id, &cred.name, "privatekey", &key_data);
                     }
                 }
 
                 // Re-key passphrase
                 if has_passphrase {
-                    if let Some(pp) = load_host_credential(&host.host, host.port, &host.username, "passphrase", &host.name) {
+                    if let Some(pp) = load_host_credential(
+                        &host.host,
+                        host.port,
+                        &host.username,
+                        "passphrase",
+                        &host.name,
+                    ) {
                         store_credential_secret(&cred.id, &cred.name, "passphrase", &pp);
                     }
                 }
@@ -813,7 +968,10 @@ pub fn migrate_hosts_to_credentials(hosts: &mut [HostEntry], credentials: &mut V
     }
 
     if changed {
-        log::info!("Migrated {} host(s) to credential-based auth", credentials.len());
+        log::info!(
+            "Migrated {} host(s) to credential-based auth",
+            credentials.len()
+        );
     }
 }
 
@@ -835,10 +993,10 @@ pub fn hosts_file_path() -> PathBuf {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snippet {
-    pub id: String,         // UUID
+    pub id: String, // UUID
     pub name: String,
     pub command: String,
-    pub group: String,      // Category group
+    pub group: String, // Category group
 }
 
 /// Get the snippets file path
@@ -846,12 +1004,18 @@ pub fn snippets_file_path() -> PathBuf {
     config_dir().join("snippets.json")
 }
 
-/// Load snippets from JSON file. Returns empty vec on error.
+/// Load snippets from JSON file. A missing file is empty; a corrupt file is
+/// quarantined as `.bad` (preserving the original) and loads as empty.
 pub fn load_snippets(path: &Path) -> Vec<Snippet> {
-    if let Ok(data) = std::fs::read_to_string(path) {
-        serde_json::from_str(&data).unwrap_or_default()
-    } else {
-        Vec::new()
+    match std::fs::read_to_string(path) {
+        Ok(data) => match serde_json::from_str(&data) {
+            Ok(snippets) => snippets,
+            Err(e) => {
+                quarantine_corrupt_file(path, "snippets", &e);
+                Vec::new()
+            }
+        },
+        Err(_) => Vec::new(),
     }
 }
 
@@ -883,10 +1047,15 @@ pub fn history_file_path() -> PathBuf {
 
 pub fn load_history() -> Vec<ConnectionRecord> {
     let path = history_file_path();
-    if let Ok(data) = std::fs::read_to_string(&path) {
-        serde_json::from_str(&data).unwrap_or_default()
-    } else {
-        Vec::new()
+    match std::fs::read_to_string(&path) {
+        Ok(data) => match serde_json::from_str(&data) {
+            Ok(records) => records,
+            Err(e) => {
+                quarantine_corrupt_file(&path, "history", &e);
+                Vec::new()
+            }
+        },
+        Err(_) => Vec::new(),
     }
 }
 
@@ -945,18 +1114,102 @@ pub struct KeyBinding {
 
 pub fn default_shortcuts() -> Vec<KeyBinding> {
     vec![
-        KeyBinding { action: ShortcutAction::SplitHorizontal, key: "D".into(), ctrl: false, alt: false, shift: false, command: true },
-        KeyBinding { action: ShortcutAction::SplitVertical, key: "D".into(), ctrl: false, alt: false, shift: true, command: true },
-        KeyBinding { action: ShortcutAction::NewTab, key: "T".into(), ctrl: false, alt: false, shift: false, command: true },
-        KeyBinding { action: ShortcutAction::CloseTab, key: "W".into(), ctrl: false, alt: false, shift: false, command: true },
-        KeyBinding { action: ShortcutAction::ClosePane, key: "P".into(), ctrl: false, alt: false, shift: true, command: true },
-        KeyBinding { action: ShortcutAction::NextTab, key: "RightBracket".into(), ctrl: false, alt: false, shift: true, command: true },
-        KeyBinding { action: ShortcutAction::PrevTab, key: "LeftBracket".into(), ctrl: false, alt: false, shift: true, command: true },
-        KeyBinding { action: ShortcutAction::ToggleBroadcast, key: "I".into(), ctrl: false, alt: false, shift: true, command: true },
-        KeyBinding { action: ShortcutAction::Search, key: "F".into(), ctrl: false, alt: false, shift: false, command: true },
-        KeyBinding { action: ShortcutAction::Copy, key: "C".into(), ctrl: false, alt: false, shift: false, command: true },
-        KeyBinding { action: ShortcutAction::Paste, key: "V".into(), ctrl: false, alt: false, shift: false, command: true },
-        KeyBinding { action: ShortcutAction::SelectAll, key: "A".into(), ctrl: false, alt: false, shift: false, command: true },
+        KeyBinding {
+            action: ShortcutAction::SplitHorizontal,
+            key: "D".into(),
+            ctrl: false,
+            alt: false,
+            shift: false,
+            command: true,
+        },
+        KeyBinding {
+            action: ShortcutAction::SplitVertical,
+            key: "D".into(),
+            ctrl: false,
+            alt: false,
+            shift: true,
+            command: true,
+        },
+        KeyBinding {
+            action: ShortcutAction::NewTab,
+            key: "T".into(),
+            ctrl: false,
+            alt: false,
+            shift: false,
+            command: true,
+        },
+        KeyBinding {
+            action: ShortcutAction::CloseTab,
+            key: "W".into(),
+            ctrl: false,
+            alt: false,
+            shift: false,
+            command: true,
+        },
+        KeyBinding {
+            action: ShortcutAction::ClosePane,
+            key: "P".into(),
+            ctrl: false,
+            alt: false,
+            shift: true,
+            command: true,
+        },
+        KeyBinding {
+            action: ShortcutAction::NextTab,
+            key: "RightBracket".into(),
+            ctrl: false,
+            alt: false,
+            shift: true,
+            command: true,
+        },
+        KeyBinding {
+            action: ShortcutAction::PrevTab,
+            key: "LeftBracket".into(),
+            ctrl: false,
+            alt: false,
+            shift: true,
+            command: true,
+        },
+        KeyBinding {
+            action: ShortcutAction::ToggleBroadcast,
+            key: "I".into(),
+            ctrl: false,
+            alt: false,
+            shift: true,
+            command: true,
+        },
+        KeyBinding {
+            action: ShortcutAction::Search,
+            key: "F".into(),
+            ctrl: false,
+            alt: false,
+            shift: false,
+            command: true,
+        },
+        KeyBinding {
+            action: ShortcutAction::Copy,
+            key: "C".into(),
+            ctrl: false,
+            alt: false,
+            shift: false,
+            command: true,
+        },
+        KeyBinding {
+            action: ShortcutAction::Paste,
+            key: "V".into(),
+            ctrl: false,
+            alt: false,
+            shift: false,
+            command: true,
+        },
+        KeyBinding {
+            action: ShortcutAction::SelectAll,
+            key: "A".into(),
+            ctrl: false,
+            alt: false,
+            shift: false,
+            command: true,
+        },
     ]
 }
 
@@ -1066,10 +1319,15 @@ pub fn zmodem_download_dir() -> std::path::PathBuf {
 
 pub fn load_settings() -> PortalSettings {
     let path = settings_file_path();
-    if let Ok(data) = std::fs::read_to_string(&path) {
-        serde_json::from_str(&data).unwrap_or_default()
-    } else {
-        PortalSettings::default()
+    match std::fs::read_to_string(&path) {
+        Ok(data) => match serde_json::from_str(&data) {
+            Ok(settings) => settings,
+            Err(e) => {
+                quarantine_corrupt_file(&path, "settings", &e);
+                PortalSettings::default()
+            }
+        },
+        Err(_) => PortalSettings::default(),
     }
 }
 
@@ -1083,24 +1341,31 @@ pub fn save_settings(settings: &PortalSettings) {
     }
 }
 
-/// Load hosts from JSON file. Returns default list if file doesn't exist.
+/// Load hosts from JSON file. A missing file yields just the local entry; a
+/// corrupt file is quarantined as `.bad` (preserving the original) and yields
+/// just the local entry — the empty list the user then sees is the visible
+/// symptom of the corruption, not a silent discard.
 ///
 /// After loading, credentials are restored from the system keychain.
 /// If plaintext passwords are found in the JSON (legacy), they are
 /// automatically migrated to the keychain and the file is re-saved.
 pub fn load_hosts(path: &Path) -> Vec<HostEntry> {
     let mut hosts = if let Ok(data) = std::fs::read_to_string(path) {
-        if let Ok(hosts) = serde_json::from_str::<Vec<HostEntry>>(&data) {
-            let has_local = hosts.iter().any(|h| h.is_local);
-            if has_local {
-                hosts
-            } else {
-                let mut result = vec![HostEntry::new_local()];
-                result.extend(hosts);
-                result
+        match serde_json::from_str::<Vec<HostEntry>>(&data) {
+            Ok(hosts) => {
+                let has_local = hosts.iter().any(|h| h.is_local);
+                if has_local {
+                    hosts
+                } else {
+                    let mut result = vec![HostEntry::new_local()];
+                    result.extend(hosts);
+                    result
+                }
             }
-        } else {
-            vec![HostEntry::new_local()]
+            Err(e) => {
+                quarantine_corrupt_file(path, "hosts", &e);
+                vec![HostEntry::new_local()]
+            }
         }
     } else {
         return vec![HostEntry::new_local()];
@@ -1116,13 +1381,26 @@ pub fn load_hosts(path: &Path) -> Vec<HostEntry> {
             AuthMethod::Password { password } => {
                 if !password.is_empty() {
                     // Plaintext password in JSON — migrate to keychain
-                    if store_host_credential(&host.host, host.port, &host.username, "password", password, &host.name) {
+                    if store_host_credential(
+                        &host.host,
+                        host.port,
+                        &host.username,
+                        "password",
+                        password,
+                        &host.name,
+                    ) {
                         password.clear();
                         needs_resave = true;
                     }
                 } else {
                     // Empty password in JSON — restore from keychain
-                    if let Some(secret) = load_host_credential(&host.host, host.port, &host.username, "password", &host.name) {
+                    if let Some(secret) = load_host_credential(
+                        &host.host,
+                        host.port,
+                        &host.username,
+                        "password",
+                        &host.name,
+                    ) {
                         *password = secret;
                     }
                 }
@@ -1130,13 +1408,26 @@ pub fn load_hosts(path: &Path) -> Vec<HostEntry> {
             AuthMethod::Key { passphrase, .. } => {
                 if !passphrase.is_empty() {
                     // Plaintext passphrase in JSON — migrate to keychain
-                    if store_host_credential(&host.host, host.port, &host.username, "passphrase", passphrase, &host.name) {
+                    if store_host_credential(
+                        &host.host,
+                        host.port,
+                        &host.username,
+                        "passphrase",
+                        passphrase,
+                        &host.name,
+                    ) {
                         passphrase.clear();
                         needs_resave = true;
                     }
                 } else {
                     // Empty passphrase in JSON — restore from keychain
-                    if let Some(secret) = load_host_credential(&host.host, host.port, &host.username, "passphrase", &host.name) {
+                    if let Some(secret) = load_host_credential(
+                        &host.host,
+                        host.port,
+                        &host.username,
+                        "passphrase",
+                        &host.name,
+                    ) {
                         *passphrase = secret;
                     }
                 }
@@ -1161,20 +1452,99 @@ pub fn load_hosts(path: &Path) -> Vec<HostEntry> {
 /// neither must be world-readable. Write errors are logged once instead of
 /// being silently swallowed.
 pub(crate) fn write_private_file(path: &Path, contents: &str) {
+    if let Err(e) = atomic_write_private_file(path, contents.as_bytes()) {
+        log::warn!("Failed to write {}: {}", path.display(), e);
+    }
+}
+
+/// Write sensitive state through a same-directory temporary file and replace
+/// the destination only after the complete contents are flushed to disk.
+pub(crate) fn atomic_write_private_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    atomic_write_with(path, contents, PermissionPolicy::OwnerOnly)
+}
+
+/// Quarantine a config file that failed to parse: rename it to `<name>.bad`
+/// and log the error. The rename is the point — the load path returns a
+/// default and the app keeps running, so without it the next save would
+/// silently overwrite the corrupt-but-recoverable original and destroy the
+/// user's data for good.
+fn quarantine_corrupt_file(path: &Path, context: &str, error: &serde_json::Error) {
+    log::error!(
+        "{}: corrupt file {} ({}); renamed .bad — original preserved there for recovery",
+        context,
+        path.display(),
+        error
+    );
+    if let Err(e) = std::fs::rename(path, path.with_extension("bad")) {
+        log::error!(
+            "{}: could not quarantine {}: {}",
+            context,
+            path.display(),
+            e
+        );
+    }
+}
+
+/// Atomic write for user files edited in Portal (the SFTP local editor):
+/// the same temp + fsync + rename as [`atomic_write_private_file`], but the
+/// replacement keeps the destination's existing permissions instead of
+/// forcing owner-only — saving an executable script must not drop +x.
+pub(crate) fn atomic_write_file_preserving_mode(
+    path: &Path,
+    contents: &[u8],
+) -> std::io::Result<()> {
+    atomic_write_with(path, contents, PermissionPolicy::PreserveExisting)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PermissionPolicy {
+    /// New file is restricted to its owner (config/session data).
+    OwnerOnly,
+    /// New file inherits the destination's mode (user files being edited).
+    PreserveExisting,
+}
+
+fn atomic_write_with(
+    path: &Path,
+    contents: &[u8],
+    policy: PermissionPolicy,
+) -> std::io::Result<()> {
     use std::io::Write;
-    match std::fs::File::create(path) {
-        Ok(file) => {
-            // Owner-only mode (0600 on unix); File::create preserves the
-            // mode of an existing file, so an old world-readable copy is
-            // tightened here too.
-            crate::file_security::restrict_to_owner(&file);
-            let mut file = file;
-            if let Err(e) = file.write_all(contents.as_bytes()) {
-                log::warn!("Failed to write {}: {}", path.display(), e);
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let temp = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("portal"),
+        uuid::Uuid::new_v4()
+    ));
+    let result = (|| {
+        let mut file = std::fs::File::create(&temp)?;
+        match policy {
+            PermissionPolicy::OwnerOnly => crate::file_security::restrict_to_owner(&file),
+            PermissionPolicy::PreserveExisting => {
+                crate::file_security::preserve_existing_mode(&file, path)
             }
         }
-        Err(e) => log::warn!("Failed to create {}: {}", path.display(), e),
+        file.write_all(contents)?;
+        file.sync_all()?;
+        drop(file);
+        if let Err(rename_error) = std::fs::rename(&temp, path) {
+            // Windows refuses to replace an existing file with rename. This
+            // fallback is intentionally narrow and only targets `path`.
+            if path.exists() {
+                std::fs::remove_file(path)?;
+                std::fs::rename(&temp, path)?;
+            } else {
+                return Err(rename_error);
+            }
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
     }
+    result
 }
 
 /// Save hosts to JSON file. Creates parent directories if needed.
@@ -1193,12 +1563,25 @@ pub fn save_hosts(path: &Path, hosts: &[HostEntry]) {
             match &mut entry.auth {
                 AuthMethod::Password { password } => {
                     if !password.is_empty()
-                        && store_host_credential(&h.host, h.port, &h.username, "password", password, &h.name) {
-                            password.clear();
-                        }
-                        // If keychain store failed, keep plaintext as fallback
+                        && store_host_credential(
+                            &h.host,
+                            h.port,
+                            &h.username,
+                            "password",
+                            password,
+                            &h.name,
+                        )
+                    {
+                        password.clear();
+                    }
+                    // If keychain store failed, keep plaintext as fallback
                 }
-                AuthMethod::Key { key_path, key_content, passphrase, key_in_keychain } => {
+                AuthMethod::Key {
+                    key_path,
+                    key_content,
+                    passphrase,
+                    key_in_keychain,
+                } => {
                     // Import private key content into keychain (from file or pasted content)
                     if !*key_in_keychain {
                         let key_data = if !key_content.is_empty() {
@@ -1227,10 +1610,23 @@ pub fn save_hosts(path: &Path, hosts: &[HostEntry]) {
                         };
 
                         if !key_data.is_empty()
-                            && store_host_credential(&h.host, h.port, &h.username, "privatekey", &key_data, &h.name) {
-                                *key_in_keychain = true;
-                                log::info!("Imported private key into keychain for {}@{}:{}", h.username, h.host, h.port);
-                            }
+                            && store_host_credential(
+                                &h.host,
+                                h.port,
+                                &h.username,
+                                "privatekey",
+                                &key_data,
+                                &h.name,
+                            )
+                        {
+                            *key_in_keychain = true;
+                            log::info!(
+                                "Imported private key into keychain for {}@{}:{}",
+                                h.username,
+                                h.host,
+                                h.port
+                            );
+                        }
                     }
                     if *key_in_keychain && !key_content.is_empty() {
                         // The PEM body now lives in the keychain — the JSON
@@ -1240,9 +1636,17 @@ pub fn save_hosts(path: &Path, hosts: &[HostEntry]) {
                         key_content.clear();
                     }
                     if !passphrase.is_empty()
-                        && store_host_credential(&h.host, h.port, &h.username, "passphrase", passphrase, &h.name) {
-                            passphrase.clear();
-                        }
+                        && store_host_credential(
+                            &h.host,
+                            h.port,
+                            &h.username,
+                            "passphrase",
+                            passphrase,
+                            &h.name,
+                        )
+                    {
+                        passphrase.clear();
+                    }
                 }
                 AuthMethod::Agent | AuthMethod::None => {}
             }

@@ -3,15 +3,15 @@
 //! The macOS/Linux split for child-process name detection lives in sibling
 //! modules behind [`pid_executable_name`]:
 
-#[cfg(target_os = "macos")]
-mod macos;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod linux;
-
 #[cfg(target_os = "macos")]
-pub use macos::pid_executable_name;
+mod macos;
+
 #[cfg(all(unix, not(target_os = "macos")))]
 pub use linux::pid_executable_name;
+#[cfg(target_os = "macos")]
+pub use macos::pid_executable_name;
 
 use super::{Error, Pty, PtySize, Result};
 use std::fs::File;
@@ -97,9 +97,7 @@ fn ps_comm(pid: u32) -> Option<String> {
 /// thread forever.
 pub fn write_all_pty(fd: RawFd, mut data: &[u8]) -> io::Result<()> {
     while !data.is_empty() {
-        let n = unsafe {
-            libc::write(fd, data.as_ptr() as *const libc::c_void, data.len())
-        };
+        let n = unsafe { libc::write(fd, data.as_ptr() as *const libc::c_void, data.len()) };
         if n >= 0 {
             data = &data[n as usize..];
             continue;
@@ -221,10 +219,7 @@ impl Pty for UnixPty {
                 // instead of the app's working directory. getenv/chdir are
                 // async-signal-safe (allowed between fork and exec).
                 let home = libc::getenv(c"HOME".as_ptr());
-                let dir = cwd_c
-                    .as_ref()
-                    .map(|c| c.as_ptr())
-                    .unwrap_or(home);
+                let dir = cwd_c.as_ref().map(|c| c.as_ptr()).unwrap_or(home);
                 if !dir.is_null() && libc::chdir(dir) == 0 {
                     // An explicit cwd can still be TCC/permission-gated: chdir
                     // succeeds but resolving the path (which reads the parent
@@ -233,11 +228,13 @@ impl Pty for UnixPty {
                     // "open ..: operation not permitted". Probe the parent;
                     // on denial fall back to HOME with a banner line (fd 2 is
                     // already the PTY slave, so write() lands in the grid).
-                    if cwd_c.is_some() && libc::open(c"..".as_ptr(), libc::O_RDONLY) < 0 {
-                        if !home.is_null() && libc::chdir(home) == 0 {
-                            let msg = b"\r\n[portal] cannot enter the requested folder (permission denied); opened ~ instead\r\n\r";
-                            libc::write(2, msg.as_ptr().cast(), msg.len());
-                        }
+                    if cwd_c.is_some()
+                        && libc::open(c"..".as_ptr(), libc::O_RDONLY) < 0
+                        && !home.is_null()
+                        && libc::chdir(home) == 0
+                    {
+                        let msg = b"\r\n[portal] cannot enter the requested folder (permission denied); opened ~ instead\r\n\r";
+                        libc::write(2, msg.as_ptr().cast(), msg.len());
                     }
                 }
             }
@@ -401,8 +398,7 @@ impl Pty for UnixPty {
                     // (SIGCHLD from the shell forking a subcommand) is caught
                     // mid-syscall — is transient and MUST NOT be treated as
                     // death, or a live shell gets falsely marked exited.
-                    let gone = std::io::Error::last_os_error().raw_os_error()
-                        == Some(libc::ECHILD);
+                    let gone = std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD);
                     if gone {
                         mark_dead(self);
                     }
@@ -454,7 +450,10 @@ impl Pty for UnixPty {
                     mark_dead(self);
                     return Ok(());
                 }
-                return Err(Error::SpawnFailed(format!("Failed to kill process: {}", err)));
+                return Err(Error::SpawnFailed(format!(
+                    "Failed to kill process: {}",
+                    err
+                )));
             }
 
             // Wait up to 50ms for graceful exit
@@ -512,8 +511,7 @@ impl Pty for UnixPty {
 pub fn detect_shell_name(child_pid: i32) -> Option<String> {
     // 1. Direct PTY child process name (ps first, then the per-platform
     //    fallback — macOS proc_pidpath when ps can't answer).
-    let direct_name = ps_comm(child_pid as u32)
-        .or_else(|| pid_executable_name(child_pid))?;
+    let direct_name = ps_comm(child_pid as u32).or_else(|| pid_executable_name(child_pid))?;
 
     // 2. Scan direct children for a nested known interactive shell.
     //    Handles "zsh → user ran `bash`" — the visible shell is the
@@ -533,10 +531,12 @@ pub fn detect_shell_name(child_pid: i32) -> Option<String> {
                         Err(_) => continue,
                     };
                     if let Some(comm) = ps_comm(cpid) {
-                        if KNOWN.contains(&comm.as_str()) && comm != direct_name
-                            && best.as_ref().is_none_or(|(pid, _)| cpid > *pid) {
-                                best = Some((cpid, comm));
-                            }
+                        if KNOWN.contains(&comm.as_str())
+                            && comm != direct_name
+                            && best.as_ref().is_none_or(|(pid, _)| cpid > *pid)
+                        {
+                            best = Some((cpid, comm));
+                        }
                     }
                 }
                 if let Some((_, name)) = best {

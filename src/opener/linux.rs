@@ -31,7 +31,10 @@ impl Opener for LinuxOpener {
     fn reveal_path(&self, path: &Path) -> Result<(), String> {
         match reveal_target(path) {
             Some(parent) => spawn_path("xdg-open", parent),
-            None => Err(format!("no parent directory to open for {}", path.display())),
+            None => Err(format!(
+                "no parent directory to open for {}",
+                path.display()
+            )),
         }
     }
 

@@ -2,12 +2,12 @@
 //!
 //! This module contains the tab bar rendering logic for the terminal view.
 
-use eframe::egui;
+use crate::ssh::SshConnectionState;
+use crate::ui::i18n::Language;
 use crate::ui::pane::{Tab, TabDragState};
 use crate::ui::theme::ThemeColors;
-use crate::ui::i18n::Language;
 use crate::ui::types::session::SessionKind;
-use crate::ssh::SshConnectionState;
+use eframe::egui;
 
 /// Bar title for the tab's focused session. SSH shows `user@host` — the
 /// connection identity — so same-machine multi-account tabs stay
@@ -40,8 +40,15 @@ pub enum TabBarAction {
     CloseTab(usize),
     ReconnectTab(usize),
     DetachTab(usize),
-    MergeTabs { src: usize, dst: usize },
-    ReorderTab { src: usize, dst: usize, insert_before: bool },
+    MergeTabs {
+        src: usize,
+        dst: usize,
+    },
+    ReorderTab {
+        src: usize,
+        dst: usize,
+        insert_before: bool,
+    },
     NewTab,
     ToggleToolsDrawer,
     None,
@@ -76,7 +83,17 @@ pub fn render_tab_bar(
             .auto_shrink([false, false])
             .scroll_bar_visibility(egui::containers::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .show(ui, |ui| {
-                render_tabs_inner(ui, ctx, tabs, active_tab, tab_drag, theme, language, full_tab_bar_rect, window_index)
+                render_tabs_inner(
+                    ui,
+                    ctx,
+                    tabs,
+                    active_tab,
+                    tab_drag,
+                    theme,
+                    language,
+                    full_tab_bar_rect,
+                    window_index,
+                )
             });
 
         let scroll_result = scroll_response.inner;
@@ -89,16 +106,25 @@ pub fn render_tab_bar(
         let mut action = TabBarAction::None;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let tools_open = active_tab < tabs.len() && tabs[active_tab].tools_drawer_open;
-            let btn_color = if tools_open { theme.accent } else { theme.fg_dim };
+            let btn_color = if tools_open {
+                theme.accent
+            } else {
+                theme.fg_dim
+            };
             ui.add_space(8.0);
-            if ui.add(
-                egui::Button::new(egui::RichText::new("\u{22EF}").color(btn_color).size(16.0)).frame(false),
-            ).clicked() {
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new("\u{22EF}").color(btn_color).size(16.0))
+                        .frame(false),
+                )
+                .clicked()
+            {
                 action = TabBarAction::ToggleToolsDrawer;
             }
         });
         action
-    }).inner
+    })
+    .inner
 }
 
 /// Inner function to render tabs (shared between all windows)
@@ -160,7 +186,8 @@ fn render_tabs_inner(
         // Render each tab
         for (i, tab) in tabs.iter().enumerate() {
             let is_active = i == active_tab;
-            let is_drag_target = tab_drag.source_index.is_some() && tab_drag.target_index == Some(i);
+            let is_drag_target =
+                tab_drag.source_index.is_some() && tab_drag.target_index == Some(i);
             let is_broadcasting = tab.broadcast_enabled;
 
             let offset = tab_drag.get_offset(i, current_time);
@@ -186,7 +213,8 @@ fn render_tabs_inner(
                     ui.spacing_mut().item_spacing.x = 6.0;
 
                     // Status dot
-                    let dot_color = tab.sessions
+                    let dot_color = tab
+                        .sessions
                         .get(tab.focused_session)
                         .map(|s| match &s.kind {
                             // Local: green while running, red only after the
@@ -195,7 +223,8 @@ fn render_tabs_inner(
                             SessionKind::Local(_, _) => theme.red,
                             SessionKind::Ssh(ssh, _, _) => match ssh.connection_state() {
                                 SshConnectionState::Connected => theme.green,
-                                SshConnectionState::Connecting | SshConnectionState::Authenticating => theme.accent,
+                                SshConnectionState::Connecting
+                                | SshConnectionState::Authenticating => theme.accent,
                                 _ => theme.red,
                             },
                         })
@@ -208,16 +237,25 @@ fn render_tabs_inner(
                     }
 
                     // Tab title
-                    let title_color = if is_active { theme.fg_primary } else { theme.fg_dim };
+                    let title_color = if is_active {
+                        theme.fg_primary
+                    } else {
+                        theme.fg_dim
+                    };
                     let display_title = focused_session_title(tab);
-                    ui.label(egui::RichText::new(display_title).color(title_color).size(13.0));
+                    ui.label(
+                        egui::RichText::new(display_title)
+                            .color(title_color)
+                            .size(13.0),
+                    );
 
                     // Close button
                     if tabs.len() > 1 {
                         let close_resp = ui.add(
                             egui::Button::new(
-                                egui::RichText::new("×").color(theme.fg_dim).size(14.0)
-                            ).frame(false)
+                                egui::RichText::new("×").color(theme.fg_dim).size(14.0),
+                            )
+                            .frame(false),
                         );
                         close_btn_rect = Some(close_resp.rect);
                     }
@@ -229,11 +267,8 @@ fn render_tabs_inner(
 
             // Draw merge indicator
             if is_drag_target {
-                ui.painter().rect_stroke(
-                    tab_rect,
-                    8.0,
-                    egui::Stroke::new(2.0, theme.accent),
-                );
+                ui.painter()
+                    .rect_stroke(tab_rect, 8.0, egui::Stroke::new(2.0, theme.accent));
             }
 
             // Handle interaction
@@ -242,16 +277,19 @@ fn render_tabs_inner(
 
             if sense_resp.clicked() {
                 let click_pos = ui.ctx().input(|inp| inp.pointer.interact_pos());
-                let on_close = close_btn_rect.is_some_and(|r| click_pos.is_some_and(|p| r.contains(p)));
+                let on_close =
+                    close_btn_rect.is_some_and(|r| click_pos.is_some_and(|p| r.contains(p)));
                 if on_close {
                     tab_to_close = Some(i);
                 } else {
                     tab_to_activate = Some(i);
                     // Auto-reconnect only for main window (window_index == 0)
-                    if window_index == 0 && tab.sessions
-                        .get(tab.focused_session)
-                        .map(|s| s.needs_reconnect())
-                        .unwrap_or(false)
+                    if window_index == 0
+                        && tab
+                            .sessions
+                            .get(tab.focused_session)
+                            .map(|s| s.needs_reconnect())
+                            .unwrap_or(false)
                     {
                         tab_to_reconnect = Some(i);
                     }
@@ -269,7 +307,10 @@ fn render_tabs_inner(
             // Context menu
             let tab_count = tabs.len();
             sense_resp.context_menu(|ui| {
-                if ui.add_enabled(tab_count > 1, egui::Button::new(language.t("close_tab"))).clicked() {
+                if ui
+                    .add_enabled(tab_count > 1, egui::Button::new(language.t("close_tab")))
+                    .clicked()
+                {
                     tab_to_close = Some(i);
                     ui.close_menu();
                 }
@@ -291,7 +332,9 @@ fn render_tabs_inner(
                         tab_drag.target_index = Some(i);
                         let center_x = rect.center().x;
                         let edge_threshold = rect.width() * 0.25;
-                        if pos.x >= rect.min.x + edge_threshold && pos.x <= rect.max.x - edge_threshold {
+                        if pos.x >= rect.min.x + edge_threshold
+                            && pos.x <= rect.max.x - edge_threshold
+                        {
                             tab_drag.is_merge = true;
                         } else {
                             tab_drag.insert_before = pos.x < center_x;
@@ -324,18 +367,32 @@ fn render_tabs_inner(
 
                 // Draw ghost tab
                 let ghost_rect = egui::Rect::from_center_size(pos, tab_drag.ghost_size);
-                let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("tab_ghost")));
+                let painter = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Middle,
+                    egui::Id::new("tab_ghost"),
+                ));
                 painter.rect_filled(
                     ghost_rect,
                     egui::Rounding::same(8.0),
                     egui::Color32::from_rgba_unmultiplied(
-                        theme.bg_elevated.r(), theme.bg_elevated.g(), theme.bg_elevated.b(), 200)
+                        theme.bg_elevated.r(),
+                        theme.bg_elevated.g(),
+                        theme.bg_elevated.b(),
+                        200,
+                    ),
                 );
                 painter.rect_stroke(
                     ghost_rect,
                     egui::Rounding::same(8.0),
-                    egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(
-                        theme.border.r(), theme.border.g(), theme.border.b(), 150))
+                    egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgba_unmultiplied(
+                            theme.border.r(),
+                            theme.border.g(),
+                            theme.border.b(),
+                            150,
+                        ),
+                    ),
                 );
 
                 // Draw ghost text
@@ -346,13 +403,23 @@ fn render_tabs_inner(
                     &tab_drag.ghost_title,
                     egui::FontId::new(13.0, egui::FontFamily::Monospace),
                     egui::Color32::from_rgba_unmultiplied(
-                        theme.fg_primary.r(), theme.fg_primary.g(), theme.fg_primary.b(), 180)
+                        theme.fg_primary.r(),
+                        theme.fg_primary.g(),
+                        theme.fg_primary.b(),
+                        180,
+                    ),
                 );
 
                 // Draw insertion indicator
                 if let Some(dst_idx) = tab_drag.target_index {
                     if !tab_drag.is_merge && dst_idx < tab_rects.len() {
-                        draw_insertion_indicator(ui, tab_rects[dst_idx], tab_drag.insert_before, current_time, theme);
+                        draw_insertion_indicator(
+                            ui,
+                            tab_rects[dst_idx],
+                            tab_drag.insert_before,
+                            current_time,
+                            theme,
+                        );
                     }
                 }
             }
@@ -364,14 +431,18 @@ fn render_tabs_inner(
                         if tab_drag.is_merge {
                             result = TabBarAction::MergeTabs { src, dst };
                         } else {
-                            result = TabBarAction::ReorderTab { src, dst, insert_before: tab_drag.insert_before };
+                            result = TabBarAction::ReorderTab {
+                                src,
+                                dst,
+                                insert_before: tab_drag.insert_before,
+                            };
                         }
                     }
                 } else {
                     // No target tab - check if dropped outside tab bar
                     let hover_pos = ctx.input(|i| i.pointer.hover_pos());
                     let dropped_outside = match hover_pos {
-                        None => true,  // Mouse left the window → detach
+                        None => true, // Mouse left the window → detach
                         Some(pos) => !full_tab_bar_rect.contains(pos),
                     };
                     if dropped_outside && src < tabs.len() {
@@ -384,10 +455,13 @@ fn render_tabs_inner(
 
         // New tab button
         ui.add_space(4.0);
-        if ui.add(
-            egui::Button::new(egui::RichText::new("+").color(theme.fg_dim).size(16.0))
-                .frame(false)
-        ).clicked() {
+        if ui
+            .add(
+                egui::Button::new(egui::RichText::new("+").color(theme.fg_dim).size(16.0))
+                    .frame(false),
+            )
+            .clicked()
+        {
             result = TabBarAction::NewTab;
         }
 
@@ -428,8 +502,14 @@ fn draw_insertion_indicator(
     let expand = pulse * 3.0;
 
     let line_rect = egui::Rect::from_min_max(
-        egui::pos2(x_pos - line_width / 2.0 - expand, target_rect.min.y - 4.0 - expand),
-        egui::pos2(x_pos + line_width / 2.0 + expand, target_rect.max.y + 4.0 + expand),
+        egui::pos2(
+            x_pos - line_width / 2.0 - expand,
+            target_rect.min.y - 4.0 - expand,
+        ),
+        egui::pos2(
+            x_pos + line_width / 2.0 + expand,
+            target_rect.max.y + 4.0 + expand,
+        ),
     );
 
     let (r, g, b) = (theme.accent.r(), theme.accent.g(), theme.accent.b());
@@ -437,16 +517,16 @@ fn draw_insertion_indicator(
     painter.rect_filled(
         line_rect.expand(3.0),
         egui::Rounding::same(4.0),
-        egui::Color32::from_rgba_unmultiplied(r, g, b, (alpha as f32 / 255.0 * 80.0) as u8)
+        egui::Color32::from_rgba_unmultiplied(r, g, b, (alpha as f32 / 255.0 * 80.0) as u8),
     );
     painter.rect_filled(
         line_rect.expand(1.0),
         egui::Rounding::same(3.0),
-        egui::Color32::from_rgba_unmultiplied(r, g, b, (alpha as f32 / 255.0 * 150.0) as u8)
+        egui::Color32::from_rgba_unmultiplied(r, g, b, (alpha as f32 / 255.0 * 150.0) as u8),
     );
     painter.rect_filled(
         line_rect,
         egui::Rounding::same(2.0),
-        egui::Color32::from_rgba_unmultiplied(r, g, b, alpha)
+        egui::Color32::from_rgba_unmultiplied(r, g, b, alpha),
     );
 }

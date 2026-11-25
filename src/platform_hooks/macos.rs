@@ -8,7 +8,9 @@ pub fn activate_gui() {
 
     unsafe {
         let app: id = NSApp();
-        app.setActivationPolicy_(NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular);
+        app.setActivationPolicy_(
+            NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular,
+        );
         app.activateIgnoringOtherApps_(YES);
     }
 }

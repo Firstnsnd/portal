@@ -9,7 +9,8 @@ fn bench_search(c: &mut Criterion) {
     group.bench_function("search_30000_rows", |b| {
         let mut grid = TerminalGrid::with_scrollback_limit(200, 50, 100 * 1024 * 1024);
         for _ in 0..30_000 {
-            grid.scrollback.push_back(vec![TerminalCell::default(); grid.cols]);
+            grid.scrollback
+                .push_back(vec![TerminalCell::default(); grid.cols]);
             grid.scrollback_wrapped.push_back(false);
         }
         b.iter(|| {

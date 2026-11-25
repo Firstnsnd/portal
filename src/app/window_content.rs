@@ -10,13 +10,13 @@ use eframe::egui;
 
 use crate::config;
 use crate::config::ShortcutAction;
-use crate::ssh::{SshConnectionState, NotificationLevel};
-use crate::ui::*;
-use crate::ui::views::tab_view::{TabBarAction, render_tab_bar};
+use crate::ssh::{NotificationLevel, SshConnectionState};
+use crate::ui::pane::{PaneAction, PaneNode, SplitDirection, Tab};
+use crate::ui::pane_view::{ViewActions, WindowContext};
 use crate::ui::types::dialogs::AppView;
-use crate::ui::pane::{PaneNode, PaneAction, SplitDirection, Tab};
-use crate::ui::types::session::{TerminalSession, SessionKind};
-use crate::ui::pane_view::{WindowContext, ViewActions};
+use crate::ui::types::session::{SessionKind, TerminalSession};
+use crate::ui::views::tab_view::{render_tab_bar, TabBarAction};
+use crate::ui::*;
 
 use super::PortalApp;
 
@@ -113,7 +113,9 @@ impl PortalApp {
                     if window.active_tab >= window.tabs.len() {
                         window.active_tab = window.tabs.len().saturating_sub(1);
                     }
-                    result.pending_detach.retain(|&(w, t)| w != window_idx || t != removed_idx);
+                    result
+                        .pending_detach
+                        .retain(|&(w, t)| w != window_idx || t != removed_idx);
                 }
                 self.mark_sessions_dirty();
             }
@@ -154,7 +156,9 @@ impl PortalApp {
                 }
             }
             // Cmd+Shift+M → open tools drawer with Metrics tab
-            if ctx.input(|i| i.key_pressed(egui::Key::M) && i.modifiers.command && i.modifiers.shift) {
+            if ctx
+                .input(|i| i.key_pressed(egui::Key::M) && i.modifiers.command && i.modifiers.shift)
+            {
                 let at = self.windows[window_idx].active_tab;
                 if let Some(tab) = self.windows[window_idx].tabs.get_mut(at) {
                     if tab.tools_drawer_open && tab.tools_tab == 0 {
@@ -169,7 +173,9 @@ impl PortalApp {
                 }
             }
             // Cmd+Shift+S → open tools drawer with Snippets tab
-            if ctx.input(|i| i.key_pressed(egui::Key::S) && i.modifiers.command && i.modifiers.shift) {
+            if ctx
+                .input(|i| i.key_pressed(egui::Key::S) && i.modifiers.command && i.modifiers.shift)
+            {
                 let at = self.windows[window_idx].active_tab;
                 if let Some(tab) = self.windows[window_idx].tabs.get_mut(at) {
                     if tab.tools_drawer_open && tab.tools_tab == 1 {
@@ -212,7 +218,11 @@ impl PortalApp {
             None
         };
         if let Some(clicked_view) = crate::ui::views::nav_panel::show_nav_panel(
-            ctx, current_view, &self.theme, &self.language, nav_id
+            ctx,
+            current_view,
+            &self.theme,
+            &self.language,
+            nav_id,
         ) {
             // The Keychain page is the door to the credential store:
             // entering it clears the owner gate (operations inside then run
@@ -269,13 +279,14 @@ impl PortalApp {
                                     NotificationLevel::Warning => {
                                         ("\u{26A0}", self.theme.warning, self.theme.warning)
                                     }
-                                    NotificationLevel::Error => {
-                                        ("\u{274C}", theme.red, theme.red)
-                                    }
+                                    NotificationLevel::Error => ("\u{274C}", theme.red, theme.red),
                                 };
 
                                 let border_color = egui::Color32::from_rgba_unmultiplied(
-                                    border_tint.r(), border_tint.g(), border_tint.b(), 60,
+                                    border_tint.r(),
+                                    border_tint.g(),
+                                    border_tint.b(),
+                                    60,
                                 );
 
                                 let frame = egui::Frame {
@@ -296,9 +307,7 @@ impl PortalApp {
                                     ui.horizontal(|ui| {
                                         // Icon
                                         ui.label(
-                                            egui::RichText::new(icon)
-                                                .size(15.0)
-                                                .color(icon_color),
+                                            egui::RichText::new(icon).size(15.0).color(icon_color),
                                         );
                                         ui.add_space(6.0);
 
@@ -331,7 +340,9 @@ impl PortalApp {
                                                 if close_resp.clicked() {
                                                     to_remove.push(i);
                                                 }
-                                                close_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+                                                close_resp.on_hover_cursor(
+                                                    egui::CursorIcon::PointingHand,
+                                                );
                                             },
                                         );
                                     });
@@ -371,12 +382,20 @@ impl PortalApp {
                     ..Default::default()
                 })
                 .show(ctx, |ui| {
-                    let mut showmore_menu_id = ctx.data_mut(|d| *d.get_temp_mut_or_default::<bool>(more_menu_id));
+                    let mut showmore_menu_id =
+                        ctx.data_mut(|d| *d.get_temp_mut_or_default::<bool>(more_menu_id));
 
                     let window = &mut self.windows[window_idx];
                     let action = render_tab_bar(
-                        ui, ctx, &window.tabs, window.active_tab, &mut window.tab_drag,
-                        &self.theme, &self.language, &mut showmore_menu_id, window_idx
+                        ui,
+                        ctx,
+                        &window.tabs,
+                        window.active_tab,
+                        &mut window.tab_drag,
+                        &self.theme,
+                        &self.language,
+                        &mut showmore_menu_id,
+                        window_idx,
                     );
 
                     ctx.data_mut(|d| d.insert_temp(more_menu_id, showmore_menu_id));
@@ -428,12 +447,10 @@ impl PortalApp {
         // inline credential or a proxy password. The owner gate decides —
         // verified already, or prompt now — and re-arms the granted flag
         // so the drawer re-runs its save next frame.
-        let cred_save_request = std::mem::take(
-            &mut self.windows[window_idx].credential_dialog.gate_request,
-        );
-        let host_save_request = std::mem::take(
-            &mut self.windows[window_idx].add_host_dialog.save_gate_request,
-        );
+        let cred_save_request =
+            std::mem::take(&mut self.windows[window_idx].credential_dialog.gate_request);
+        let host_save_request =
+            std::mem::take(&mut self.windows[window_idx].add_host_dialog.save_gate_request);
         if cred_save_request {
             self.gate_credential_save(window_idx);
         }
@@ -607,38 +624,64 @@ impl PortalApp {
             .collapsible(false)
             .frame(widgets::dialog_frame(&self.theme))
             .show(ctx, |ui| {
-                ui.label(egui::RichText::new(self.language.t("cwd_permission_title"))
-                    .size(16.0).strong().color(self.theme.fg_primary));
+                ui.label(
+                    egui::RichText::new(self.language.t("cwd_permission_title"))
+                        .size(16.0)
+                        .strong()
+                        .color(self.theme.fg_primary),
+                );
                 ui.add_space(12.0);
-                ui.label(egui::RichText::new(self.language.t("cwd_permission_desc"))
-                    .size(13.0).color(self.theme.fg_dim));
+                ui.label(
+                    egui::RichText::new(self.language.t("cwd_permission_desc"))
+                        .size(13.0)
+                        .color(self.theme.fg_dim),
+                );
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(&dialog.path)
-                    .size(12.0).color(self.theme.fg_dim).monospace());
+                ui.label(
+                    egui::RichText::new(&dialog.path)
+                        .size(12.0)
+                        .color(self.theme.fg_dim)
+                        .monospace(),
+                );
                 if let Some(err) = &access_error {
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new(err)
-                        .size(12.0).color(self.theme.red).monospace());
+                    ui.label(
+                        egui::RichText::new(err)
+                            .size(12.0)
+                            .color(self.theme.red)
+                            .monospace(),
+                    );
                 }
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
                     // macOS deep-links the TCC pane; platforms without an
                     // authorization surface don't render a dead button.
                     if crate::opener::has_privacy_settings()
-                        && ui.add(widgets::primary_button(
-                            self.language.t("open_auth_settings"), &self.theme,
-                        )).clicked()
+                        && ui
+                            .add(widgets::primary_button(
+                                self.language.t("open_auth_settings"),
+                                &self.theme,
+                            ))
+                            .clicked()
                     {
                         let _ = crate::opener::open_privacy_settings();
                     }
-                    if ui.add(widgets::secondary_button(
-                        self.language.t("retry"), &self.theme,
-                    )).clicked() {
+                    if ui
+                        .add(widgets::secondary_button(
+                            self.language.t("retry"),
+                            &self.theme,
+                        ))
+                        .clicked()
+                    {
                         action = Some(true);
                     }
-                    if ui.add(widgets::secondary_button(
-                        self.language.t("cancel"), &self.theme,
-                    )).clicked() {
+                    if ui
+                        .add(widgets::secondary_button(
+                            self.language.t("cancel"),
+                            &self.theme,
+                        ))
+                        .clicked()
+                    {
                         action = Some(false);
                     }
                 });
@@ -662,8 +705,8 @@ impl PortalApp {
     }
 
     fn render_update_dialog(&mut self, ctx: &egui::Context) {
-        use crate::update::UpdateState;
         use crate::ui::widgets;
+        use crate::update::UpdateState;
 
         // Snapshot the state; all mutations go through methods that take &mut
         // self (which also manage persisted dismissals and thread spawns).
@@ -690,17 +733,40 @@ impl PortalApp {
                     .collapsible(false)
                     .frame(widgets::dialog_frame(&self.theme))
                     .show(ctx, |ui| {
-                        ui.label(egui::RichText::new(self.language.tf("update_available", &version))
-                            .size(15.0).strong().color(self.theme.fg_primary));
+                        ui.label(
+                            egui::RichText::new(self.language.tf("update_available", &version))
+                                .size(15.0)
+                                .strong()
+                                .color(self.theme.fg_primary),
+                        );
                         ui.add_space(4.0);
-                        ui.label(egui::RichText::new(format!("{} → {}", env!("CARGO_PKG_VERSION"), version))
-                            .size(12.0).color(self.theme.fg_dim));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} → {}",
+                                env!("CARGO_PKG_VERSION"),
+                                version
+                            ))
+                            .size(12.0)
+                            .color(self.theme.fg_dim),
+                        );
                         ui.add_space(16.0);
                         ui.horizontal(|ui| {
-                            if ui.add(widgets::primary_button(self.language.t("update_download"), &self.theme)).clicked() {
+                            if ui
+                                .add(widgets::primary_button(
+                                    self.language.t("update_download"),
+                                    &self.theme,
+                                ))
+                                .clicked()
+                            {
                                 act = Some(true);
                             }
-                            if ui.add(widgets::secondary_button(self.language.t("update_dismiss"), &self.theme)).clicked() {
+                            if ui
+                                .add(widgets::secondary_button(
+                                    self.language.t("update_dismiss"),
+                                    &self.theme,
+                                ))
+                                .clicked()
+                            {
                                 act = Some(false);
                             }
                         });
@@ -711,7 +777,12 @@ impl PortalApp {
                     None => {}
                 }
             }
-            UpdateState::Downloading { version, asset_name, received, total } => {
+            UpdateState::Downloading {
+                version,
+                asset_name,
+                received,
+                total,
+            } => {
                 egui::Window::new("update_downloading")
                     .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
                     .title_bar(false)
@@ -719,15 +790,30 @@ impl PortalApp {
                     .collapsible(false)
                     .frame(widgets::dialog_frame(&self.theme))
                     .show(ctx, |ui| {
-                        ui.label(egui::RichText::new(format!("{} v{}", self.language.t("update_downloading"), version))
-                            .size(14.0).strong().color(self.theme.fg_primary));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} v{}",
+                                self.language.t("update_downloading"),
+                                version
+                            ))
+                            .size(14.0)
+                            .strong()
+                            .color(self.theme.fg_primary),
+                        );
                         ui.add_space(4.0);
-                        ui.label(egui::RichText::new(&asset_name).size(12.0).color(self.theme.fg_dim));
+                        ui.label(
+                            egui::RichText::new(&asset_name)
+                                .size(12.0)
+                                .color(self.theme.fg_dim),
+                        );
                         ui.add_space(12.0);
                         match total {
                             Some(t) if t > 0 => {
                                 let pct = received as f32 / t as f32;
-                                ui.add(egui::ProgressBar::new(pct).text(format!("{:.0}%", pct * 100.0)));
+                                ui.add(
+                                    egui::ProgressBar::new(pct)
+                                        .text(format!("{:.0}%", pct * 100.0)),
+                                );
                             }
                             _ => {
                                 ui.horizontal(|ui| {
@@ -748,16 +834,36 @@ impl PortalApp {
                     .collapsible(false)
                     .frame(widgets::dialog_frame(&self.theme))
                     .show(ctx, |ui| {
-                        ui.label(egui::RichText::new(self.language.tf("update_ready", &version))
-                            .size(14.0).strong().color(self.theme.fg_primary));
+                        ui.label(
+                            egui::RichText::new(self.language.tf("update_ready", &version))
+                                .size(14.0)
+                                .strong()
+                                .color(self.theme.fg_primary),
+                        );
                         ui.add_space(4.0);
-                        ui.label(egui::RichText::new(path.display().to_string()).size(12.0).color(self.theme.fg_dim));
+                        ui.label(
+                            egui::RichText::new(path.display().to_string())
+                                .size(12.0)
+                                .color(self.theme.fg_dim),
+                        );
                         ui.add_space(16.0);
                         ui.horizontal(|ui| {
-                            if ui.add(widgets::primary_button(self.language.t("update_open"), &self.theme)).clicked() {
+                            if ui
+                                .add(widgets::primary_button(
+                                    self.language.t("update_open"),
+                                    &self.theme,
+                                ))
+                                .clicked()
+                            {
                                 act = Some(true);
                             }
-                            if ui.add(widgets::secondary_button(self.language.t("update_close"), &self.theme)).clicked() {
+                            if ui
+                                .add(widgets::secondary_button(
+                                    self.language.t("update_close"),
+                                    &self.theme,
+                                ))
+                                .clicked()
+                            {
                                 act = Some(false);
                             }
                         });
@@ -787,12 +893,22 @@ impl PortalApp {
                     .collapsible(false)
                     .frame(widgets::dialog_frame(&self.theme))
                     .show(ctx, |ui| {
-                        ui.label(egui::RichText::new(self.language.t("update_check_error"))
-                            .size(14.0).strong().color(self.theme.fg_primary));
+                        ui.label(
+                            egui::RichText::new(self.language.t("update_check_error"))
+                                .size(14.0)
+                                .strong()
+                                .color(self.theme.fg_primary),
+                        );
                         ui.add_space(4.0);
                         ui.label(egui::RichText::new(&e).size(12.0).color(self.theme.fg_dim));
                         ui.add_space(16.0);
-                        if ui.add(widgets::secondary_button(self.language.t("update_close"), &self.theme)).clicked() {
+                        if ui
+                            .add(widgets::secondary_button(
+                                self.language.t("update_close"),
+                                &self.theme,
+                            ))
+                            .clicked()
+                        {
                             close = true;
                         }
                     });
@@ -874,12 +990,24 @@ impl PortalApp {
                 }
                 self.mark_sessions_dirty();
             }
-            TabBarAction::ReorderTab { src, dst, insert_before } => {
+            TabBarAction::ReorderTab {
+                src,
+                dst,
+                insert_before,
+            } => {
                 let window = &mut self.windows[window_idx];
                 let src_tab = window.tabs.remove(src);
                 let insert_idx = if insert_before {
-                    if src < dst { dst.saturating_sub(1) } else { dst }
-                } else if src < dst { dst } else { (dst + 1).min(window.tabs.len()) };
+                    if src < dst {
+                        dst.saturating_sub(1)
+                    } else {
+                        dst
+                    }
+                } else if src < dst {
+                    dst
+                } else {
+                    (dst + 1).min(window.tabs.len())
+                };
                 window.tabs.insert(insert_idx, src_tab);
                 window.active_tab = insert_idx;
                 self.mark_sessions_dirty();
@@ -916,8 +1044,8 @@ impl PortalApp {
                     } else {
                         tab.tools_drawer_open = true;
                         tab.tools_tab = 0; // default to Metrics
-                        // The tools drawer and AI drawer share the right-hand
-                        // rail — opening tools dismisses the AI drawer.
+                                           // The tools drawer and AI drawer share the right-hand
+                                           // rail — opening tools dismisses the AI drawer.
                         if let Ok(mut ai) = tab.ai_chat.lock() {
                             ai.open = false;
                         }
@@ -932,7 +1060,9 @@ impl PortalApp {
     fn render_status_bar(&mut self, ctx: &egui::Context, window_idx: usize, is_detached: bool) {
         let window = &self.windows[window_idx];
 
-        let conn_type = window.tabs.get(window.active_tab)
+        let conn_type = window
+            .tabs
+            .get(window.active_tab)
             .and_then(|tab| tab.sessions.get(tab.focused_session))
             .map(|s| match &s.kind {
                 SessionKind::Ssh(ssh, ssh_host, _) => {
@@ -940,8 +1070,12 @@ impl PortalApp {
                     match ssh.connection_state() {
                         SshConnectionState::Connected => format!("SSH  {}", host),
                         SshConnectionState::Connecting => format!("SSH  {} (connecting…)", host),
-                        SshConnectionState::Authenticating => format!("SSH  {} (authenticating…)", host),
-                        SshConnectionState::Disconnected(_) => format!("SSH  {} (disconnected)", host),
+                        SshConnectionState::Authenticating => {
+                            format!("SSH  {} (authenticating…)", host)
+                        }
+                        SshConnectionState::Disconnected(_) => {
+                            format!("SSH  {} (disconnected)", host)
+                        }
                         SshConnectionState::Error(_) => format!("SSH  {}", host),
                     }
                 }
@@ -950,20 +1084,27 @@ impl PortalApp {
             .unwrap_or_else(|| "Local".to_string());
 
         let is_local_session = conn_type == "Local";
-        let shell_label = window.tabs.get(window.active_tab)
+        let shell_label = window
+            .tabs
+            .get(window.active_tab)
             .and_then(|tab| tab.sessions.get(tab.focused_session))
             .map(|s| s.shell_name())
             .unwrap_or_else(|| "—".to_string());
 
-        let uptime_label = window.tabs.get(window.active_tab)
+        let uptime_label = window
+            .tabs
+            .get(window.active_tab)
             .and_then(|tab| tab.sessions.get(tab.focused_session))
             .map(|s| {
                 let elapsed = s.created_at.elapsed().as_secs();
                 let hours = elapsed / 3600;
                 let minutes = (elapsed % 3600) / 60;
                 let seconds = elapsed % 60;
-                if hours > 0 { format!("{:02}:{:02}:{:02}", hours, minutes, seconds) }
-                else { format!("{:02}:{:02}", minutes, seconds) }
+                if hours > 0 {
+                    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+                } else {
+                    format!("{:02}:{:02}", minutes, seconds)
+                }
             })
             .unwrap_or_default();
 
@@ -974,12 +1115,19 @@ impl PortalApp {
         };
 
         let sep_color = self.theme.border;
-        let conn_color = if conn_type == "Local" { self.theme.green } else { self.theme.accent };
-        let broadcast_enabled = self.windows[window_idx].tabs.get(self.windows[window_idx].active_tab)
+        let conn_color = if conn_type == "Local" {
+            self.theme.green
+        } else {
+            self.theme.accent
+        };
+        let broadcast_enabled = self.windows[window_idx]
+            .tabs
+            .get(self.windows[window_idx].active_tab)
             .map(|t| t.broadcast_enabled)
             .unwrap_or(false);
         // Recording state of the focused pane (for the REC status indicator).
-        let recording_active = self.windows[window_idx].tabs
+        let recording_active = self.windows[window_idx]
+            .tabs
             .get(self.windows[window_idx].active_tab)
             .and_then(|t| t.sessions.get(t.focused_session))
             .map(|s| s.kind.is_recording())
@@ -1003,9 +1151,14 @@ impl PortalApp {
                     let font_size = if is_detached { 12.0 } else { 11.0 };
 
                     let status_btn = |ui: &mut egui::Ui, text: &str, color: egui::Color32| {
-                        ui.add(egui::Button::new(
-                            egui::RichText::new(text).color(color).size(font_size)
-                        ).frame(false).rounding(0.0).min_size(egui::vec2(0.0, if is_detached { 24.0 } else { 20.0 })))
+                        ui.add(
+                            egui::Button::new(
+                                egui::RichText::new(text).color(color).size(font_size),
+                            )
+                            .frame(false)
+                            .rounding(0.0)
+                            .min_size(egui::vec2(0.0, if is_detached { 24.0 } else { 20.0 })),
+                        )
                     };
                     status_btn(ui, &conn_type, conn_color);
 
@@ -1014,7 +1167,11 @@ impl PortalApp {
                         ui.add_space(12.0);
                         ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
                         ui.add_space(12.0);
-                        ui.label(egui::RichText::new(self.language.t("broadcast")).color(self.theme.accent).size(font_size));
+                        ui.label(
+                            egui::RichText::new(self.language.t("broadcast"))
+                                .color(self.theme.accent)
+                                .size(font_size),
+                        );
                     }
                     // Recording indicator (focused pane) — clickable, jumps to
                     // this host's recordings in the replay library.
@@ -1023,11 +1180,16 @@ impl PortalApp {
                         ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
                         ui.add_space(12.0);
                         // Red REC label; keep it ticking so the dot can't appear stale.
-                        let rec_host = self.windows[window_idx].tabs
+                        let rec_host = self.windows[window_idx]
+                            .tabs
                             .get(self.windows[window_idx].active_tab)
                             .and_then(|t| t.sessions.get(t.focused_session))
                             .map(|s| s.kind.recording_host());
-                        ui.label(egui::RichText::new("●").color(self.theme.red).size(font_size));
+                        ui.label(
+                            egui::RichText::new("●")
+                                .color(self.theme.red)
+                                .size(font_size),
+                        );
                         ui.add_space(4.0);
                         let rec_resp = status_btn(ui, self.language.t("recording"), self.theme.red);
                         if rec_resp.clicked() {
@@ -1046,9 +1208,11 @@ impl PortalApp {
                             ui.add_space(12.0);
                             ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
                             ui.add_space(12.0);
-                            ui.label(egui::RichText::new(
-                                self.language.tf("recording_failed", err),
-                            ).color(self.theme.red).size(font_size));
+                            ui.label(
+                                egui::RichText::new(self.language.tf("recording_failed", err))
+                                    .color(self.theme.red)
+                                    .size(font_size),
+                            );
                             ctx.request_repaint_after(std::time::Duration::from_millis(
                                 5000 - at.elapsed().as_millis().min(4999) as u64 + 1,
                             ));
@@ -1064,17 +1228,21 @@ impl PortalApp {
                             ui.add_space(12.0);
                             ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
                             ui.add_space(12.0);
-                            let name = saved_path.file_name()
+                            let name = saved_path
+                                .file_name()
                                 .map(|n| n.to_string_lossy().to_string())
                                 .unwrap_or_default();
                             let saved = status_btn(
                                 ui,
                                 &self.language.tf("recording_saved", &name),
                                 self.theme.green,
-                            ).on_hover_text(self.language.t("replay"));
+                            )
+                            .on_hover_text(self.language.t("replay"));
                             if saved.clicked() {
                                 let w = &mut self.windows[window_idx];
-                                w.replay = Some(crate::ui::views::replay_view::ReplayState::load(&saved_path));
+                                w.replay = Some(crate::ui::views::replay_view::ReplayState::load(
+                                    &saved_path,
+                                ));
                                 w.replay_host_filter = None;
                                 w.current_view = AppView::Replay;
                                 w.recording_saved = None;
@@ -1111,9 +1279,7 @@ impl PortalApp {
                             .map(|s| (s.kind.zmodem_transfer(), s.kind.zmodem_bytes()));
                         if let Some((Some(transfer), live_bytes)) = zt {
                             ui.add_space(12.0);
-                            ui.label(
-                                egui::RichText::new("|").color(sep_color).size(font_size),
-                            );
+                            ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
                             ui.add_space(12.0);
                             let bytes = if transfer.is_active() && live_bytes > 0 {
                                 live_bytes
@@ -1123,8 +1289,7 @@ impl PortalApp {
                                     _ => 0,
                                 }
                             };
-                            let (text, color) = match (&transfer.state, transfer.direction)
-                            {
+                            let (text, color) = match (&transfer.state, transfer.direction) {
                                 (ZmodemState::Handshaking, Direction::Upload) => (
                                     self.language.t("zmodem_sending").to_string(),
                                     self.theme.accent,
@@ -1153,10 +1318,9 @@ impl PortalApp {
                                     self.language.t("zmodem_complete").to_string(),
                                     self.theme.green,
                                 ),
-                                (ZmodemState::Failed(e), _) => (
-                                    self.language.tf("zmodem_failed", e),
-                                    self.theme.red,
-                                ),
+                                (ZmodemState::Failed(e), _) => {
+                                    (self.language.tf("zmodem_failed", e), self.theme.red)
+                                }
                                 (ZmodemState::Cancelled, _) => (
                                     self.language.t("zmodem_cancelled").to_string(),
                                     self.theme.fg_dim,
@@ -1180,7 +1344,8 @@ impl PortalApp {
                             }
                             if chip.clicked() {
                                 let w = &mut self.windows[window_idx];
-                                if let Some(s) = w.tabs
+                                if let Some(s) = w
+                                    .tabs
                                     .get_mut(w.active_tab)
                                     .and_then(|t| t.sessions.get_mut(t.focused_session))
                                 {
@@ -1193,9 +1358,7 @@ impl PortalApp {
                             }
                             if transfer.is_active() {
                                 // Keep the byte counter animating.
-                                ctx.request_repaint_after(std::time::Duration::from_millis(
-                                    250,
-                                ));
+                                ctx.request_repaint_after(std::time::Duration::from_millis(250));
                             }
                         }
                     }
@@ -1204,15 +1367,25 @@ impl PortalApp {
                     ui.add_space(12.0);
 
                     // Shell display
-                    ui.label(egui::RichText::new(&shell_label)
-                        .color(if is_local_session { self.theme.fg_primary } else { self.theme.fg_dim })
-                        .size(font_size));
+                    ui.label(
+                        egui::RichText::new(&shell_label)
+                            .color(if is_local_session {
+                                self.theme.fg_primary
+                            } else {
+                                self.theme.fg_dim
+                            })
+                            .size(font_size),
+                    );
 
                     if !uptime_label.is_empty() {
                         ui.add_space(12.0);
                         ui.label(egui::RichText::new("|").color(sep_color).size(font_size));
                         ui.add_space(12.0);
-                        ui.label(egui::RichText::new(&uptime_label).color(self.theme.fg_dim).size(font_size));
+                        ui.label(
+                            egui::RichText::new(&uptime_label)
+                                .color(self.theme.fg_dim)
+                                .size(font_size),
+                        );
                     }
 
                     // Show detached windows count (main window only)
@@ -1222,8 +1395,11 @@ impl PortalApp {
                             ui.add_space(8.0);
                             ui.label(egui::RichText::new("|").color(sep_color).size(11.0));
                             ui.add_space(8.0);
-                            ui.label(egui::RichText::new(format!("Windows: {}", n))
-                                .color(self.theme.green).size(11.0));
+                            ui.label(
+                                egui::RichText::new(format!("Windows: {}", n))
+                                    .color(self.theme.green)
+                                    .size(11.0),
+                            );
                         }
                     }
                 });
@@ -1231,7 +1407,12 @@ impl PortalApp {
     }
 
     /// Render terminal content (tab panes)
-    fn render_terminal_content(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, window_idx: usize) {
+    fn render_terminal_content(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        window_idx: usize,
+    ) {
         ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 0.0);
         let available = ui.available_rect_before_wrap();
 
@@ -1252,15 +1433,12 @@ impl PortalApp {
             // focus; while it does, the terminal panes stand down from
             // re-claiming focus every frame (see render_terminal_session).
             // A click on a pane takes focus back regardless.
-            let ai_chat_open = tab
-                .ai_chat
-                .lock()
-                .map(|s| s.open)
-                .unwrap_or(false);
-            let ai_composer_holds_focus = ai_chat_open
-                && ui.memory(|mem| mem.has_focus(ai_composer_id));
+            let ai_chat_open = tab.ai_chat.lock().map(|s| s.open).unwrap_or(false);
+            let ai_composer_holds_focus =
+                ai_chat_open && ui.memory(|mem| mem.has_focus(ai_composer_id));
             render_pane_tree(
-                ui, ctx,
+                ui,
+                ctx,
                 &mut tab.layout,
                 available,
                 &mut tab.sessions,
@@ -1291,10 +1469,9 @@ impl PortalApp {
                     }
                     let live = match &session.kind {
                         SessionKind::Local(pty, _) => !pty.has_exited(),
-                        SessionKind::Ssh(ssh, _, _) => matches!(
-                            ssh.connection_state(),
-                            SshConnectionState::Connected
-                        ),
+                        SessionKind::Ssh(ssh, _, _) => {
+                            matches!(ssh.connection_state(), SshConnectionState::Connected)
+                        }
                     };
                     if live {
                         let _ = session.kind.write(&input_bytes);
@@ -1307,50 +1484,60 @@ impl PortalApp {
                 PaneAction::SplitHorizontal => {
                     let window = &mut self.windows[window_idx];
                     let old_idx = idx;
-                    let new_session = match &window.tabs[active].sessions.get(old_idx).map(|s| &s.kind) {
-                        Some(SessionKind::Ssh(_, host, auth)) => {
-                            TerminalSession::new_ssh(host, auth.clone(), &self.runtime, None)
-                        }
-                        _ => {
-                            let default_shell = crate::terminal::default_shell_path();
-                            let id = window.next_id;
-                            window.next_id += 1;
-                            TerminalSession::new_local(id, &default_shell)
-                        }
-                    };
+                    let new_session =
+                        match &window.tabs[active].sessions.get(old_idx).map(|s| &s.kind) {
+                            Some(SessionKind::Ssh(_, host, auth)) => {
+                                TerminalSession::new_ssh(host, auth.clone(), &self.runtime, None)
+                            }
+                            _ => {
+                                let default_shell = crate::terminal::default_shell_path();
+                                let id = window.next_id;
+                                window.next_id += 1;
+                                TerminalSession::new_local(id, &default_shell)
+                            }
+                        };
                     let tab = &mut window.tabs[active];
                     tab.sessions.push(new_session);
                     let new_idx = tab.sessions.len() - 1;
-                    tab.layout.replace(old_idx, PaneNode::Split {
-                        direction: SplitDirection::Horizontal, ratio: 0.5,
-                        first: Box::new(PaneNode::Terminal(old_idx)),
-                        second: Box::new(PaneNode::Terminal(new_idx)),
-                    });
+                    tab.layout.replace(
+                        old_idx,
+                        PaneNode::Split {
+                            direction: SplitDirection::Horizontal,
+                            ratio: 0.5,
+                            first: Box::new(PaneNode::Terminal(old_idx)),
+                            second: Box::new(PaneNode::Terminal(new_idx)),
+                        },
+                    );
                     tab.focused_session = new_idx;
                     self.mark_sessions_dirty();
                 }
                 PaneAction::SplitVertical => {
                     let window = &mut self.windows[window_idx];
                     let old_idx = idx;
-                    let new_session = match &window.tabs[active].sessions.get(old_idx).map(|s| &s.kind) {
-                        Some(SessionKind::Ssh(_, host, auth)) => {
-                            TerminalSession::new_ssh(host, auth.clone(), &self.runtime, None)
-                        }
-                        _ => {
-                            let default_shell = crate::terminal::default_shell_path();
-                            let id = window.next_id;
-                            window.next_id += 1;
-                            TerminalSession::new_local(id, &default_shell)
-                        }
-                    };
+                    let new_session =
+                        match &window.tabs[active].sessions.get(old_idx).map(|s| &s.kind) {
+                            Some(SessionKind::Ssh(_, host, auth)) => {
+                                TerminalSession::new_ssh(host, auth.clone(), &self.runtime, None)
+                            }
+                            _ => {
+                                let default_shell = crate::terminal::default_shell_path();
+                                let id = window.next_id;
+                                window.next_id += 1;
+                                TerminalSession::new_local(id, &default_shell)
+                            }
+                        };
                     let tab = &mut window.tabs[active];
                     tab.sessions.push(new_session);
                     let new_idx = tab.sessions.len() - 1;
-                    tab.layout.replace(old_idx, PaneNode::Split {
-                        direction: SplitDirection::Vertical, ratio: 0.5,
-                        first: Box::new(PaneNode::Terminal(old_idx)),
-                        second: Box::new(PaneNode::Terminal(new_idx)),
-                    });
+                    tab.layout.replace(
+                        old_idx,
+                        PaneNode::Split {
+                            direction: SplitDirection::Vertical,
+                            ratio: 0.5,
+                            first: Box::new(PaneNode::Terminal(old_idx)),
+                            second: Box::new(PaneNode::Terminal(new_idx)),
+                        },
+                    );
                     tab.focused_session = new_idx;
                     self.mark_sessions_dirty();
                 }
@@ -1391,16 +1578,16 @@ impl PortalApp {
                             // Surface the finished file: the status bar shows a
                             // clickable "saved" notice that opens the player.
                             if let Some(path) = session.kind.stop_recording() {
-                                window.recording_saved =
-                                    Some((path, std::time::Instant::now()));
+                                window.recording_saved = Some((path, std::time::Instant::now()));
                             }
                         } else {
                             let label = session.kind.recording_label();
-                            match crate::terminal::cast::new_recording_path(&label)
-                                .and_then(|path| {
+                            match crate::terminal::cast::new_recording_path(&label).and_then(
+                                |path| {
                                     session.kind.start_recording(&path)?;
                                     Ok(path)
-                                }) {
+                                },
+                            ) {
                                 Ok(_path) => {}
                                 Err(e) => {
                                     window.recording_error =
@@ -1453,9 +1640,7 @@ impl PortalApp {
                     let composer_id = self.windows[window_idx].ai_composer_id();
                     let window = &mut self.windows[window_idx];
                     if let Some(session) = window.tabs[active].sessions.get_mut(idx) {
-                        if let Some(text) =
-                            crate::ui::terminal::render::selected_text_of(session)
-                        {
+                        if let Some(text) = crate::ui::terminal::render::selected_text_of(session) {
                             // The selection was consumed into the composer
                             // draft — clear it so the terminal doesn't keep a
                             // highlighted selection while the AI input owns
@@ -1514,8 +1699,7 @@ impl PortalApp {
             let mut open = true;
             let mut submitted = false;
             let mut cancel_clicked = false;
-            let mut buffer = self
-                .windows[window_idx]
+            let mut buffer = self.windows[window_idx]
                 .zmodem_download_dialog
                 .take()
                 .unwrap_or_default();
@@ -1531,9 +1715,7 @@ impl PortalApp {
                             .desired_width(360.0)
                             .hint_text("/var/log/app/error.log"),
                     );
-                    if field.lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                    {
+                    if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         submitted = true;
                     }
                     field.request_focus();
@@ -1551,13 +1733,13 @@ impl PortalApp {
             if submitted && !remote.is_empty() {
                 let dir = config::zmodem_download_dir();
                 let window = &mut self.windows[window_idx];
-                if let Some(session) = window.tabs
+                if let Some(session) = window
+                    .tabs
                     .get_mut(window.active_tab)
                     .and_then(|t| t.sessions.get_mut(t.focused_session))
                 {
                     if let Err(e) = session.kind.start_zmodem_download(&remote, &dir) {
-                        window.recording_error =
-                            Some((e.to_string(), std::time::Instant::now()));
+                        window.recording_error = Some((e.to_string(), std::time::Instant::now()));
                     }
                 }
             } else if open && !cancel_clicked {
@@ -1626,7 +1808,9 @@ impl PortalApp {
                     crate::terminal::ai_capture::AiCapture::for_wrapped(&cmd, &wrapped),
                 ));
                 let slot = session.kind.ai_capture_slot();
-                session.kind.set_ai_capture(Some(std::sync::Arc::clone(&capture)));
+                session
+                    .kind
+                    .set_ai_capture(Some(std::sync::Arc::clone(&capture)));
                 session.write(&wrapped);
                 session.write("\r");
 
@@ -1653,7 +1837,10 @@ impl PortalApp {
                         // Detach the tap — but only if no newer Run already
                         // replaced this capture.
                         if let Ok(mut slot) = slot.lock() {
-                            if slot.as_ref().is_some_and(|c| std::sync::Arc::ptr_eq(c, &capture)) {
+                            if slot
+                                .as_ref()
+                                .is_some_and(|c| std::sync::Arc::ptr_eq(c, &capture))
+                            {
                                 *slot = None;
                             }
                         }
@@ -1672,7 +1859,11 @@ impl PortalApp {
                             st.messages.clone()
                         };
                         crate::ui::state::ai_chat::spawn_chat(
-                            llm_config, String::new(), messages, env, ai,
+                            llm_config,
+                            String::new(),
+                            messages,
+                            env,
+                            ai,
                         );
                         crate::repaint::notify_repaint();
                     });
@@ -1681,7 +1872,12 @@ impl PortalApp {
     }
 
     /// Handle actions returned from view rendering
-    fn handle_view_actions(&mut self, actions: ViewActions, window_idx: usize, _ctx: &egui::Context) {
+    fn handle_view_actions(
+        &mut self,
+        actions: ViewActions,
+        window_idx: usize,
+        _ctx: &egui::Context,
+    ) {
         if actions.add_local_tab {
             self.add_tab_local();
         }

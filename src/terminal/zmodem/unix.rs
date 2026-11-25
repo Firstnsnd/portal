@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex};
 use rzsz::serial::reader::ModemReader;
 
 use super::{
-    inert_bridge, set_transfer_state, Direction, SessionWriter, TransferRequest, ZmodemBridge,
-    ZmodemState, ZmodemSupport, ZmodemTap, ZmodemTransfer, TapAction, CHANNEL_CHUNKS,
+    inert_bridge, set_transfer_state, Direction, SessionWriter, TapAction, TransferRequest,
+    ZmodemBridge, ZmodemState, ZmodemSupport, ZmodemTap, ZmodemTransfer, CHANNEL_CHUNKS,
 };
 
 /// lrzsz abort sequence: CAN×10 + BS×10 (same as the crate's send_cancel).
@@ -274,9 +274,7 @@ fn run_download(
             files,
             bytes: counter.load(Ordering::Relaxed),
         },
-        Err(rzsz::zmodem::ZError::Cancelled)
-            if !cancel.load(Ordering::Relaxed) =>
-        {
+        Err(rzsz::zmodem::ZError::Cancelled) if !cancel.load(Ordering::Relaxed) => {
             let files = dir_file_names(&cfg.output_dir)
                 .into_iter()
                 .filter(|name| !dir_before.contains(name))
@@ -411,8 +409,8 @@ pub fn platform_supports_zmodem() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::ChunkRoute;
+    use super::*;
     use std::io::Read;
 
     // ── route_chunk ──────────────────────────────────────────────────────
@@ -522,9 +520,8 @@ mod tests {
         // so the pump thread can drive feed() while we watch the slot.
         let slot: Arc<Mutex<Option<ZmodemTransfer>>> = Arc::new(Mutex::new(None));
         let write_half = Mutex::new(ours.try_clone().unwrap());
-        let sink = SessionWriter::new(move |data| {
-            write_half.lock().unwrap().write_all(data).map(|_| ())
-        });
+        let sink =
+            SessionWriter::new(move |data| write_half.lock().unwrap().write_all(data).map(|_| ()));
         let bridge = Arc::new(Mutex::new(ZmodemBridge::spawn(
             TransferRequest::Upload {
                 path: src_path.clone(),
@@ -572,8 +569,7 @@ mod tests {
             "upload progress counter must advance"
         );
 
-        let received =
-            std::fs::read(dst_dir.path().join("payload.bin")).expect("received file");
+        let received = std::fs::read(dst_dir.path().join("payload.bin")).expect("received file");
         assert_eq!(received, payload, "loopback bytes must be identical");
 
         pump.join().ok();
@@ -594,18 +590,14 @@ mod tests {
         // read timeouts until we cancel.
         let slot: Arc<Mutex<Option<ZmodemTransfer>>> = Arc::new(Mutex::new(None));
         let sink_stream = Mutex::new(b);
-        let sink = SessionWriter::new(move |data| {
-            sink_stream.lock().unwrap().write_all(data).map(|_| ())
-        });
+        let sink =
+            SessionWriter::new(move |data| sink_stream.lock().unwrap().write_all(data).map(|_| ()));
         let src = tempfile::tempdir().unwrap();
         let path = src.path().join("x.bin");
         std::fs::write(&path, b"hello").unwrap();
 
-        let mut bridge = ZmodemBridge::spawn(
-            TransferRequest::Upload { path },
-            sink,
-            Arc::clone(&slot),
-        );
+        let mut bridge =
+            ZmodemBridge::spawn(TransferRequest::Upload { path }, sink, Arc::clone(&slot));
 
         std::thread::sleep(std::time::Duration::from_millis(200));
         bridge.cancel();

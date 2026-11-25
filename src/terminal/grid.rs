@@ -7,8 +7,8 @@
 use std::collections::VecDeque;
 use unicode_width::UnicodeWidthChar;
 
-use super::types::TerminalCell;
 use super::types::CellAttrs;
+use super::types::TerminalCell;
 
 /// Alternate screen buffer state: (cells, line_wrapped, cursor_col, cursor_row, autowrap)
 type AltScreenState = (Vec<Vec<TerminalCell>>, Vec<bool>, usize, usize, bool);
@@ -104,7 +104,11 @@ impl TerminalGrid {
         // Initial cwd matches the PTY, which starts in the user's home dir.
         let cwd = dirs::home_dir()
             .map(|p| p.to_string_lossy().to_string())
-            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()));
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            });
         Self {
             cols,
             rows,
@@ -524,12 +528,21 @@ impl TerminalGrid {
     /// Enter alternate screen mode (save current screen and switch to alt buffer).
     pub fn enter_alt_screen(&mut self) {
         if self.alt_screen.is_none() {
-            let saved_cells = std::mem::replace(&mut self.cells, vec![vec![TerminalCell::default(); self.cols]; self.rows]);
+            let saved_cells = std::mem::replace(
+                &mut self.cells,
+                vec![vec![TerminalCell::default(); self.cols]; self.rows],
+            );
             let saved_wrapped = std::mem::replace(&mut self.line_wrapped, vec![false; self.rows]);
             // Save DECAWM so it's restored when leaving the alt buffer, and
             // reset it to the DEC default (on) for the fresh alt screen.
             let saved_autowrap = self.autowrap;
-            self.alt_screen = Some((saved_cells, saved_wrapped, self.cursor_col, self.cursor_row, saved_autowrap));
+            self.alt_screen = Some((
+                saved_cells,
+                saved_wrapped,
+                self.cursor_col,
+                self.cursor_row,
+                saved_autowrap,
+            ));
             self.autowrap = true;
             // Alt buffer is a fresh surface — drop any main-buffer positioning
             // signal so it reflects only the live main buffer (re-established on exit).
@@ -654,7 +667,11 @@ impl TerminalGrid {
         // Process scrollback first
         for row_idx in 0..self.scrollback.len() {
             let row = &self.scrollback[row_idx];
-            let was_wrapped = self.scrollback_wrapped.get(row_idx).copied().unwrap_or(false);
+            let was_wrapped = self
+                .scrollback_wrapped
+                .get(row_idx)
+                .copied()
+                .unwrap_or(false);
             current_line.extend(row.iter().cloned());
             if !was_wrapped {
                 scrollback_logical_lines.push(std::mem::take(&mut current_line));
@@ -684,49 +701,73 @@ impl TerminalGrid {
         }
 
         // Step 2: Re-wrap scrollback logical lines at new column width
-        let reflow_line = |logical_lines: &[Vec<TerminalCell>], new_cols: usize| -> VecDeque<Vec<TerminalCell>> {
-            let mut result = VecDeque::new();
-            for logical_line in logical_lines {
-                // Find actual content length (skip trailing spaces/nuls)
-                let line_len = logical_line.iter().rposition(|c| c.c != ' ' && c.c != '\0')
-                    .map(|p| p + 1).unwrap_or(0);
+        let reflow_line =
+            |logical_lines: &[Vec<TerminalCell>], new_cols: usize| -> VecDeque<Vec<TerminalCell>> {
+                let mut result = VecDeque::new();
+                for logical_line in logical_lines {
+                    // Find actual content length (skip trailing spaces/nuls)
+                    let line_len = logical_line
+                        .iter()
+                        .rposition(|c| c.c != ' ' && c.c != '\0')
+                        .map(|p| p + 1)
+                        .unwrap_or(0);
 
-                if line_len == 0 {
-                    continue;
-                }
-
-                // Split logical line into chunks of new_cols
-                let chunks = logical_line[..line_len].chunks(new_cols).collect::<Vec<_>>();
-                for chunk in chunks {
-                    let mut row = vec![TerminalCell::default(); new_cols];
-                    for (i, cell) in chunk.iter().enumerate() {
-                        if i < new_cols {
-                            row[i] = cell.clone();
-                        }
+                    if line_len == 0 {
+                        continue;
                     }
-                    result.push_back(row);
+
+                    // Split logical line into chunks of new_cols
+                    let chunks = logical_line[..line_len]
+                        .chunks(new_cols)
+                        .collect::<Vec<_>>();
+                    for chunk in chunks {
+                        let mut row = vec![TerminalCell::default(); new_cols];
+                        for (i, cell) in chunk.iter().enumerate() {
+                            if i < new_cols {
+                                row[i] = cell.clone();
+                            }
+                        }
+                        result.push_back(row);
+                    }
                 }
-            }
-            result
-        };
+                result
+            };
 
         // Re-wrap scrollback content
         let mut new_scrollback = reflow_line(&scrollback_logical_lines, new_cols);
         // Calculate wrapped flags for scrollback
-        let scrollback_row_counts: Vec<usize> = scrollback_logical_lines.iter()
+        let scrollback_row_counts: Vec<usize> = scrollback_logical_lines
+            .iter()
             .map(|line| {
-                let line_len = line.iter().rposition(|c| c.c != ' ' && c.c != '\0').map(|p| p + 1).unwrap_or(0);
-                if line_len == 0 { 0 } else { line_len.div_ceil(new_cols) }
+                let line_len = line
+                    .iter()
+                    .rposition(|c| c.c != ' ' && c.c != '\0')
+                    .map(|p| p + 1)
+                    .unwrap_or(0);
+                if line_len == 0 {
+                    0
+                } else {
+                    line_len.div_ceil(new_cols)
+                }
             })
             .collect();
 
         // Re-wrap grid content
         let mut new_grid_content = reflow_line(&grid_logical_lines, new_cols);
         // Calculate wrapped flags for grid
-        let grid_row_counts: Vec<usize> = grid_logical_lines.iter()
+        let grid_row_counts: Vec<usize> = grid_logical_lines
+            .iter()
             .map(|line| {
-                let line_len = line.iter().rposition(|c| c.c != ' ' && c.c != '\0').map(|p| p + 1).unwrap_or(0);
-                if line_len == 0 { 0 } else { line_len.div_ceil(new_cols) }
+                let line_len = line
+                    .iter()
+                    .rposition(|c| c.c != ' ' && c.c != '\0')
+                    .map(|p| p + 1)
+                    .unwrap_or(0);
+                if line_len == 0 {
+                    0
+                } else {
+                    line_len.div_ceil(new_cols)
+                }
             })
             .collect();
 
@@ -760,7 +801,8 @@ impl TerminalGrid {
                 // widening back — a position-based frame (e.g. Claude Code's
                 // welcome box) ends up permanently truncated.
                 let mut all = new_scrollback.into_iter().chain(new_grid_content);
-                let mut all_wrapped = calc_wrapped_flags(&scrollback_row_counts).into_iter()
+                let mut all_wrapped = calc_wrapped_flags(&scrollback_row_counts)
+                    .into_iter()
                     .chain(calc_wrapped_flags(&grid_row_counts));
                 self.scrollback.clear();
                 self.scrollback_wrapped.clear();
@@ -768,15 +810,23 @@ impl TerminalGrid {
                 self.line_wrapped = Vec::new();
                 while self.cells.len() < new_rows {
                     match (all.next(), all_wrapped.next()) {
-                        (Some(row), Some(w)) => { self.cells.push(row); self.line_wrapped.push(w); }
-                        _ => { self.cells.push(vec![TerminalCell::default(); new_cols]); self.line_wrapped.push(false); }
+                        (Some(row), Some(w)) => {
+                            self.cells.push(row);
+                            self.line_wrapped.push(w);
+                        }
+                        _ => {
+                            self.cells.push(vec![TerminalCell::default(); new_cols]);
+                            self.line_wrapped.push(false);
+                        }
                     }
                 }
             } else {
                 // Shrinking: keep the prior separation so history stays in
                 // scrollback (even if it would fit, users expect to scroll it).
                 self.scrollback = new_scrollback;
-                self.scrollback_wrapped = calc_wrapped_flags(&scrollback_row_counts).into_iter().collect();
+                self.scrollback_wrapped = calc_wrapped_flags(&scrollback_row_counts)
+                    .into_iter()
+                    .collect();
                 self.cells = new_grid_content.into_iter().collect();
                 self.line_wrapped = calc_wrapped_flags(&grid_row_counts).into_iter().collect();
                 while self.cells.len() < new_rows {
@@ -846,7 +896,9 @@ impl TerminalGrid {
         // Find the last non-empty row to place the cursor correctly
         let mut last_content_row = None;
         for row_idx in (0..self.cells.len()).rev() {
-            let has_content = self.cells[row_idx].iter().any(|c| c.c != ' ' && c.c != '\0');
+            let has_content = self.cells[row_idx]
+                .iter()
+                .any(|c| c.c != ' ' && c.c != '\0');
             if has_content {
                 last_content_row = Some(row_idx);
                 break;
@@ -879,7 +931,9 @@ impl TerminalGrid {
         }
 
         // Recalculate scrollback memory usage
-        self.current_scrollback_bytes = self.scrollback.iter()
+        self.current_scrollback_bytes = self
+            .scrollback
+            .iter()
             .map(|row| Self::row_memory_usage(row))
             .sum();
 
@@ -919,7 +973,11 @@ impl TerminalGrid {
 
         for row_idx in 0..self.scrollback.len() {
             let row = &self.scrollback[row_idx];
-            let was_wrapped = self.scrollback_wrapped.get(row_idx).copied().unwrap_or(false);
+            let was_wrapped = self
+                .scrollback_wrapped
+                .get(row_idx)
+                .copied()
+                .unwrap_or(false);
             current_line.extend(row.iter().cloned());
             if !was_wrapped {
                 scrollback_logical_lines.push(std::mem::take(&mut current_line));
@@ -935,15 +993,20 @@ impl TerminalGrid {
         let mut new_scrollback_wrapped: VecDeque<bool> = VecDeque::new();
 
         for logical_line in &scrollback_logical_lines {
-            let line_len = logical_line.iter().rposition(|c| c.c != ' ' && c.c != '\0')
-                .map(|p| p + 1).unwrap_or(0);
+            let line_len = logical_line
+                .iter()
+                .rposition(|c| c.c != ' ' && c.c != '\0')
+                .map(|p| p + 1)
+                .unwrap_or(0);
 
             if line_len == 0 {
                 continue;
             }
 
             // Split logical line into chunks of new_cols
-            let chunks = logical_line[..line_len].chunks(new_cols).collect::<Vec<_>>();
+            let chunks = logical_line[..line_len]
+                .chunks(new_cols)
+                .collect::<Vec<_>>();
             let chunk_count = chunks.len();
 
             for (i, chunk) in chunks.iter().enumerate() {
@@ -968,7 +1031,9 @@ impl TerminalGrid {
         // the 0.14.4 alt-screen grid-corruption bug.)
 
         // Recalculate scrollback memory usage
-        self.current_scrollback_bytes = self.scrollback.iter()
+        self.current_scrollback_bytes = self
+            .scrollback
+            .iter()
             .map(|row| Self::row_memory_usage(row))
             .sum();
 

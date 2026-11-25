@@ -6,6 +6,7 @@
 //! spawns a `std::thread`. Version comparison, JSON parsing, and asset
 //! selection are pure and unit-tested without touching the network.
 
+use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::io::{Read, Write};
 
@@ -17,6 +18,10 @@ pub struct ReleaseAsset {
     pub name: String,
     #[serde(rename = "browser_download_url")]
     pub url: String,
+    /// GitHub's SHA-256 digest for the uploaded asset (`sha256:<hex>`).
+    /// Updates are rejected when GitHub does not provide this value.
+    #[serde(default)]
+    pub digest: Option<String>,
 }
 
 /// The `releases/latest` response, trimmed to what we consume.
@@ -37,6 +42,7 @@ pub enum UpdateState {
         version: String,
         url: String,
         asset_name: String,
+        digest: String,
     },
     Downloading {
         version: String,
@@ -164,28 +170,46 @@ fn request(url: &str) -> Result<ureq::Response, String> {
 /// next state: `Available` when a newer version has a matching artifact,
 /// `Idle` when up-to-date or no artifact matches, `Error` on any failure.
 pub fn check_latest(current_version: &str) -> UpdateState {
-    let body = match request(GITHUB_API_LATEST).and_then(|r| r.into_string().map_err(|e| e.to_string())) {
-        Ok(b) => b,
-        Err(e) => return UpdateState::Error(e),
-    };
+    let body =
+        match request(GITHUB_API_LATEST).and_then(|r| r.into_string().map_err(|e| e.to_string())) {
+            Ok(b) => b,
+            Err(e) => return UpdateState::Error(e),
+        };
     let release = match parse_release_json(&body) {
         Some(r) => r,
         None => return UpdateState::Error("malformed release JSON".to_string()),
     };
-    let version = match normalize_tag(&release.tag_name) {
-        Some(v) => v,
-        None => return UpdateState::Idle,
+    update_state_from_release(current_version, &release)
+}
+
+/// Pure, fetch-free update decision for a parsed release: `Available` only
+/// when a strictly newer version exists AND its installer asset carries
+/// GitHub's SHA-256 digest. Integrity verification is mandatory — an asset
+/// without a digest is never offered, never downloaded, never revealed.
+fn update_state_from_release(current_version: &str, release: &LatestRelease) -> UpdateState {
+    let Some(version) = normalize_tag(&release.tag_name) else {
+        return UpdateState::Idle;
     };
     if !is_newer(current_version, &version) {
         return UpdateState::Idle;
     }
-    match select_asset(&release.assets) {
-        Some(asset) => UpdateState::Available {
-            version,
-            url: asset.url.clone(),
-            asset_name: asset.name.clone(),
-        },
-        None => UpdateState::Idle,
+    let Some(asset) = select_asset(&release.assets) else {
+        return UpdateState::Idle;
+    };
+    let Some(digest) = asset
+        .digest
+        .as_deref()
+        // Must parse as `sha256:<hex>` — anything malformed counts as
+        // missing, so verification can never be skipped downstream.
+        .filter(|d| parse_sha256_digest(d).is_ok())
+    else {
+        return UpdateState::Idle;
+    };
+    UpdateState::Available {
+        version,
+        url: asset.url.clone(),
+        asset_name: asset.name.clone(),
+        digest: digest.to_string(),
     }
 }
 
@@ -194,8 +218,13 @@ pub fn check_latest(current_version: &str) -> UpdateState {
 pub fn download_to_path(
     url: &str,
     dest: &std::path::Path,
+    expected_digest: &str,
     on_progress: impl Fn(u64, Option<u64>),
 ) -> Result<(), String> {
+    // Fail fast on a malformed digest — no point downloading an artifact we
+    // could never verify. (The authoritative compare happens in
+    // `verify_digest` once the bytes are in hand.)
+    parse_sha256_digest(expected_digest)?;
     let resp = request(url)?;
     let total = resp
         .header("Content-Length")
@@ -203,8 +232,10 @@ pub fn download_to_path(
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
+    let temp = dest.with_extension(format!("download-{}.tmp", uuid::Uuid::new_v4()));
+    let file = std::fs::File::create(&temp).map_err(|e| e.to_string())?;
     let mut writer = std::io::BufWriter::new(file);
+    let mut hasher = Sha256::new();
 
     let mut reader = resp.into_reader();
     let mut buf = [0u8; 64 * 1024];
@@ -215,11 +246,61 @@ pub fn download_to_path(
             break;
         }
         writer.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        hasher.update(&buf[..n]);
         received += n as u64;
         on_progress(received, total);
     }
     writer.flush().map_err(|e| e.to_string())?;
+    let actual = hasher.finalize();
+    if let Err(e) = verify_digest(expected_digest, actual.as_slice()) {
+        // Never install (let alone reveal) an artifact that doesn't match
+        // the release's published digest.
+        let _ = std::fs::remove_file(&temp);
+        return Err(e);
+    }
+    replace_file_atomically(&temp, dest)?;
     Ok(())
+}
+
+/// Compare the streamed artifact's SHA-256 against the release asset's
+/// published `sha256:<hex>` digest. `Ok` only on an exact match.
+fn verify_digest(expected_digest: &str, actual: &[u8]) -> Result<(), String> {
+    let expected = parse_sha256_digest(expected_digest)?;
+    if expected.as_slice() != actual {
+        return Err("downloaded update failed SHA-256 verification".to_string());
+    }
+    Ok(())
+}
+
+fn parse_sha256_digest(value: &str) -> Result<Vec<u8>, String> {
+    let hex = value.strip_prefix("sha256:").unwrap_or(value);
+    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("release asset has no valid SHA-256 digest".to_string());
+    }
+    (0..64)
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| "invalid SHA-256 digest".to_string())
+        })
+        .collect()
+}
+
+fn replace_file_atomically(temp: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+    if std::fs::rename(temp, dest).is_err() {
+        // Windows cannot replace an existing file with rename. Remove only the
+        // exact destination, then retry; Unix keeps the atomic fast path above.
+        if dest.exists() {
+            std::fs::remove_file(dest).map_err(|e| e.to_string())?;
+            std::fs::rename(temp, dest).map_err(|e| e.to_string())
+        } else {
+            Err(format!(
+                "failed to install downloaded update: {}",
+                dest.display()
+            ))
+        }
+    } else {
+        Ok(())
+    }
 }
 
 /// Reveal a downloaded asset. Archives (`.tar.gz`) are extracted next to the
@@ -236,15 +317,37 @@ pub fn reveal_downloaded(
         let dir_name = asset_name.trim_end_matches(".tar.gz").to_string();
         let extracted = downloads_dir.join(&dir_name);
 
-        let status = std::process::Command::new("tar")
-            .arg("-xzf")
-            .arg(archive_path)
-            .arg("-C")
-            .arg(&downloads_dir)
-            .status()
-            .map_err(|e| format!("failed to extract archive: {e}"))?;
-        if !status.success() {
-            return Err("archive extraction failed".to_string());
+        let file = std::fs::File::open(archive_path).map_err(|e| e.to_string())?;
+        let decoder = flate2::read::GzDecoder::new(file);
+        let mut archive = tar::Archive::new(decoder);
+        for entry in archive
+            .entries()
+            .map_err(|e| format!("failed to read archive: {e}"))?
+        {
+            let mut entry = entry.map_err(|e| format!("failed to read archive entry: {e}"))?;
+            let entry_path = entry
+                .path()
+                .map_err(|e| format!("invalid archive path: {e}"))?
+                .into_owned();
+            if entry_path.is_absolute()
+                || entry_path
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                return Err("update archive contains an unsafe path".to_string());
+            }
+            if entry.header().entry_type().is_symlink()
+                || entry.header().entry_type().is_hard_link()
+            {
+                return Err("update archive contains a link entry".to_string());
+            }
+            let target = downloads_dir.join(&entry_path);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            entry
+                .unpack(&target)
+                .map_err(|e| format!("failed to extract archive: {e}"))?;
         }
 
         let target = if extracted.is_dir() {
@@ -272,11 +375,12 @@ pub fn download_and_reveal(
     version: &str,
     asset_name: &str,
     url: &str,
+    digest: &str,
     on_progress: impl Fn(u64, Option<u64>),
 ) -> Result<std::path::PathBuf, String> {
     let downloads_dir = dirs::download_dir().unwrap_or_else(std::env::temp_dir);
     let dest = downloads_dir.join(asset_name);
-    download_to_path(url, &dest, on_progress)?;
+    download_to_path(url, &dest, digest, on_progress)?;
     let path = reveal_downloaded(asset_name, &dest)?;
     let _ = version; // documented for callers; not used in naming
     Ok(path)
@@ -332,7 +436,14 @@ mod tests {
     }
 
     fn asset(name: &str) -> ReleaseAsset {
-        ReleaseAsset { name: name.to_string(), url: format!("https://example.com/{name}") }
+        ReleaseAsset {
+            name: name.to_string(),
+            url: format!("https://example.com/{name}"),
+            digest: Some(
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+            ),
+        }
     }
 
     fn sample_assets() -> Vec<ReleaseAsset> {
@@ -349,15 +460,123 @@ mod tests {
     #[test]
     fn select_asset_for_picks_exact_platform() {
         let assets = sample_assets();
-        assert_eq!(select_asset_for("macos", "aarch64", &assets).map(|a| a.name.as_str()), Some("Portal-macos-arm64.dmg"));
-        assert_eq!(select_asset_for("macos", "x86_64", &assets).map(|a| a.name.as_str()), Some("Portal-macos-x86_64.dmg"));
-        assert_eq!(select_asset_for("linux", "x86_64", &assets).map(|a| a.name.as_str()), Some("Portal-linux-x86_64-v0.15.0.tar.gz"));
+        assert_eq!(
+            select_asset_for("macos", "aarch64", &assets).map(|a| a.name.as_str()),
+            Some("Portal-macos-arm64.dmg")
+        );
+        assert_eq!(
+            select_asset_for("macos", "x86_64", &assets).map(|a| a.name.as_str()),
+            Some("Portal-macos-x86_64.dmg")
+        );
+        assert_eq!(
+            select_asset_for("linux", "x86_64", &assets).map(|a| a.name.as_str()),
+            Some("Portal-linux-x86_64-v0.15.0.tar.gz")
+        );
         // Windows: the setup.exe over the portable zip, per arch.
-        assert_eq!(select_asset_for("windows", "x86_64", &assets).map(|a| a.name.as_str()), Some("Portal-windows-x86_64-v0.15.0-setup.exe"));
-        assert_eq!(select_asset_for("windows", "aarch64", &assets).map(|a| a.name.as_str()), Some("Portal-windows-aarch64-v0.15.0-setup.exe"));
+        assert_eq!(
+            select_asset_for("windows", "x86_64", &assets).map(|a| a.name.as_str()),
+            Some("Portal-windows-x86_64-v0.15.0-setup.exe")
+        );
+        assert_eq!(
+            select_asset_for("windows", "aarch64", &assets).map(|a| a.name.as_str()),
+            Some("Portal-windows-aarch64-v0.15.0-setup.exe")
+        );
         // No setup.exe for this arch (zip alone doesn't count).
         assert!(select_asset_for("windows", "x86_64", &assets[3..4]).is_none());
         // missing platform asset: only a Linux tarball present → no macOS match
         assert!(select_asset_for("macos", "x86_64", &assets[2..3]).is_none());
+    }
+
+    fn release_with_digest(digest: Option<&str>) -> LatestRelease {
+        let mut a = asset("Portal-macos-arm64.dmg");
+        a.digest = digest.map(str::to_string);
+        LatestRelease {
+            tag_name: "v0.20.0".to_string(),
+            assets: vec![a],
+        }
+    }
+
+    #[test]
+    fn update_requires_digest_on_the_asset() {
+        // Integrity verification is mandatory: without GitHub's digest the
+        // newer release is NOT offered (Idle), never downloaded.
+        let hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        let with = release_with_digest(Some(&format!("sha256:{hex}")));
+        match update_state_from_release("0.19.8", &with) {
+            UpdateState::Available { digest, .. } => {
+                assert_eq!(digest, format!("sha256:{hex}"))
+            }
+            other => panic!("expected Available, got {other:?}"),
+        }
+        for digest in [None, Some(""), Some("not-a-digest")] {
+            let state = update_state_from_release("0.19.8", &release_with_digest(digest));
+            assert!(
+                matches!(state, UpdateState::Idle),
+                "digest {digest:?} must not produce Available"
+            );
+        }
+        // Not newer / malformed tag → Idle regardless of digest.
+        assert!(matches!(
+            update_state_from_release("0.20.0", &release_with_digest(Some("sha256:ab"))),
+            UpdateState::Idle
+        ));
+        // A valid digest on an up-to-date version stays Idle too.
+        assert!(matches!(
+            update_state_from_release(
+                "0.20.0",
+                &release_with_digest(Some(&format!("sha256:{hex}")))
+            ),
+            UpdateState::Idle
+        ));
+    }
+
+    #[test]
+    fn parse_sha256_digest_accepts_only_valid_hex() {
+        let hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        assert!(parse_sha256_digest(hex).is_ok());
+        assert!(parse_sha256_digest(&format!("sha256:{hex}")).is_ok());
+        // Wrong length, non-hex, empty.
+        assert!(parse_sha256_digest("abcd").is_err());
+        assert!(parse_sha256_digest(&hex[..63]).is_err());
+        assert!(parse_sha256_digest(&format!("sha256:{}", "g".repeat(64))).is_err());
+        assert!(parse_sha256_digest("").is_err());
+    }
+
+    #[test]
+    fn verify_digest_rejects_any_mismatch() {
+        // `actual` is the streamed artifact's digest (32 raw bytes).
+        let empty_hash: [u8; 32] = Sha256::digest(b"").into();
+        let empty_hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        assert_eq!(verify_digest(empty_hex, &empty_hash), Ok(()));
+        assert_eq!(
+            verify_digest(&format!("sha256:{empty_hex}"), &empty_hash),
+            Ok(())
+        );
+        // One byte off → rejected with the verification error.
+        let mut bad = empty_hash;
+        bad[0] ^= 0xff;
+        let err = verify_digest(empty_hex, &bad).unwrap_err();
+        assert!(err.contains("SHA-256"));
+        // Unparseable expected digest → rejected (nothing passes).
+        assert!(verify_digest("", &empty_hash).is_err());
+    }
+
+    #[test]
+    fn replace_file_atomically_installs_or_keeps_old() {
+        let dir = std::env::temp_dir().join(format!("portal-update-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("installer.dmg");
+        // Fresh install.
+        let temp = dir.join("t1");
+        std::fs::write(&temp, b"new").unwrap();
+        replace_file_atomically(&temp, &dest).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new");
+        assert!(!temp.exists());
+        // Replacement over an existing destination.
+        let temp = dir.join("t2");
+        std::fs::write(&temp, b"newer").unwrap();
+        replace_file_atomically(&temp, &dest).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"newer");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

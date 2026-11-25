@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use eframe::egui;
 
 use crate::sftp::drop_planner::{
-    copy_local_dir, copy_local_file, join_remote_path, DropSide, OsDropTarget,
-    PlannedTransfer, TransferPlan,
+    copy_local_dir, copy_local_file, join_remote_path, DropSide, OsDropTarget, PlannedTransfer,
+    TransferPlan,
 };
 use crate::sftp::{SftpBrowser, SftpConnectionState};
 use crate::ui::pane::AppWindow;
@@ -119,12 +119,19 @@ fn planned_upload(entry: &DragEntry, remote_dir: &str, via: DropSide) -> Planned
     }
 }
 
-fn planned_download(entry: &DragEntry, local_dir: &std::path::Path, via: DropSide) -> Option<PlannedTransfer> {
+fn planned_download(
+    entry: &DragEntry,
+    local_dir: &std::path::Path,
+    via: DropSide,
+) -> Option<PlannedTransfer> {
     // The name comes straight from the remote listing; without this check a
     // hostile server could plant `../…` or absolute names and turn a download
     // into an arbitrary-file overwrite outside the destination directory.
     let Some(name) = crate::sftp::safe_download_name(&entry.entry_name) else {
-        log::warn!("download: skipping entry with unsafe name {:?}", entry.entry_name);
+        log::warn!(
+            "download: skipping entry with unsafe name {:?}",
+            entry.entry_name
+        );
         return None;
     };
     let local = local_dir.join(name);
@@ -163,9 +170,11 @@ pub(crate) fn os_drop_target_for(window: &AppWindow, side: DropSide) -> OsDropRe
         b.filter(|b| matches!(b.state, SftpConnectionState::Connected))
     }
     match side {
-        DropSide::Left if window.left_panel_is_local => OsDropResolution::Target(
-            OsDropTarget::Local { dir: PathBuf::from(&window.local_browser_left.current_path) },
-        ),
+        DropSide::Left if window.left_panel_is_local => {
+            OsDropResolution::Target(OsDropTarget::Local {
+                dir: PathBuf::from(&window.local_browser_left.current_path),
+            })
+        }
         DropSide::Left => match connected(window.sftp_browser_left.as_ref()) {
             Some(b) => OsDropResolution::Target(OsDropTarget::Remote {
                 side,
@@ -173,9 +182,11 @@ pub(crate) fn os_drop_target_for(window: &AppWindow, side: DropSide) -> OsDropRe
             }),
             None => OsDropResolution::DisconnectedRemote,
         },
-        DropSide::Right if window.right_panel_is_local => OsDropResolution::Target(
-            OsDropTarget::Local { dir: PathBuf::from(&window.local_browser_right.current_path) },
-        ),
+        DropSide::Right if window.right_panel_is_local => {
+            OsDropResolution::Target(OsDropTarget::Local {
+                dir: PathBuf::from(&window.local_browser_right.current_path),
+            })
+        }
         DropSide::Right => match connected(window.sftp_browser.as_ref()) {
             Some(b) => OsDropResolution::Target(OsDropTarget::Remote {
                 side,
@@ -271,7 +282,12 @@ pub(crate) fn execute_transfer_plan(window: &mut AppWindow, plan: &TransferPlan)
     }
     // Local copies bypass the transfer pipeline (no TransferComplete response
     // will refresh the panels), so refresh eagerly.
-    if plan.transfers.iter().any(|t| matches!(t, PlannedTransfer::CopyFile { .. } | PlannedTransfer::CopyDir { .. })) {
+    if plan.transfers.iter().any(|t| {
+        matches!(
+            t,
+            PlannedTransfer::CopyFile { .. } | PlannedTransfer::CopyDir { .. }
+        )
+    }) {
         window.local_browser_left.refresh();
         window.local_browser_right.refresh();
     }
@@ -369,12 +385,20 @@ mod tests {
             origin: SftpPanel::LeftLocal,
             entries: vec![file_entry("report.pdf", "/Users/x")],
         };
-        let plan = plan_in_app_drop(&payload, SftpPanel::LeftLocal, SftpPanel::RightRemote, &panel_dirs());
-        assert_eq!(plan.transfers, vec![PlannedTransfer::UploadFile {
-            local: PathBuf::from("/Users/x/report.pdf"),
-            remote: "/srv/upload/report.pdf".to_string(),
-            via: DropSide::Right,
-        }]);
+        let plan = plan_in_app_drop(
+            &payload,
+            SftpPanel::LeftLocal,
+            SftpPanel::RightRemote,
+            &panel_dirs(),
+        );
+        assert_eq!(
+            plan.transfers,
+            vec![PlannedTransfer::UploadFile {
+                local: PathBuf::from("/Users/x/report.pdf"),
+                remote: "/srv/upload/report.pdf".to_string(),
+                via: DropSide::Right,
+            }]
+        );
     }
 
     #[test]
@@ -384,12 +408,20 @@ mod tests {
             origin: SftpPanel::RightRemote,
             entries: vec![file_entry("archive.tar.gz", "/srv/upload")],
         };
-        let plan = plan_in_app_drop(&payload, SftpPanel::RightRemote, SftpPanel::LeftLocal, &panel_dirs());
-        assert_eq!(plan.transfers, vec![PlannedTransfer::DownloadFile {
-            remote: "/srv/upload/archive.tar.gz".to_string(),
-            local: PathBuf::from("/Users/x/archive.tar.gz"),
-            via: DropSide::Right,
-        }]);
+        let plan = plan_in_app_drop(
+            &payload,
+            SftpPanel::RightRemote,
+            SftpPanel::LeftLocal,
+            &panel_dirs(),
+        );
+        assert_eq!(
+            plan.transfers,
+            vec![PlannedTransfer::DownloadFile {
+                remote: "/srv/upload/archive.tar.gz".to_string(),
+                local: PathBuf::from("/Users/x/archive.tar.gz"),
+                via: DropSide::Right,
+            }]
+        );
     }
 
     /// Regression: a left-side remote panel previously had no drop handler at
@@ -402,12 +434,20 @@ mod tests {
             origin: SftpPanel::LeftRemote,
             entries: vec![file_entry("notes.md", "/home/left")],
         };
-        let plan = plan_in_app_drop(&payload, SftpPanel::LeftRemote, SftpPanel::RightLocal, &panel_dirs());
-        assert_eq!(plan.transfers, vec![PlannedTransfer::DownloadFile {
-            remote: "/home/left/notes.md".to_string(),
-            local: PathBuf::from("/Users/x/dl/notes.md"),
-            via: DropSide::Left,
-        }]);
+        let plan = plan_in_app_drop(
+            &payload,
+            SftpPanel::LeftRemote,
+            SftpPanel::RightLocal,
+            &panel_dirs(),
+        );
+        assert_eq!(
+            plan.transfers,
+            vec![PlannedTransfer::DownloadFile {
+                remote: "/home/left/notes.md".to_string(),
+                local: PathBuf::from("/Users/x/dl/notes.md"),
+                via: DropSide::Left,
+            }]
+        );
     }
 
     #[test]
@@ -417,12 +457,20 @@ mod tests {
             origin: SftpPanel::RightLocal,
             entries: vec![file_entry("pic.png", "/Users/x/dl")],
         };
-        let plan = plan_in_app_drop(&payload, SftpPanel::RightLocal, SftpPanel::LeftRemote, &panel_dirs());
-        assert_eq!(plan.transfers, vec![PlannedTransfer::UploadFile {
-            local: PathBuf::from("/Users/x/dl/pic.png"),
-            remote: "/home/left/pic.png".to_string(),
-            via: DropSide::Left,
-        }]);
+        let plan = plan_in_app_drop(
+            &payload,
+            SftpPanel::RightLocal,
+            SftpPanel::LeftRemote,
+            &panel_dirs(),
+        );
+        assert_eq!(
+            plan.transfers,
+            vec![PlannedTransfer::UploadFile {
+                local: PathBuf::from("/Users/x/dl/pic.png"),
+                remote: "/home/left/pic.png".to_string(),
+                via: DropSide::Left,
+            }]
+        );
     }
 
     #[test]
@@ -432,7 +480,12 @@ mod tests {
             origin: SftpPanel::LeftLocal,
             entries: vec![file_entry("a.txt", "/Users/x")],
         };
-        let plan = plan_in_app_drop(&payload, SftpPanel::LeftLocal, SftpPanel::RightLocal, &panel_dirs());
+        let plan = plan_in_app_drop(
+            &payload,
+            SftpPanel::LeftLocal,
+            SftpPanel::RightLocal,
+            &panel_dirs(),
+        );
         assert!(plan.is_empty());
     }
 
@@ -443,7 +496,12 @@ mod tests {
             origin: SftpPanel::RightRemote,
             entries: vec![file_entry("a.txt", "/srv/upload")],
         };
-        let plan = plan_in_app_drop(&payload, SftpPanel::RightRemote, SftpPanel::LeftRemote, &panel_dirs());
+        let plan = plan_in_app_drop(
+            &payload,
+            SftpPanel::RightRemote,
+            SftpPanel::LeftRemote,
+            &panel_dirs(),
+        );
         assert!(plan.is_empty());
     }
 
@@ -454,7 +512,12 @@ mod tests {
             origin: SftpPanel::RightRemote,
             entries: vec![file_entry("a.txt", "/srv/upload")],
         };
-        let plan = plan_in_app_drop(&payload, SftpPanel::RightRemote, SftpPanel::RightRemote, &panel_dirs());
+        let plan = plan_in_app_drop(
+            &payload,
+            SftpPanel::RightRemote,
+            SftpPanel::RightRemote,
+            &panel_dirs(),
+        );
         assert!(plan.is_empty());
     }
 
@@ -467,7 +530,12 @@ mod tests {
         };
         let mut dirs = panel_dirs();
         dirs.right_remote = None;
-        let plan = plan_in_app_drop(&payload, SftpPanel::LeftLocal, SftpPanel::RightRemote, &dirs);
+        let plan = plan_in_app_drop(
+            &payload,
+            SftpPanel::LeftLocal,
+            SftpPanel::RightRemote,
+            &dirs,
+        );
         assert!(plan.is_empty());
     }
 
@@ -482,24 +550,32 @@ mod tests {
                 file_entry("a.txt", "/srv/upload"),
             ],
         };
-        let plan = plan_in_app_drop(&payload, SftpPanel::RightRemote, SftpPanel::LeftLocal, &panel_dirs());
-        assert_eq!(plan.transfers, vec![
-            PlannedTransfer::DownloadFile {
-                remote: "/srv/upload/z.txt".to_string(),
-                local: PathBuf::from("/Users/x/z.txt"),
-                via: DropSide::Right,
-            },
-            PlannedTransfer::DownloadDir {
-                remote: "/srv/upload/assets".to_string(),
-                local: PathBuf::from("/Users/x/assets"),
-                via: DropSide::Right,
-            },
-            PlannedTransfer::DownloadFile {
-                remote: "/srv/upload/a.txt".to_string(),
-                local: PathBuf::from("/Users/x/a.txt"),
-                via: DropSide::Right,
-            },
-        ]);
+        let plan = plan_in_app_drop(
+            &payload,
+            SftpPanel::RightRemote,
+            SftpPanel::LeftLocal,
+            &panel_dirs(),
+        );
+        assert_eq!(
+            plan.transfers,
+            vec![
+                PlannedTransfer::DownloadFile {
+                    remote: "/srv/upload/z.txt".to_string(),
+                    local: PathBuf::from("/Users/x/z.txt"),
+                    via: DropSide::Right,
+                },
+                PlannedTransfer::DownloadDir {
+                    remote: "/srv/upload/assets".to_string(),
+                    local: PathBuf::from("/Users/x/assets"),
+                    via: DropSide::Right,
+                },
+                PlannedTransfer::DownloadFile {
+                    remote: "/srv/upload/a.txt".to_string(),
+                    local: PathBuf::from("/Users/x/a.txt"),
+                    via: DropSide::Right,
+                },
+            ]
+        );
     }
 
     // ------------------------------------------------------------------

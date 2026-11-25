@@ -31,13 +31,29 @@ pub(crate) enum DropSide {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PlannedTransfer {
     /// Local file → remote panel, via the given side's connection.
-    UploadFile { local: PathBuf, remote: String, via: DropSide },
+    UploadFile {
+        local: PathBuf,
+        remote: String,
+        via: DropSide,
+    },
     /// Local directory tree → remote panel.
-    UploadDir { local: PathBuf, remote: String, via: DropSide },
+    UploadDir {
+        local: PathBuf,
+        remote: String,
+        via: DropSide,
+    },
     /// Remote file → local panel.
-    DownloadFile { remote: String, local: PathBuf, via: DropSide },
+    DownloadFile {
+        remote: String,
+        local: PathBuf,
+        via: DropSide,
+    },
     /// Remote directory tree → local panel.
-    DownloadDir { remote: String, local: PathBuf, via: DropSide },
+    DownloadDir {
+        remote: String,
+        local: PathBuf,
+        via: DropSide,
+    },
     /// Local → local copy (OS drop onto a local panel).
     CopyFile { src: PathBuf, dest: PathBuf },
     /// Local → local recursive copy.
@@ -98,9 +114,15 @@ where
             OsDropTarget::Local { dir } => {
                 let dest = dir.join(&name);
                 if is_dir(path) {
-                    transfers.push(PlannedTransfer::CopyDir { src: path.clone(), dest });
+                    transfers.push(PlannedTransfer::CopyDir {
+                        src: path.clone(),
+                        dest,
+                    });
                 } else {
-                    transfers.push(PlannedTransfer::CopyFile { src: path.clone(), dest });
+                    transfers.push(PlannedTransfer::CopyFile {
+                        src: path.clone(),
+                        dest,
+                    });
                 }
             }
         }
@@ -147,12 +169,18 @@ mod tests {
 
     #[test]
     fn join_plain_dir() {
-        assert_eq!(join_remote_path("/home/user", "file.txt"), "/home/user/file.txt");
+        assert_eq!(
+            join_remote_path("/home/user", "file.txt"),
+            "/home/user/file.txt"
+        );
     }
 
     #[test]
     fn join_trailing_slash_dir() {
-        assert_eq!(join_remote_path("/home/user/", "file.txt"), "/home/user/file.txt");
+        assert_eq!(
+            join_remote_path("/home/user/", "file.txt"),
+            "/home/user/file.txt"
+        );
     }
 
     #[test]
@@ -173,42 +201,59 @@ mod tests {
     #[test]
     fn os_drop_file_to_remote_panel_plans_upload() {
         let paths = vec![PathBuf::from("/tmp/report.pdf")];
-        let target = OsDropTarget::Remote { side: DropSide::Right, dir: "/srv/data".to_string() };
+        let target = OsDropTarget::Remote {
+            side: DropSide::Right,
+            dir: "/srv/data".to_string(),
+        };
         let plan = plan_os_drop(&paths, &target, |_| false);
-        assert_eq!(plan.transfers, vec![PlannedTransfer::UploadFile {
-            local: PathBuf::from("/tmp/report.pdf"),
-            remote: "/srv/data/report.pdf".to_string(),
-            via: DropSide::Right,
-        }]);
+        assert_eq!(
+            plan.transfers,
+            vec![PlannedTransfer::UploadFile {
+                local: PathBuf::from("/tmp/report.pdf"),
+                remote: "/srv/data/report.pdf".to_string(),
+                via: DropSide::Right,
+            }]
+        );
     }
 
     #[test]
     fn os_drop_dir_to_remote_panel_plans_upload_dir_at_root() {
         let paths = vec![PathBuf::from("/tmp/project")];
-        let target = OsDropTarget::Remote { side: DropSide::Left, dir: "/".to_string() };
+        let target = OsDropTarget::Remote {
+            side: DropSide::Left,
+            dir: "/".to_string(),
+        };
         let plan = plan_os_drop(&paths, &target, |p| p.ends_with("project"));
-        assert_eq!(plan.transfers, vec![PlannedTransfer::UploadDir {
-            local: PathBuf::from("/tmp/project"),
-            remote: "/project".to_string(),
-            via: DropSide::Left,
-        }]);
+        assert_eq!(
+            plan.transfers,
+            vec![PlannedTransfer::UploadDir {
+                local: PathBuf::from("/tmp/project"),
+                remote: "/project".to_string(),
+                via: DropSide::Left,
+            }]
+        );
     }
 
     #[test]
     fn os_drop_to_local_panel_plans_copy() {
         let paths = vec![PathBuf::from("/tmp/a.txt"), PathBuf::from("/tmp/subdir")];
-        let target = OsDropTarget::Local { dir: PathBuf::from("/Users/x/dest") };
+        let target = OsDropTarget::Local {
+            dir: PathBuf::from("/Users/x/dest"),
+        };
         let plan = plan_os_drop(&paths, &target, |p| p.ends_with("subdir"));
-        assert_eq!(plan.transfers, vec![
-            PlannedTransfer::CopyFile {
-                src: PathBuf::from("/tmp/a.txt"),
-                dest: PathBuf::from("/Users/x/dest/a.txt"),
-            },
-            PlannedTransfer::CopyDir {
-                src: PathBuf::from("/tmp/subdir"),
-                dest: PathBuf::from("/Users/x/dest/subdir"),
-            },
-        ]);
+        assert_eq!(
+            plan.transfers,
+            vec![
+                PlannedTransfer::CopyFile {
+                    src: PathBuf::from("/tmp/a.txt"),
+                    dest: PathBuf::from("/Users/x/dest/a.txt"),
+                },
+                PlannedTransfer::CopyDir {
+                    src: PathBuf::from("/tmp/subdir"),
+                    dest: PathBuf::from("/Users/x/dest/subdir"),
+                },
+            ]
+        );
     }
 
     #[test]
@@ -218,18 +263,28 @@ mod tests {
             PathBuf::from("/tmp/a.txt"),
             PathBuf::from("/tmp/m.txt"),
         ];
-        let target = OsDropTarget::Remote { side: DropSide::Right, dir: "/srv".to_string() };
+        let target = OsDropTarget::Remote {
+            side: DropSide::Right,
+            dir: "/srv".to_string(),
+        };
         let plan = plan_os_drop(&paths, &target, |_| false);
-        let names: Vec<String> = plan.transfers.iter().map(|t| match t {
-            PlannedTransfer::UploadFile { remote, .. } => remote.clone(),
-            _ => String::new(),
-        }).collect();
+        let names: Vec<String> = plan
+            .transfers
+            .iter()
+            .map(|t| match t {
+                PlannedTransfer::UploadFile { remote, .. } => remote.clone(),
+                _ => String::new(),
+            })
+            .collect();
         assert_eq!(names, vec!["/srv/z.txt", "/srv/a.txt", "/srv/m.txt"]);
     }
 
     #[test]
     fn os_drop_empty_paths_yield_empty_plan() {
-        let target = OsDropTarget::Remote { side: DropSide::Right, dir: "/srv".to_string() };
+        let target = OsDropTarget::Remote {
+            side: DropSide::Right,
+            dir: "/srv".to_string(),
+        };
         let plan = plan_os_drop(&[], &target, |_| false);
         assert!(plan.is_empty());
     }

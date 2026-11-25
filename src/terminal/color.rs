@@ -11,22 +11,22 @@ pub const DEFAULT_BG: (u8, u8, u8) = (26, 27, 38);
 
 /// Standard ANSI 16-color palette
 pub const ANSI_COLORS: [(u8, u8, u8); 16] = [
-    (0, 0, 0),         // 0  Black
-    (205, 49, 49),      // 1  Red
-    (13, 188, 121),     // 2  Green
-    (229, 229, 16),     // 3  Yellow
-    (36, 114, 200),     // 4  Blue
-    (188, 63, 188),     // 5  Magenta
-    (17, 168, 205),     // 6  Cyan
-    (229, 229, 229),    // 7  White
-    (102, 102, 102),    // 8  Bright Black
-    (241, 76, 76),      // 9  Bright Red
-    (35, 209, 139),     // 10 Bright Green
-    (245, 245, 67),     // 11 Bright Yellow
-    (59, 142, 234),     // 12 Bright Blue
-    (214, 112, 214),    // 13 Bright Magenta
-    (41, 184, 219),     // 14 Bright Cyan
-    (255, 255, 255),    // 15 Bright White
+    (0, 0, 0),       // 0  Black
+    (205, 49, 49),   // 1  Red
+    (13, 188, 121),  // 2  Green
+    (229, 229, 16),  // 3  Yellow
+    (36, 114, 200),  // 4  Blue
+    (188, 63, 188),  // 5  Magenta
+    (17, 168, 205),  // 6  Cyan
+    (229, 229, 229), // 7  White
+    (102, 102, 102), // 8  Bright Black
+    (241, 76, 76),   // 9  Bright Red
+    (35, 209, 139),  // 10 Bright Green
+    (245, 245, 67),  // 11 Bright Yellow
+    (59, 142, 234),  // 12 Bright Blue
+    (214, 112, 214), // 13 Bright Magenta
+    (41, 184, 219),  // 14 Bright Cyan
+    (255, 255, 255), // 15 Bright White
 ];
 
 /// Convert a 256-color index to RGB tuple.
@@ -64,7 +64,11 @@ pub fn color_256_to_rgb(idx: u16) -> (u8, u8, u8) {
 /// next-params form (38 ; 5 ; n or 38 ; 2 ; r ; g ; b).
 ///
 /// Returns the RGB color tuple, or the default if parsing fails.
-pub fn parse_extended_color<'b, I>(param: &[u16], iter: &mut I, default: (u8, u8, u8)) -> (u8, u8, u8)
+pub fn parse_extended_color<'b, I>(
+    param: &[u16],
+    iter: &mut I,
+    default: (u8, u8, u8),
+) -> (u8, u8, u8)
 where
     I: Iterator<Item = &'b [u16]>,
 {

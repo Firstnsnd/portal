@@ -110,8 +110,7 @@ impl LocalBrowser {
     pub fn rename(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
         let old_path = format!("{}/{}", self.current_path.trim_end_matches('/'), old_name);
         let new_path = format!("{}/{}", self.current_path.trim_end_matches('/'), new_name);
-        std::fs::rename(&old_path, &new_path)
-            .map_err(|e| format!("Rename failed: {}", e))?;
+        std::fs::rename(&old_path, &new_path).map_err(|e| format!("Rename failed: {}", e))?;
         self.refresh();
         Ok(())
     }
@@ -121,11 +120,9 @@ impl LocalBrowser {
         let path = format!("{}/{}", self.current_path.trim_end_matches('/'), name);
         let p = std::path::Path::new(&path);
         if p.is_dir() {
-            std::fs::remove_dir_all(&path)
-                .map_err(|e| format!("Delete failed: {}", e))?;
+            std::fs::remove_dir_all(&path).map_err(|e| format!("Delete failed: {}", e))?;
         } else {
-            std::fs::remove_file(&path)
-                .map_err(|e| format!("Delete failed: {}", e))?;
+            std::fs::remove_file(&path).map_err(|e| format!("Delete failed: {}", e))?;
         }
         self.refresh();
         Ok(())
@@ -134,8 +131,7 @@ impl LocalBrowser {
     /// Create a new directory inside the current path.
     pub fn create_dir(&mut self, name: &str) -> Result<(), String> {
         let path = format!("{}/{}", self.current_path.trim_end_matches('/'), name);
-        std::fs::create_dir(&path)
-            .map_err(|e| format!("Create dir failed: {}", e))?;
+        std::fs::create_dir(&path).map_err(|e| format!("Create dir failed: {}", e))?;
         self.refresh();
         Ok(())
     }
@@ -143,21 +139,20 @@ impl LocalBrowser {
     /// Read a local file for the editor (≤10MB, UTF-8).
     pub fn read_file(&self, name: &str) -> Result<String, String> {
         let path = format!("{}/{}", self.current_path.trim_end_matches('/'), name);
-        let meta = std::fs::metadata(&path)
-            .map_err(|e| format!("Cannot stat file: {}", e))?;
+        let meta = std::fs::metadata(&path).map_err(|e| format!("Cannot stat file: {}", e))?;
         if meta.len() > 10 * 1024 * 1024 {
             return Err(format!("File too large: {} bytes (max 10 MB)", meta.len()));
         }
-        let data = std::fs::read(&path)
-            .map_err(|e| format!("Cannot read file: {}", e))?;
-        String::from_utf8(data)
-            .map_err(|_| "Not valid UTF-8".to_string())
+        let data = std::fs::read(&path).map_err(|e| format!("Cannot read file: {}", e))?;
+        String::from_utf8(data).map_err(|_| "Not valid UTF-8".to_string())
     }
 
-    /// Write content to a local file from the editor.
+    /// Write content to a local file from the editor. Atomic (temp + fsync +
+    /// rename): a crash mid-save leaves the old content intact, never a
+    /// truncated file. The file's existing mode is preserved.
     pub fn write_file(&mut self, name: &str, content: &str) -> Result<(), String> {
         let path = format!("{}/{}", self.current_path.trim_end_matches('/'), name);
-        std::fs::write(&path, content.as_bytes())
+        crate::config::atomic_write_file_preserving_mode(path.as_ref(), content.as_bytes())
             .map_err(|e| format!("Cannot write file: {}", e))?;
         self.refresh();
         Ok(())

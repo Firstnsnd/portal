@@ -104,7 +104,10 @@ impl AuthPromptBridge {
 
     /// The prompt currently awaiting an answer, if any.
     pub fn pending(&self) -> Option<AuthPrompt> {
-        self.inner.lock().ok().and_then(|g| g.as_ref().map(|p| p.prompt.clone()))
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|p| p.prompt.clone()))
     }
 
     /// Deliver the user's answers. Returns false (and keeps the prompt
@@ -189,7 +192,10 @@ mod tests {
     use super::*;
 
     fn field(prompt: &str, echo: bool) -> AuthPromptField {
-        AuthPromptField { prompt: prompt.to_string(), echo }
+        AuthPromptField {
+            prompt: prompt.to_string(),
+            echo,
+        }
     }
 
     /// T2.1 — a fresh bridge has nothing pending.
@@ -208,7 +214,11 @@ mod tests {
         let task_bridge = Arc::clone(&bridge);
         let task = tokio::spawn(async move {
             task_bridge
-                .ask("2FA".into(), "Enter code".into(), vec![field("OTP:", false)])
+                .ask(
+                    "2FA".into(),
+                    "Enter code".into(),
+                    vec![field("OTP:", false)],
+                )
                 .await
         });
 
@@ -223,7 +233,10 @@ mod tests {
         assert_eq!(prompt.instructions, "Enter code");
         assert_eq!(prompt.prompts.len(), 1);
         assert_eq!(prompt.prompts[0].prompt, "OTP:");
-        assert!(!prompt.prompts[0].echo, "echo=false must survive the mailbox");
+        assert!(
+            !prompt.prompts[0].echo,
+            "echo=false must survive the mailbox"
+        );
 
         assert!(bridge.respond(vec!["123456".to_string()]));
         let answers = task.await.unwrap().expect("ask should succeed");
@@ -240,7 +253,11 @@ mod tests {
         let task_bridge = Arc::clone(&bridge);
         let task = tokio::spawn(async move {
             task_bridge
-                .ask("x".into(), String::new(), vec![field("A:", true), field("B:", false)])
+                .ask(
+                    "x".into(),
+                    String::new(),
+                    vec![field("A:", true), field("B:", false)],
+                )
                 .await
         });
         loop {
@@ -250,8 +267,10 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
 
-        assert!(!bridge.respond(vec!["only-one".to_string()]),
-            "one answer for two prompts must be rejected");
+        assert!(
+            !bridge.respond(vec!["only-one".to_string()]),
+            "one answer for two prompts must be rejected"
+        );
         assert!(bridge.pending().is_some(), "prompt must stay pending");
 
         assert!(bridge.respond(vec!["a".to_string(), "b".to_string()]));
@@ -266,7 +285,9 @@ mod tests {
         let bridge = Arc::new(AuthPromptBridge::new());
         let task_bridge = Arc::clone(&bridge);
         let task = tokio::spawn(async move {
-            task_bridge.ask("x".into(), String::new(), vec![field("OTP:", false)]).await
+            task_bridge
+                .ask("x".into(), String::new(), vec![field("OTP:", false)])
+                .await
         });
         loop {
             if bridge.pending().is_some() {
@@ -286,8 +307,13 @@ mod tests {
     async fn decline_mode_ask_returns_declined_without_publishing() {
         let bridge = AuthPromptBridge::decline();
         assert_eq!(bridge.mode(), PromptMode::Decline);
-        let res = bridge.ask("x".into(), String::new(), vec![field("OTP:", false)]).await;
-        assert_eq!(res.expect_err("decline bridge must refuse"), PromptError::Declined);
+        let res = bridge
+            .ask("x".into(), String::new(), vec![field("OTP:", false)])
+            .await;
+        assert_eq!(
+            res.expect_err("decline bridge must refuse"),
+            PromptError::Declined
+        );
         assert!(bridge.pending().is_none());
     }
 
@@ -300,9 +326,7 @@ mod tests {
         let run_round = |bridge: &Arc<AuthPromptBridge>, name: &str| {
             let b = Arc::clone(bridge);
             let n = name.to_string();
-            tokio::spawn(async move {
-                b.ask(n, String::new(), vec![field("P:", false)]).await
-            })
+            tokio::spawn(async move { b.ask(n, String::new(), vec![field("P:", false)]).await })
         };
 
         let round1 = run_round(&bridge, "r1");
@@ -325,6 +349,9 @@ mod tests {
         bridge.cancel();
         assert!(round2.await.unwrap().is_err());
 
-        assert!(id2 > id1, "ids must strictly increase (got {id1} then {id2})");
+        assert!(
+            id2 > id1,
+            "ids must strictly increase (got {id1} then {id2})"
+        );
     }
 }

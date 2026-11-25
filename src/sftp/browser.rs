@@ -6,7 +6,9 @@ use tokio::sync::mpsc;
 
 use crate::config::{ResolvedAuth, ResolvedProxy};
 use crate::sftp::selection::FileSelection;
-use crate::sftp::types::{SftpEntry, SftpConnectionState, TransferProgress, SftpCommand, SftpResponse};
+use crate::sftp::types::{
+    SftpCommand, SftpConnectionState, SftpEntry, SftpResponse, TransferProgress,
+};
 
 /// SFTP file browser state, driven from the GUI
 pub struct SftpBrowser {
@@ -54,8 +56,14 @@ impl SftpBrowser {
         let cancel_clone = cancel_flag.clone();
         let prompt_clone = std::sync::Arc::clone(&auth_prompt);
         runtime.spawn(crate::sftp::task::sftp_task(
-            host.clone(), port, username.clone(), auth.clone(),
-            cmd_rx, resp_tx, cancel_clone, prompt_clone,
+            host.clone(),
+            port,
+            username.clone(),
+            auth.clone(),
+            cmd_rx,
+            resp_tx,
+            cancel_clone,
+            prompt_clone,
             crate::ssh::HostKeyPolicy::Learn,
             proxy.clone(),
         ));
@@ -101,11 +109,15 @@ impl SftpBrowser {
                 SftpResponse::TransferComplete => {
                     self.transfer = None;
                     // Refresh current directory after transfer
-                    let _ = self.cmd_tx.send(SftpCommand::ListDir(self.current_path.clone()));
+                    let _ = self
+                        .cmd_tx
+                        .send(SftpCommand::ListDir(self.current_path.clone()));
                 }
                 SftpResponse::OperationComplete => {
                     // Refresh current directory after rename/delete/mkdir
-                    let _ = self.cmd_tx.send(SftpCommand::ListDir(self.current_path.clone()));
+                    let _ = self
+                        .cmd_tx
+                        .send(SftpCommand::ListDir(self.current_path.clone()));
                 }
                 SftpResponse::FileContent { path, data } => {
                     self.pending_file_content = Some((path, data));
@@ -157,19 +169,20 @@ impl SftpBrowser {
 
         let cancel_clone = cancel_flag.clone();
         let prompt_clone = std::sync::Arc::clone(&auth_prompt);
-        self.runtime.spawn(crate::sftp::task::sftp_task_with_initial_path(
-            self.conn_host.clone(),
-            self.conn_port,
-            self.conn_username.clone(),
-            self.conn_auth.clone(),
-            cmd_rx,
-            resp_tx,
-            cancel_clone,
-            prompt_clone,
-            crate::ssh::HostKeyPolicy::Learn,
-            reconnect_path,
-            self.conn_proxy.clone(),
-        ));
+        self.runtime
+            .spawn(crate::sftp::task::sftp_task_with_initial_path(
+                self.conn_host.clone(),
+                self.conn_port,
+                self.conn_username.clone(),
+                self.conn_auth.clone(),
+                cmd_rx,
+                resp_tx,
+                cancel_clone,
+                prompt_clone,
+                crate::ssh::HostKeyPolicy::Learn,
+                reconnect_path,
+                self.conn_proxy.clone(),
+            ));
 
         // Replace the old channels (old ones are dropped here)
         self.cmd_tx = cmd_tx;
@@ -237,7 +250,8 @@ impl SftpBrowser {
 
     /// Signal the async task to stop during connection setup.
     pub fn cancel_connect(&self) {
-        self.cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.cancel_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Disconnect the SFTP session.
@@ -320,18 +334,24 @@ impl SftpBrowser {
     /// Request to read a remote file for the editor.
     pub fn read_file(&mut self, path: &str) {
         self.ensure_reconnected();
-        let _ = self.cmd_tx.send(SftpCommand::ReadFile { path: path.to_string() });
+        let _ = self.cmd_tx.send(SftpCommand::ReadFile {
+            path: path.to_string(),
+        });
     }
 
     /// Write content to a remote file from the editor.
     pub fn write_file(&mut self, path: &str, data: Vec<u8>) {
         self.ensure_reconnected();
-        let _ = self.cmd_tx.send(SftpCommand::WriteFile { path: path.to_string(), data });
+        let _ = self.cmd_tx.send(SftpCommand::WriteFile {
+            path: path.to_string(),
+            data,
+        });
     }
 
     /// Cancel the current transfer in progress.
     pub fn cancel_transfer(&mut self) {
-        self.cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.cancel_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         self.transfer = None;
     }
 
@@ -346,7 +366,8 @@ impl SftpBrowser {
         if self.show_hidden_files {
             self.entries.clone()
         } else {
-            self.entries.iter()
+            self.entries
+                .iter()
                 .filter(|e| !e.name.starts_with('.'))
                 .cloned()
                 .collect()

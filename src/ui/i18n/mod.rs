@@ -3,12 +3,12 @@
 //! Multi-language translation support for the application.
 
 mod en;
-mod zh;
+mod es;
+mod fr;
 mod ja;
 mod ko;
-mod es;
 mod ru;
-mod fr;
+mod zh;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Language {
@@ -142,7 +142,9 @@ mod tests {
     /// Keys registered in a language file's `t()` / `tf()` / `tf2()` table,
     /// delimited by the next `pub fn` marker (or end of file).
     fn table_keys(src: &str, func: &str) -> BTreeSet<String> {
-        let start = src.find(&format!("pub fn {}(", func)).expect("table fn exists");
+        let start = src
+            .find(&format!("pub fn {}(", func))
+            .expect("table fn exists");
         let rest = &src[start..];
         let end = rest["pub fn".len()..]
             .find("\npub fn ")
@@ -202,10 +204,9 @@ mod tests {
         }
 
         for lang in LANGS {
-            let src = std::fs::read_to_string(
-                manifest.join("src/ui/i18n").join(format!("{}.rs", lang)),
-            )
-            .expect("language file readable");
+            let src =
+                std::fs::read_to_string(manifest.join("src/ui/i18n").join(format!("{}.rs", lang)))
+                    .expect("language file readable");
 
             let t_keys = table_keys(&src, "t");
             let tf_keys = table_keys(&src, "tf");
@@ -217,7 +218,10 @@ mod tests {
             assert!(
                 missing_t.is_empty() && missing_tf.is_empty() && missing_tf2.is_empty(),
                 "[{}] missing i18n keys — t(): {:?}, tf(): {:?}, tf2(): {:?}",
-                lang, missing_t, missing_tf, missing_tf2
+                lang,
+                missing_t,
+                missing_tf,
+                missing_tf2
             );
         }
     }

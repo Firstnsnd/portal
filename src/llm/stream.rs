@@ -43,7 +43,11 @@ pub fn stream_chat(
             // Honor a custom base URL (LiteLLM/OpenRouter/Bedrock/claude-code-router)
             // and fall back to the official endpoint when left blank.
             let base = cfg.base_url.trim().trim_end_matches('/');
-            let base = if base.is_empty() { ANTHROPIC_DEFAULT_BASE } else { base };
+            let base = if base.is_empty() {
+                ANTHROPIC_DEFAULT_BASE
+            } else {
+                base
+            };
             let url = format!("{base}/v1/messages");
             let body = anthropic::build_body(&cfg.model, messages, DEFAULT_MAX_TOKENS);
             let headers = vec![
@@ -78,7 +82,9 @@ pub fn stream_chat(
     let mut full = String::new();
 
     loop {
-        let n = reader.read(&mut buf).map_err(|e| format!("read failed: {e}"))?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("read failed: {e}"))?;
         if n == 0 {
             break;
         }
@@ -137,7 +143,10 @@ mod tests {
             has_api_key: true,
         };
         // Sanity: a trailing slash is trimmed before appending /chat/completions.
-        assert_eq!(cfg.base_url.trim().trim_end_matches('/'), "http://localhost:11434/v1");
+        assert_eq!(
+            cfg.base_url.trim().trim_end_matches('/'),
+            "http://localhost:11434/v1"
+        );
     }
 
     #[test]

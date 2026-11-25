@@ -6,7 +6,8 @@ use portal::terminal::{TerminalCell, TerminalGrid};
 
 fn fill_scrollback(grid: &mut TerminalGrid, rows: usize) {
     for _ in 0..rows {
-        grid.scrollback.push_back(vec![TerminalCell::default(); grid.cols]);
+        grid.scrollback
+            .push_back(vec![TerminalCell::default(); grid.cols]);
         grid.scrollback_wrapped.push_back(false);
     }
 }

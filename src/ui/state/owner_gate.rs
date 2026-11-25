@@ -144,15 +144,16 @@ mod tests {
 
     #[test]
     fn cancel_clears_everything_but_is_idempotent() {
-        let mut gate = OwnerGate::default();
-        gate.pending = Some(PendingOwnerAction::DeleteHost {
-            index: 3,
-            name: "prod".into(),
-        });
-        gate.prompt = GatePrompt::Password;
-        gate.reason = "test".into();
-        gate.password = "hunter2".into();
-        gate.error = "wrong".into();
+        let mut gate = OwnerGate {
+            pending: Some(PendingOwnerAction::DeleteHost {
+                index: 3,
+                name: "prod".into(),
+            }),
+            prompt: GatePrompt::Password,
+            reason: "test".into(),
+            password: "hunter2".into(),
+            error: "wrong".into(),
+        };
         gate.cancel();
         assert!(gate.pending.is_none());
         assert!(gate.password.is_empty());

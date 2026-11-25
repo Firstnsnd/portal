@@ -63,14 +63,13 @@ impl super::OwnerAuth for LocalAuthentication {
             // Blocks must be Fn, so the FnOnce reply rides in a RefCell<Option>
             // and is taken on the (single) invocation.
             let reply_cell = std::cell::RefCell::new(Some(reply));
-            let blk = block::ConcreteBlock::new(
-                move |success: libc::c_schar, _error: *mut Object| {
+            let blk =
+                block::ConcreteBlock::new(move |success: libc::c_schar, _error: *mut Object| {
                     if let Some(reply) = reply_cell.borrow_mut().take() {
                         reply(success != 0);
                     }
-                },
-            )
-            .copy();
+                })
+                .copy();
 
             // NOT the `options:` variant: that one demands the reason inside
             // the options dictionary (LAContextLocalizedReason) and raises

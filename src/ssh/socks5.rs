@@ -137,7 +137,13 @@ pub fn parse_request(buf: &[u8]) -> Result<(usize, SocksRequest), SocksError> {
             }
             let host = std::net::Ipv4Addr::new(buf[4], buf[5], buf[6], buf[7]);
             let port = u16::from_be_bytes([buf[8], buf[9]]);
-            Ok((LEN, SocksRequest { host: SocksHost::Ipv4(host), port }))
+            Ok((
+                LEN,
+                SocksRequest {
+                    host: SocksHost::Ipv4(host),
+                    port,
+                },
+            ))
         }
         ATYP_DOMAIN => {
             if buf.len() < 5 {
@@ -155,7 +161,13 @@ pub fn parse_request(buf: &[u8]) -> Result<(usize, SocksRequest), SocksError> {
                 return Err(SocksError::Malformed);
             }
             let port = u16::from_be_bytes([buf[5 + dlen], buf[6 + dlen]]);
-            Ok((total, SocksRequest { host: SocksHost::Domain(domain), port }))
+            Ok((
+                total,
+                SocksRequest {
+                    host: SocksHost::Domain(domain),
+                    port,
+                },
+            ))
         }
         ATYP_IPV6 => {
             const LEN: usize = 4 + 16 + 2;
@@ -164,7 +176,13 @@ pub fn parse_request(buf: &[u8]) -> Result<(usize, SocksRequest), SocksError> {
             }
             let octets: [u8; 16] = buf[4..20].try_into().map_err(|_| SocksError::Malformed)?;
             let port = u16::from_be_bytes([buf[20], buf[21]]);
-            Ok((LEN, SocksRequest { host: SocksHost::Ipv6(std::net::Ipv6Addr::from(octets)), port }))
+            Ok((
+                LEN,
+                SocksRequest {
+                    host: SocksHost::Ipv6(std::net::Ipv6Addr::from(octets)),
+                    port,
+                },
+            ))
         }
         _ => Err(SocksError::Malformed),
     }
@@ -204,9 +222,7 @@ pub fn success_reply(host: &SocksHost, port: u16) -> Vec<u8> {
 
 /// Encode a failure reply with the RFC-required placeholder 0.0.0.0:0.
 pub fn failure_reply(code: u8) -> Vec<u8> {
-    vec![
-        SOCKS_VERSION, code, 0x00, ATYP_IPV4, 0, 0, 0, 0, 0, 0,
-    ]
+    vec![SOCKS_VERSION, code, 0x00, ATYP_IPV4, 0, 0, 0, 0, 0, 0]
 }
 
 #[cfg(test)]
@@ -223,8 +239,7 @@ mod tests {
     #[test]
     fn greeting_picks_first_supported_of_many() {
         let buf = [0x05, 0x03, 0x01, 0x02, 0x00];
-        let (n, method) =
-            parse_greeting(&buf, &[METHOD_NO_AUTH, METHOD_USER_PASS]).unwrap();
+        let (n, method) = parse_greeting(&buf, &[METHOD_NO_AUTH, METHOD_USER_PASS]).unwrap();
         assert_eq!(n, 5);
         // 0x02 appears before 0x00 in the offer
         assert_eq!(method, METHOD_USER_PASS);
@@ -264,7 +279,10 @@ mod tests {
         assert_eq!(n, 10);
         assert_eq!(
             req,
-            SocksRequest { host: SocksHost::Ipv4(std::net::Ipv4Addr::new(10, 0, 0, 1)), port: 8080 }
+            SocksRequest {
+                host: SocksHost::Ipv4(std::net::Ipv4Addr::new(10, 0, 0, 1)),
+                port: 8080
+            }
         );
     }
 
@@ -287,14 +305,27 @@ mod tests {
         buf.extend_from_slice(&22u16.to_be_bytes());
         let (n, req) = parse_request(&buf).unwrap();
         assert_eq!(n, 22);
-        assert_eq!(req.host, SocksHost::Ipv6(std::net::Ipv6Addr::from([0x20; 16])));
+        assert_eq!(
+            req.host,
+            SocksHost::Ipv6(std::net::Ipv6Addr::from([0x20; 16]))
+        );
         assert_eq!(req.port, 22);
     }
 
     #[test]
     fn request_split_across_chunks_is_incomplete() {
         let full = [
-            0x05_u8, 0x01, 0x00, ATYP_DOMAIN, 4, b'a', b'b', b'c', b'd', 0x00, 0x50,
+            0x05_u8,
+            0x01,
+            0x00,
+            ATYP_DOMAIN,
+            4,
+            b'a',
+            b'b',
+            b'c',
+            b'd',
+            0x00,
+            0x50,
         ];
         for cut in 1..full.len() {
             assert_eq!(

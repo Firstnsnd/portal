@@ -18,13 +18,13 @@ pub(crate) mod unix;
 pub(crate) mod windows;
 
 use std::io;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
-use sysinfo::System;
 use crate::terminal::metrics::{MetricsSnapshot, SystemMetrics};
+use sysinfo::System;
 
 pub use super::{Pty, PtySize, Result};
 
@@ -58,7 +58,11 @@ fn make_recorder_slot(
             .unwrap_or_else(|| shell.to_string());
         match crate::terminal::cast::new_recording_path(&title).and_then(|path| {
             crate::terminal::cast::CastRecorder::create(
-                &path, cols, rows, Some(title.clone()), Some("localhost".into()),
+                &path,
+                cols,
+                rows,
+                Some(title.clone()),
+                Some("localhost".into()),
             )
         }) {
             Ok(rec) => Some(rec),
@@ -239,7 +243,15 @@ pub struct RealPtySession {
 impl RealPtySession {
     #[allow(dead_code)] // integration tests (tests/e2e_tests.rs); bin tree spawns via with_scrollback_limit
     pub fn new(id: usize, cols: u16, rows: u16, shell: &str) -> Result<Self> {
-        Self::with_scrollback_limit(id, cols, rows, shell, TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES, None, false)
+        Self::with_scrollback_limit(
+            id,
+            cols,
+            rows,
+            shell,
+            TerminalGrid::DEFAULT_MAX_SCROLLBACK_BYTES,
+            None,
+            false,
+        )
     }
 
     /// A session-shaped placeholder with no PTY, used when spawning fails so
@@ -310,9 +322,14 @@ impl RealPtySession {
     pub fn resize(&mut self, cols: u16, rows: u16) -> io::Result<()> {
         if let Some(ref pty) = self.pty {
             let mut pty_ref = pty.lock().unwrap();
-            return pty_ref.resize(PtySize::new(rows, cols)).map_err(|e| io::Error::other(e.to_string()));
+            return pty_ref
+                .resize(PtySize::new(rows, cols))
+                .map_err(|e| io::Error::other(e.to_string()));
         }
-        Err(io::Error::new(io::ErrorKind::NotConnected, "PTY not available"))
+        Err(io::Error::new(
+            io::ErrorKind::NotConnected,
+            "PTY not available",
+        ))
     }
 
     /// Check if the PTY session is still alive
@@ -491,7 +508,9 @@ mod tests {
             "login zsh exited within 1.5s of spawn — the session-ended bug"
         );
 
-        session.write(b"echo PORTAL-SURVIVED\n").expect("write probe");
+        session
+            .write(b"echo PORTAL-SURVIVED\n")
+            .expect("write probe");
         let grid = session.get_grid();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
@@ -525,20 +544,14 @@ mod tests {
     fn recording_captures_pty_output_as_cast() {
         use crate::terminal::cast::{parse_cast, CastRecorder, EventKind};
 
-        let session = RealPtySession::with_scrollback_limit(
-            1,
-            80,
-            24,
-            "/bin/sh",
-            1024 * 1024,
-            None,
-            false,
-        )
-        .expect("spawn sh");
+        let session =
+            RealPtySession::with_scrollback_limit(1, 80, 24, "/bin/sh", 1024 * 1024, None, false)
+                .expect("spawn sh");
 
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("e2e.cast");
-        let recorder = CastRecorder::create(&path, 80, 24, Some("sh".into()), None).expect("create recorder");
+        let recorder =
+            CastRecorder::create(&path, 80, 24, Some("sh".into()), None).expect("create recorder");
         // Populate the EXISTING slot Arc — the reader thread holds a clone of
         // it, so replacing the field would strand the tap on the old slot.
         *session.recorder.lock().unwrap() = Some(recorder);
@@ -603,16 +616,9 @@ mod tests {
     fn auto_record_starts_at_spawn_with_title() {
         use crate::terminal::cast::parse_cast;
 
-        let session = RealPtySession::with_scrollback_limit(
-            1,
-            80,
-            24,
-            "/bin/sh",
-            1024 * 1024,
-            None,
-            true,
-        )
-        .expect("spawn sh");
+        let session =
+            RealPtySession::with_scrollback_limit(1, 80, 24, "/bin/sh", 1024 * 1024, None, true)
+                .expect("spawn sh");
 
         // The recorder must be in the slot the instant the constructor
         // returns — that's what makes capture lossless from byte zero.
@@ -652,7 +658,10 @@ mod tests {
         let path = recorder.finish().expect("flush cast");
         let cast = parse_cast(&path).expect("parse cast");
         assert_eq!(cast.header.title.as_deref(), Some("sh"));
-        assert!(!cast.events.is_empty(), "shell output captured from the start");
+        assert!(
+            !cast.events.is_empty(),
+            "shell output captured from the start"
+        );
     }
 
     /// Verify that is_connected() returns false when the alive flag is false.
@@ -661,9 +670,11 @@ mod tests {
     #[test]
     fn test_is_connected_false_when_reader_thread_dies() {
         // Simulate: alive = false (reader thread exited on error), no PTY
-        let grid = Arc::new(Mutex::new(
-            TerminalGrid::with_scrollback_limit(80, 24, 1024 * 1024)
-        ));
+        let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
+            80,
+            24,
+            1024 * 1024,
+        )));
         let session = RealPtySession {
             pty: None,
             #[cfg(unix)]
@@ -683,7 +694,10 @@ mod tests {
             zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         };
 
-        assert!(!session.is_connected(), "is_connected() must return false when alive flag is false");
+        assert!(
+            !session.is_connected(),
+            "is_connected() must return false when alive flag is false"
+        );
     }
 
     /// Verify that is_connected() is a pure mirror of the `alive` flag.
@@ -693,9 +707,11 @@ mod tests {
     /// the reader thread of a real PTY.)
     #[test]
     fn test_is_connected_false_when_no_pty() {
-        let grid = Arc::new(Mutex::new(
-            TerminalGrid::with_scrollback_limit(80, 24, 1024 * 1024)
-        ));
+        let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
+            80,
+            24,
+            1024 * 1024,
+        )));
         let session = RealPtySession {
             pty: None,
             #[cfg(unix)]
@@ -715,7 +731,10 @@ mod tests {
             zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         };
 
-        assert!(!session.is_connected(), "is_connected() must return false when alive flag is false");
+        assert!(
+            !session.is_connected(),
+            "is_connected() must return false when alive flag is false"
+        );
     }
 
     /// Verify that is_connected() returns true while `alive` is true.
@@ -724,9 +743,11 @@ mod tests {
     /// what transient read errors occurred.
     #[test]
     fn test_is_connected_true_while_alive_true() {
-        let grid = Arc::new(Mutex::new(
-            TerminalGrid::with_scrollback_limit(80, 24, 1024 * 1024)
-        ));
+        let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
+            80,
+            24,
+            1024 * 1024,
+        )));
         let session = RealPtySession {
             pty: None,
             #[cfg(unix)]
@@ -746,17 +767,21 @@ mod tests {
             zmodem_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         };
 
-        assert!(session.is_connected(),
-            "is_connected() must return true while alive=true, regardless of PTY state");
+        assert!(
+            session.is_connected(),
+            "is_connected() must return true while alive=true, regardless of PTY state"
+        );
     }
 
     /// Verify that Drop sets alive to false, ensuring is_connected() transitions correctly.
     #[test]
     fn test_drop_sets_alive_false() {
         let alive = Arc::new(AtomicBool::new(true));
-        let grid = Arc::new(Mutex::new(
-            TerminalGrid::with_scrollback_limit(80, 24, 1024 * 1024)
-        ));
+        let grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
+            80,
+            24,
+            1024 * 1024,
+        )));
 
         {
             let _session = RealPtySession {
@@ -781,6 +806,9 @@ mod tests {
             assert!(alive.load(Ordering::Relaxed));
         }
         // After drop, alive must be false
-        assert!(!alive.load(Ordering::Relaxed), "Drop must set alive to false");
+        assert!(
+            !alive.load(Ordering::Relaxed),
+            "Drop must set alive to false"
+        );
     }
 }

@@ -9,13 +9,13 @@ mod session_restore;
 mod tab_management;
 mod window_content;
 
-use crate::config::{HostEntry, Credential, ConnectionRecord, ShortcutAction, Snippet};
-use crate::ui::types::session::TerminalSession;
-use crate::ui::types::dialogs::AppView;
-use crate::ui::pane::{Tab, AppWindow};
+use crate::config::{ConnectionRecord, Credential, HostEntry, ShortcutAction, Snippet};
 use crate::ui::input::ShortcutResolver;
+use crate::ui::pane::{AppWindow, Tab};
 use crate::ui::terminal::TerminalBackground;
-use crate::ui::{ThemeColors, ThemePreset, Language, fonts};
+use crate::ui::types::dialogs::AppView;
+use crate::ui::types::session::TerminalSession;
+use crate::ui::{fonts, Language, ThemeColors, ThemePreset};
 use std::path::PathBuf;
 
 #[cfg(target_os = "macos")]
@@ -49,8 +49,7 @@ pub struct PortalApp {
     pub recording_shortcut: Option<ShortcutAction>,
     /// "Open here" landed on a folder Portal can't enter — offers to open
     /// the macOS authorization settings and retry (app-global, one at a time).
-    pub cwd_permission_dialog:
-        Option<crate::ui::types::dialogs::CwdPermissionDialog>,
+    pub cwd_permission_dialog: Option<crate::ui::types::dialogs::CwdPermissionDialog>,
     // Update checking
     pub update_state: std::sync::Arc<std::sync::Mutex<crate::update::UpdateState>>,
     pub next_update_check: std::time::Instant,
@@ -141,7 +140,7 @@ impl PortalApp {
             use cocoa::appkit::NSApp;
             use cocoa::base::{id, YES};
 
-            #[allow(unexpected_cfgs)]  // Suppress warning from objc crate's msg_send! macro
+            #[allow(unexpected_cfgs)] // Suppress warning from objc crate's msg_send! macro
             unsafe {
                 let app: id = NSApp();
                 // Force the app to be active and show in Dock
@@ -163,10 +162,7 @@ impl PortalApp {
         let recordings_retention_days = settings.recordings_retention_days;
         let recordings_max_total_mb = settings.recordings_max_total_mb;
         let restore_sessions = settings.restore_sessions;
-        let zmodem_download_dir = settings
-            .zmodem_download_dir
-            .clone()
-            .unwrap_or_default();
+        let zmodem_download_dir = settings.zmodem_download_dir.clone().unwrap_or_default();
         let terminal_background_image = settings
             .terminal_background_image
             .clone()
@@ -181,7 +177,10 @@ impl PortalApp {
             recordings_max_total_mb,
         );
         if !removed.is_empty() {
-            log::info!("retention: removed {} recording(s) at startup", removed.len());
+            log::info!(
+                "retention: removed {} recording(s) at startup",
+                removed.len()
+            );
         }
         let llm_config = settings.llm.clone();
         // Use default theme preset (Tokyo Night)
@@ -276,7 +275,9 @@ impl PortalApp {
             recording_shortcut: None,
             cwd_permission_dialog: None,
             snippets,
-            update_state: std::sync::Arc::new(std::sync::Mutex::new(crate::update::UpdateState::Idle)),
+            update_state: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::update::UpdateState::Idle,
+            )),
             next_update_check: std::time::Instant::now(),
             check_for_updates,
             last_dismissed_update_version,
@@ -399,11 +400,15 @@ impl PortalApp {
         }
         {
             let guard = self.update_state.lock().expect("update_state lock");
-            if !matches!(*guard, crate::update::UpdateState::Idle | crate::update::UpdateState::Error(_)) {
+            if !matches!(
+                *guard,
+                crate::update::UpdateState::Idle | crate::update::UpdateState::Error(_)
+            ) {
                 return;
             }
         }
-        self.next_update_check = std::time::Instant::now() + std::time::Duration::from_secs(24 * 3600);
+        self.next_update_check =
+            std::time::Instant::now() + std::time::Duration::from_secs(24 * 3600);
         if let Ok(mut guard) = self.update_state.lock() {
             *guard = crate::update::UpdateState::Checking;
         }
@@ -419,12 +424,20 @@ impl PortalApp {
     /// Transition from `Available` to `Downloading` and spawn the download +
     /// reveal on a background thread.
     pub fn begin_update_download(&mut self) {
-        let (version, url, asset_name) = {
+        let (version, url, asset_name, digest) = {
             let guard = self.update_state.lock().expect("update_state lock");
             match &*guard {
-                crate::update::UpdateState::Available { version, url, asset_name } => {
-                    (version.clone(), url.clone(), asset_name.clone())
-                }
+                crate::update::UpdateState::Available {
+                    version,
+                    url,
+                    asset_name,
+                    digest,
+                } => (
+                    version.clone(),
+                    url.clone(),
+                    asset_name.clone(),
+                    digest.clone(),
+                ),
                 _ => return,
             }
         };
@@ -444,6 +457,7 @@ impl PortalApp {
                 &version,
                 &asset_name,
                 &url,
+                &digest,
                 |received, total| {
                     if let Ok(mut g) = arc.lock() {
                         *g = crate::update::UpdateState::Downloading {

@@ -93,7 +93,6 @@ impl TransferProgress {
         }
         None
     }
-
 }
 
 /// Validate a server-supplied entry name before it is joined onto a local
@@ -107,11 +106,7 @@ impl TransferProgress {
 /// Every download path — drag-drop planning and recursive directory
 /// traversal alike — must pass names through this before touching disk.
 pub fn safe_download_name(name: &str) -> Option<&str> {
-    if name.is_empty()
-        || name == "."
-        || name == ".."
-        || name.contains(['/', '\\', '\0'])
-    {
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
         None
     } else {
         Some(name)
@@ -121,10 +116,22 @@ pub fn safe_download_name(name: &str) -> Option<&str> {
 /// Commands sent from the GUI thread to the async SFTP task
 pub enum SftpCommand {
     ListDir(String),
-    Download { remote: String, local: String },
-    Upload { local: String, remote: String },
-    UploadDir { local_dir: String, remote_dir: String },
-    DownloadDir { remote_dir: String, local_dir: String },
+    Download {
+        remote: String,
+        local: String,
+    },
+    Upload {
+        local: String,
+        remote: String,
+    },
+    UploadDir {
+        local_dir: String,
+        remote_dir: String,
+    },
+    DownloadDir {
+        remote_dir: String,
+        local_dir: String,
+    },
     /// Like `Download`, but the task acks the result through `done`. Used by
     /// the macOS file-promise drag-out, whose delegate must block until the
     /// file exists locally.
@@ -156,14 +163,28 @@ pub enum SftpCommand {
     /// Server-to-server copy streamed through the client on THIS connection
     /// (SFTPv3 has no server-side copy primitive). Used for paste onto the
     /// same remote browser.
-    CopyRemoteFile { from: String, to: String },
+    CopyRemoteFile {
+        from: String,
+        to: String,
+    },
     /// Recursive `CopyRemoteFile` over a directory tree.
-    CopyRemoteDir { from: String, to: String },
-    Rename { from: String, to: String },
+    CopyRemoteDir {
+        from: String,
+        to: String,
+    },
+    Rename {
+        from: String,
+        to: String,
+    },
     Delete(String),
     CreateDir(String),
-    ReadFile { path: String },
-    WriteFile { path: String, data: Vec<u8> },
+    ReadFile {
+        path: String,
+    },
+    WriteFile {
+        path: String,
+        data: Vec<u8>,
+    },
     Disconnect,
 }
 
@@ -176,8 +197,14 @@ pub enum SftpResponse {
     Progress(TransferProgress),
     TransferComplete,
     OperationComplete,
-    FileContent { path: String, data: Vec<u8> },
-    FileTooLarge { path: String, size: u64 },
+    FileContent {
+        path: String,
+        data: Vec<u8>,
+    },
+    FileTooLarge {
+        path: String,
+        size: u64,
+    },
     Error(String),
     Disconnected,
 }

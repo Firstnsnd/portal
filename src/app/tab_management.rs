@@ -1,10 +1,13 @@
 //! Tab management functionality for PortalApp
 
-use crate::config::{HostEntry, resolve_auth, resolve_proxy, ResolvedAuth};
-use crate::ssh::JumpHostInfo;
-use crate::ui::pane::{SplitDirection, PaneNode, Tab};
-use crate::ui::types::{session::{TerminalSession, SessionKind}, dialogs::AppView};
 use super::PortalApp;
+use crate::config::{resolve_auth, resolve_proxy, HostEntry, ResolvedAuth};
+use crate::ssh::JumpHostInfo;
+use crate::ui::pane::{PaneNode, SplitDirection, Tab};
+use crate::ui::types::{
+    dialogs::AppView,
+    session::{SessionKind, TerminalSession},
+};
 
 /// Why a shell could not run in `cwd` — `None` when it could. Two gates,
 /// mirroring what the PTY child does: the path must resolve (canonicalize),
@@ -106,7 +109,11 @@ impl PortalApp {
             .unwrap_or_else(|| format!("Terminal {}", id));
         let tab = Tab {
             title: title.clone(),
-            sessions: vec![TerminalSession::new_local_in(id, &default_shell, session_cwd)],
+            sessions: vec![TerminalSession::new_local_in(
+                id,
+                &default_shell,
+                session_cwd,
+            )],
             layout: PaneNode::Terminal(0),
             focused_session: 0,
             broadcast_enabled: false,
@@ -227,12 +234,15 @@ impl PortalApp {
         let tab = &mut window.tabs[active_tab];
         tab.sessions.push(new_session);
         let new_idx = tab.sessions.len() - 1;
-        tab.layout.replace(old_idx, PaneNode::Split {
-            direction,
-            ratio: 0.5,
-            first: Box::new(PaneNode::Terminal(old_idx)),
-            second: Box::new(PaneNode::Terminal(new_idx)),
-        });
+        tab.layout.replace(
+            old_idx,
+            PaneNode::Split {
+                direction,
+                ratio: 0.5,
+                first: Box::new(PaneNode::Terminal(old_idx)),
+                second: Box::new(PaneNode::Terminal(new_idx)),
+            },
+        );
         tab.focused_session = new_idx;
         self.mark_sessions_dirty();
     }

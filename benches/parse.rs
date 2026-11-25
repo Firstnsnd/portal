@@ -29,7 +29,10 @@ fn bench_parse(c: &mut Criterion) {
         b.iter(|| {
             let mut grid = TerminalGrid::with_scrollback_limit(80, 24, 100 * 1024 * 1024);
             let mut attrs = CellAttrs::default();
-            let mut handler = VteHandler { grid: &mut grid, attrs: &mut attrs };
+            let mut handler = VteHandler {
+                grid: &mut grid,
+                attrs: &mut attrs,
+            };
             let mut parser = vte::Parser::new();
             for &byte in &data {
                 parser.advance(&mut handler, byte);

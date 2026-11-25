@@ -24,11 +24,13 @@ impl super::PortalApp {
     /// — since connecting through it uses its credentials — the jump host.
     pub(crate) fn gate_connect_ssh(&mut self, window_idx: usize, host: &HostEntry) {
         let gated = host.protected || self.jump_chain_protected(host);
-        if !gated || self.owner_gate_or_request(
-            window_idx,
-            PendingOwnerAction::ConnectSsh { host: host.clone() },
-            "owner_verify_reason_connect",
-        ) {
+        if !gated
+            || self.owner_gate_or_request(
+                window_idx,
+                PendingOwnerAction::ConnectSsh { host: host.clone() },
+                "owner_verify_reason_connect",
+            )
+        {
             self.add_tab_ssh(host);
         }
     }
@@ -105,7 +107,11 @@ impl super::PortalApp {
         let host = self.hosts.remove(index);
         config::delete_host_credentials(&host);
         if let Some(cid) = &host.credential_id {
-            if !self.hosts.iter().any(|h| h.credential_id.as_ref() == Some(cid)) {
+            if !self
+                .hosts
+                .iter()
+                .any(|h| h.credential_id.as_ref() == Some(cid))
+            {
                 if let Some(cred) = self.credentials.iter().find(|c| &c.id == cid) {
                     config::delete_credential_secrets(&cred.id, &cred.name);
                 }
@@ -125,7 +131,10 @@ impl super::PortalApp {
         if !host.protected
             || self.owner_gate_or_request(
                 window_idx,
-                PendingOwnerAction::ConnectSftp { left, host: host.clone() },
+                PendingOwnerAction::ConnectSftp {
+                    left,
+                    host: host.clone(),
+                },
                 "owner_verify_reason_sftp",
             )
         {
@@ -151,7 +160,11 @@ impl super::PortalApp {
         if !needs_gate
             || self.owner_gate_or_request(
                 window_idx,
-                PendingOwnerAction::Reconnect { tab, session, remove_known_key },
+                PendingOwnerAction::Reconnect {
+                    tab,
+                    session,
+                    remove_known_key,
+                },
                 "owner_verify_reason_reconnect",
             )
         {
@@ -307,7 +320,10 @@ impl super::PortalApp {
         // user in a dialog that can never verify.
         let sheet_failed = match crate::local_auth::begin_system_prompt(&gate.reason) {
             Some(result) => {
-                gate.prompt = GatePrompt::InFlight { system_prompt: true, result };
+                gate.prompt = GatePrompt::InFlight {
+                    system_prompt: true,
+                    result,
+                };
                 false
             }
             None if !crate::local_auth::has_system_prompt() => {
@@ -341,16 +357,21 @@ impl super::PortalApp {
             let Some(gate) = self.windows.get(window_idx).map(|w| &w.owner_gate) else {
                 return;
             };
-            let GatePrompt::InFlight { system_prompt, result } = &gate.prompt else {
+            let GatePrompt::InFlight {
+                system_prompt,
+                result,
+            } = &gate.prompt
+            else {
                 return;
             };
             match result.try_recv() {
                 Ok(res) => (Some(res), *system_prompt),
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
                 // Callback thread died without answering — surface as failure.
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    (Some(Err("verification channel closed".to_string())), *system_prompt)
-                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => (
+                    Some(Err("verification channel closed".to_string())),
+                    *system_prompt,
+                ),
             }
         };
         let Some(outcome) = outcome else { return };
@@ -379,8 +400,7 @@ impl super::PortalApp {
                         _ => self.language.t("owner_verify_cancelled").to_string(),
                     };
                     if let Some(w) = self.windows.get_mut(window_idx) {
-                        w.notifications
-                            .push(AppNotification::warning(msg));
+                        w.notifications.push(AppNotification::warning(msg));
                     }
                 } else {
                     // Wrong password / backend error: back to the field with
@@ -400,11 +420,7 @@ impl super::PortalApp {
     /// Re-run an action that survived verification. Identity is re-checked:
     /// the hosts vec may have shifted (delete in another window) while the
     /// system sheet was up.
-    pub(crate) fn dispatch_owner_action(
-        &mut self,
-        window_idx: usize,
-        action: PendingOwnerAction,
-    ) {
+    pub(crate) fn dispatch_owner_action(&mut self, window_idx: usize, action: PendingOwnerAction) {
         match action {
             PendingOwnerAction::ConnectSsh { host } => self.add_tab_ssh(&host),
             PendingOwnerAction::OpenHostEdit { index, name } => {
@@ -425,7 +441,8 @@ impl super::PortalApp {
                 }
             }
             PendingOwnerAction::DeleteHost { index, name } => {
-                if self.hosts.get(index).is_some_and(|h| h.name == name) && !self.hosts[index].is_local
+                if self.hosts.get(index).is_some_and(|h| h.name == name)
+                    && !self.hosts[index].is_local
                 {
                     self.delete_host_at(index);
                 }
@@ -433,7 +450,11 @@ impl super::PortalApp {
             PendingOwnerAction::ConnectSftp { left, host } => {
                 self.connect_sftp_browser(window_idx, left, &host);
             }
-            PendingOwnerAction::Reconnect { tab, session, remove_known_key } => {
+            PendingOwnerAction::Reconnect {
+                tab,
+                session,
+                remove_known_key,
+            } => {
                 self.reconnect_session(window_idx, tab, session, remove_known_key);
             }
             PendingOwnerAction::KeychainNew => {
@@ -505,7 +526,9 @@ impl super::PortalApp {
         // Extract-then-mutate: the borrow checker can't hold the window
         // borrow across the runtime reconnect call below.
         let (host_addr, port) = {
-            let Some(w) = self.windows.get(window_idx) else { return };
+            let Some(w) = self.windows.get(window_idx) else {
+                return;
+            };
             let Some(s) = w.tabs.get(tab).and_then(|t| t.sessions.get(session)) else {
                 return;
             };
@@ -602,14 +625,14 @@ impl super::PortalApp {
                             .color(theme.fg_primary),
                     );
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new(&gate.reason).size(13.0).color(theme.fg_dim));
+                    ui.label(
+                        egui::RichText::new(&gate.reason)
+                            .size(13.0)
+                            .color(theme.fg_dim),
+                    );
                     if !gate.error.is_empty() {
                         ui.add_space(4.0);
-                        ui.label(
-                            egui::RichText::new(&gate.error)
-                                .size(12.0)
-                                .color(theme.red),
-                        );
+                        ui.label(egui::RichText::new(&gate.error).size(12.0).color(theme.red));
                     }
                     ui.add_space(12.0);
                     match &gate.prompt {
@@ -667,7 +690,10 @@ impl super::PortalApp {
             }
             let (tx, rx) = std::sync::mpsc::channel();
             let password = std::mem::take(&mut gate.password);
-            gate.prompt = GatePrompt::InFlight { system_prompt: false, result: rx };
+            gate.prompt = GatePrompt::InFlight {
+                system_prompt: false,
+                result: rx,
+            };
             match std::thread::Builder::new()
                 .name("owner-verify".into())
                 .spawn(move || {

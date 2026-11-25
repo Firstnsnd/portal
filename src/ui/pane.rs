@@ -74,12 +74,17 @@
 use eframe::egui;
 
 use crate::sftp::{LocalBrowser, SftpBrowser};
-use crate::ui::views::sftp::types::SftpClipboard;
 use crate::ui::types::{
+    dialogs::{
+        AddHostDialog, AppView, CredentialDialog, HistoryViewState, HostFilter, SnippetViewState,
+    },
     session::TerminalSession,
-    dialogs::{AppView, AddHostDialog, CredentialDialog, SnippetViewState, HostFilter, HistoryViewState},
-    sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEmbeddedEditor, SftpErrorDialog, SftpPanel, SftpSide},
+    sftp_types::{
+        SftpConfirmDelete, SftpContextMenu, SftpEmbeddedEditor, SftpErrorDialog, SftpNewFileDialog,
+        SftpNewFolderDialog, SftpPanel, SftpRenameDialog, SftpSide,
+    },
 };
+use crate::ui::views::sftp::types::SftpClipboard;
 
 /// Split direction for pane layout
 #[derive(Clone, Copy, PartialEq)]
@@ -120,16 +125,26 @@ impl PaneNode {
     pub fn remove(self, target: usize) -> Option<PaneNode> {
         match self {
             PaneNode::Terminal(idx) => {
-                if idx == target { None } else { Some(PaneNode::Terminal(idx)) }
+                if idx == target {
+                    None
+                } else {
+                    Some(PaneNode::Terminal(idx))
+                }
             }
-            PaneNode::Split { direction, ratio, first, second } => {
+            PaneNode::Split {
+                direction,
+                ratio,
+                first,
+                second,
+            } => {
                 match first.remove(target) {
-                    None => Some(*second),  // first was removed → collapse to second
+                    None => Some(*second), // first was removed → collapse to second
                     Some(new_first) => {
                         match second.remove(target) {
                             None => Some(new_first), // second was removed → collapse to first
                             Some(new_second) => Some(PaneNode::Split {
-                                direction, ratio,
+                                direction,
+                                ratio,
                                 first: Box::new(new_first),
                                 second: Box::new(new_second),
                             }),
@@ -145,7 +160,9 @@ impl PaneNode {
     pub fn decrement_indices_above(&mut self, threshold: usize) {
         match self {
             PaneNode::Terminal(idx) => {
-                if *idx > threshold { *idx -= 1; }
+                if *idx > threshold {
+                    *idx -= 1;
+                }
             }
             PaneNode::Split { first, second, .. } => {
                 first.decrement_indices_above(threshold);
@@ -158,7 +175,9 @@ impl PaneNode {
     /// Used when merging another tab's layout into this one.
     pub fn offset_indices(&mut self, offset: usize) {
         match self {
-            PaneNode::Terminal(idx) => { *idx += offset; }
+            PaneNode::Terminal(idx) => {
+                *idx += offset;
+            }
             PaneNode::Split { first, second, .. } => {
                 first.offset_indices(offset);
                 second.offset_indices(offset);
@@ -168,7 +187,11 @@ impl PaneNode {
 }
 
 /// Split a rect into two parts based on direction and ratio
-pub fn split_rect(rect: egui::Rect, direction: SplitDirection, ratio: f32) -> (egui::Rect, egui::Rect) {
+pub fn split_rect(
+    rect: egui::Rect,
+    direction: SplitDirection,
+    ratio: f32,
+) -> (egui::Rect, egui::Rect) {
     let gap = 2.0; // divider width
     match direction {
         SplitDirection::Horizontal => {
@@ -226,7 +249,7 @@ pub struct Tab {
     /// Whether the unified tools drawer (broadcast + snippets + metrics) is open
     pub tools_drawer_open: bool,
     /// Which content tab is active: false = Metrics (default), true = Snippets
-    pub tools_tab: u8,  // 0=Metrics 1=Snippets 2=Tunnels
+    pub tools_tab: u8, // 0=Metrics 1=Snippets 2=Tunnels
     /// Pending snippet command to execute on next frame (after drawer closes and PTY resizes)
     pub pending_snippet: Option<String>,
     /// AI chat state + draggable orb for this tab.
@@ -300,7 +323,8 @@ impl TabDragState {
             // Ease-out cubic: fast start, slow end
             let eased = 1.0 - (1.0 - progress).powi(3);
 
-            anim.current_offset = anim.start_offset + (anim.target_offset - anim.start_offset) * eased;
+            anim.current_offset =
+                anim.start_offset + (anim.target_offset - anim.start_offset) * eased;
 
             if progress >= 1.0 {
                 anim.start_time = None; // Animation complete
@@ -372,18 +396,18 @@ pub struct AppWindow {
     pub zmodem_download_dialog: Option<String>,
 
     // SFTP state (per-window, independent connections)
-    pub sftp_browser_left: Option<SftpBrowser>,   // Left panel SFTP connection
-    pub sftp_browser: Option<SftpBrowser>,        // Right panel SFTP connection
-    pub local_browser_left: LocalBrowser,         // Left panel local browser
-    pub local_browser_right: LocalBrowser,         // Right panel local browser
-    pub left_panel_is_local: bool,                // true = local, false = remote (left panel)
-    pub right_panel_is_local: bool,               // true = local, false = remote (right panel)
+    pub sftp_browser_left: Option<SftpBrowser>, // Left panel SFTP connection
+    pub sftp_browser: Option<SftpBrowser>,      // Right panel SFTP connection
+    pub local_browser_left: LocalBrowser,       // Left panel local browser
+    pub local_browser_right: LocalBrowser,      // Right panel local browser
+    pub left_panel_is_local: bool,              // true = local, false = remote (left panel)
+    pub right_panel_is_local: bool,             // true = local, false = remote (right panel)
     pub sftp_context_menu: Option<SftpContextMenu>,
     pub sftp_rename_dialog: Option<SftpRenameDialog>,
     pub sftp_new_folder_dialog: Option<SftpNewFolderDialog>,
     pub sftp_new_file_dialog: Option<SftpNewFileDialog>,
     pub sftp_confirm_delete: Option<SftpConfirmDelete>,
-    pub sftp_editor_left: Option<SftpEmbeddedEditor>,  // editor occupying the left half
+    pub sftp_editor_left: Option<SftpEmbeddedEditor>, // editor occupying the left half
     pub sftp_editor_right: Option<SftpEmbeddedEditor>, // editor occupying the right half
     pub sftp_error_dialog: Option<SftpErrorDialog>,
     pub sftp_local_left_refresh_start: Option<std::time::Instant>,
@@ -391,9 +415,9 @@ pub struct AppWindow {
     pub sftp_remote_refresh_start: Option<std::time::Instant>,
     pub sftp_left_remote_refresh_start: Option<std::time::Instant>,
     pub sftp_active_panel_is_local: bool,
-    pub sftp_active_side_left: bool,            // last-clicked SFTP panel side (drop fallback hint)
-    pub sftp_os_drag_active: bool,              // native file-promise drag session in flight
-    pub sftp_clipboard: Option<SftpClipboard>,  // app-internal copy/paste snapshot
+    pub sftp_active_side_left: bool, // last-clicked SFTP panel side (drop fallback hint)
+    pub sftp_os_drag_active: bool,   // native file-promise drag session in flight
+    pub sftp_clipboard: Option<SftpClipboard>, // app-internal copy/paste snapshot
 
     // Page-related dialog states (per-window)
     pub add_host_dialog: AddHostDialog,
@@ -420,7 +444,12 @@ impl AppWindow {
     /// Deliver an async remote file read to the embedded editor that
     /// requested it. Safe no-op when the editor was closed (or replaced by
     /// another file) mid-flight.
-    pub fn sftp_editor_deliver_file_content(&mut self, panel: SftpPanel, path: String, data: Vec<u8>) {
+    pub fn sftp_editor_deliver_file_content(
+        &mut self,
+        panel: SftpPanel,
+        path: String,
+        data: Vec<u8>,
+    ) {
         let slot = match panel.side() {
             SftpSide::Left => &mut self.sftp_editor_left,
             SftpSide::Right => &mut self.sftp_editor_right,
@@ -461,11 +490,7 @@ impl AppWindow {
     /// Create a fresh window around a single tab with fresh SFTP/dialog state.
     /// Used for the root window at startup, for detached tabs, and for
     /// "New Portal Window Here".
-    pub fn new_window(
-        viewport_id: egui::ViewportId,
-        tab: Tab,
-        next_id: usize,
-    ) -> Self {
+    pub fn new_window(viewport_id: egui::ViewportId, tab: Tab, next_id: usize) -> Self {
         Self {
             viewport_id,
             tabs: vec![tab],
@@ -553,7 +578,10 @@ mod tests {
     #[test]
     fn test_tab_default_tools_drawer_closed() {
         let tab = create_test_tab("Test Tab");
-        assert!(!tab.tools_drawer_open, "New tabs should have tools drawer closed by default");
+        assert!(
+            !tab.tools_drawer_open,
+            "New tabs should have tools drawer closed by default"
+        );
     }
 
     #[test]
@@ -564,7 +592,10 @@ mod tests {
 
         // Open tools drawer on Tab A only
         tab_a.tools_drawer_open = true;
-        assert!(tab_a.tools_drawer_open, "Tab A should have tools drawer open");
+        assert!(
+            tab_a.tools_drawer_open,
+            "Tab A should have tools drawer open"
+        );
         assert!(!tab_b.tools_drawer_open, "Tab B should remain closed");
 
         // Close Tab A's drawer
@@ -573,16 +604,21 @@ mod tests {
 
         // Open Tab B's drawer
         tab_b.tools_drawer_open = true;
-        assert!(tab_b.tools_drawer_open, "Tab B should have tools drawer open");
+        assert!(
+            tab_b.tools_drawer_open,
+            "Tab B should have tools drawer open"
+        );
         assert!(!tab_a.tools_drawer_open, "Tab A should remain closed");
     }
 
     #[test]
     fn test_snippet_drawer_state_preserved_on_tab_switch() {
         // Simulate multiple tabs with independent drawer states
-        let mut tabs = [create_test_tab("Tab 1"),
+        let mut tabs = [
+            create_test_tab("Tab 1"),
             create_test_tab("Tab 2"),
-            create_test_tab("Tab 3")];
+            create_test_tab("Tab 3"),
+        ];
 
         // Open drawer on tabs 0 and 2, leave tab 1 closed
         tabs[0].tools_drawer_open = true;
@@ -590,28 +626,42 @@ mod tests {
 
         // Simulate switching tabs and verifying states are preserved
         let active_tab = 0;
-        assert!(tabs[active_tab].tools_drawer_open, "Tab 0 should have drawer open");
+        assert!(
+            tabs[active_tab].tools_drawer_open,
+            "Tab 0 should have drawer open"
+        );
 
         let active_tab = 1;
-        assert!(!tabs[active_tab].tools_drawer_open, "Tab 1 should have drawer closed");
+        assert!(
+            !tabs[active_tab].tools_drawer_open,
+            "Tab 1 should have drawer closed"
+        );
 
         let active_tab = 2;
-        assert!(tabs[active_tab].tools_drawer_open, "Tab 2 should have drawer open");
+        assert!(
+            tabs[active_tab].tools_drawer_open,
+            "Tab 2 should have drawer open"
+        );
 
         // Switch back to tab 0
         let active_tab = 0;
-        assert!(tabs[active_tab].tools_drawer_open, "Tab 0 drawer should still be open after switching");
+        assert!(
+            tabs[active_tab].tools_drawer_open,
+            "Tab 0 drawer should still be open after switching"
+        );
     }
 
     #[test]
     fn test_multiple_tabs_independent_state() {
         // Create a vector of tabs
-        let mut tabs: Vec<Tab> = (0..5).map(|i| {
-            let mut tab = create_test_tab(&format!("Tab {}", i));
-            // Alternate drawer states
-            tab.tools_drawer_open = i % 2 == 0;
-            tab
-        }).collect();
+        let mut tabs: Vec<Tab> = (0..5)
+            .map(|i| {
+                let mut tab = create_test_tab(&format!("Tab {}", i));
+                // Alternate drawer states
+                tab.tools_drawer_open = i % 2 == 0;
+                tab
+            })
+            .collect();
 
         // Verify each tab maintains its independent state
         for (i, tab) in tabs.iter().enumerate() {
@@ -632,7 +682,10 @@ mod tests {
         assert!(tabs[0].tools_drawer_open, "Tab 0 should be unaffected");
         assert!(!tabs[1].tools_drawer_open, "Tab 1 should be unaffected");
         assert!(!tabs[2].tools_drawer_open, "Tab 2 should now be closed");
-        assert!(!tabs[3].tools_drawer_open, "Tab 3 should be unaffected (was closed originally)");
+        assert!(
+            !tabs[3].tools_drawer_open,
+            "Tab 3 should be unaffected (was closed originally)"
+        );
         assert!(tabs[4].tools_drawer_open, "Tab 4 should be unaffected");
     }
 
@@ -647,7 +700,10 @@ mod tests {
     fn test_pane_node_remove_single_terminal() {
         let node = PaneNode::Terminal(0);
         let result = node.remove(0);
-        assert!(result.is_none(), "Removing the only terminal must return None");
+        assert!(
+            result.is_none(),
+            "Removing the only terminal must return None"
+        );
     }
 
     /// remove(Terminal(N)) on a different terminal returns Some(Terminal(N)).
@@ -655,8 +711,10 @@ mod tests {
     fn test_pane_node_remove_wrong_terminal() {
         let node = PaneNode::Terminal(5);
         let result = node.remove(3);
-        assert!(matches!(result, Some(PaneNode::Terminal(5))),
-            "Removing a non-matching terminal must return the original node");
+        assert!(
+            matches!(result, Some(PaneNode::Terminal(5))),
+            "Removing a non-matching terminal must return the original node"
+        );
     }
 
     /// remove on a Split collapses to the surviving child.
@@ -672,8 +730,10 @@ mod tests {
 
         // Remove first child → collapses to second
         let result = split.remove(0);
-        assert!(matches!(result, Some(PaneNode::Terminal(1))),
-            "Removing first child must collapse to second");
+        assert!(
+            matches!(result, Some(PaneNode::Terminal(1))),
+            "Removing first child must collapse to second"
+        );
 
         // Remove second child → collapses to first
         let split = PaneNode::Split {
@@ -683,8 +743,10 @@ mod tests {
             second: Box::new(PaneNode::Terminal(1)),
         };
         let result = split.remove(1);
-        assert!(matches!(result, Some(PaneNode::Terminal(0))),
-            "Removing second child must collapse to first");
+        assert!(
+            matches!(result, Some(PaneNode::Terminal(0))),
+            "Removing second child must collapse to first"
+        );
     }
 
     /// remove on a deep tree removes the target and collapses correctly.
@@ -714,8 +776,14 @@ mod tests {
         // Should be Split(T(0), T(2))
         match &tree {
             PaneNode::Split { first, second, .. } => {
-                assert!(matches!(**first, PaneNode::Terminal(0)), "first must be T(0)");
-                assert!(matches!(**second, PaneNode::Terminal(2)), "second must be T(2)");
+                assert!(
+                    matches!(**first, PaneNode::Terminal(0)),
+                    "first must be T(0)"
+                );
+                assert!(
+                    matches!(**second, PaneNode::Terminal(2)),
+                    "second must be T(2)"
+                );
             }
             _ => panic!("Expected Split, got Terminal"),
         }
@@ -742,7 +810,10 @@ mod tests {
         // Index 0 → unchanged, Index 2 → 1, Index 4 → 3
         match &tree {
             PaneNode::Split { first, second, .. } => {
-                assert!(matches!(**first, PaneNode::Terminal(0)), "Index 0 unchanged");
+                assert!(
+                    matches!(**first, PaneNode::Terminal(0)),
+                    "Index 0 unchanged"
+                );
                 match &**second {
                     PaneNode::Split { first, second, .. } => {
                         assert!(matches!(**first, PaneNode::Terminal(1)), "Index 2 → 1");
@@ -836,8 +907,10 @@ mod tests {
 
         // Step 1: Remove T(1)
         let new_tree = tree.remove(1);
-        assert!(matches!(new_tree, Some(PaneNode::Terminal(0))),
-            "After closing T(1), tree must collapse to T(0)");
+        assert!(
+            matches!(new_tree, Some(PaneNode::Terminal(0))),
+            "After closing T(1), tree must collapse to T(0)"
+        );
         tree = new_tree.unwrap();
 
         // Step 2: decrement_indices_above(1) — no-op since tree has only T(0)
@@ -870,8 +943,10 @@ mod tests {
         match &tree {
             PaneNode::Split { first, second, .. } => {
                 assert!(matches!(**first, PaneNode::Terminal(0)));
-                assert!(matches!(**second, PaneNode::Terminal(1)),
-                    "Index 2 must be decremented to 1 after removing session at index 1");
+                assert!(
+                    matches!(**second, PaneNode::Terminal(1)),
+                    "Index 2 must be decremented to 1 after removing session at index 1"
+                );
             }
             _ => panic!("Tree must remain a Split after closing one of 3 panes"),
         }
@@ -901,7 +976,11 @@ mod tests {
         window.sftp_editor_left = Some(make_loading_editor(SftpPanel::LeftRemote));
 
         // The matching payload lands in the left slot.
-        window.sftp_editor_deliver_file_content(SftpPanel::LeftRemote, "/srv/a.txt".to_string(), b"hello".to_vec());
+        window.sftp_editor_deliver_file_content(
+            SftpPanel::LeftRemote,
+            "/srv/a.txt".to_string(),
+            b"hello".to_vec(),
+        );
         {
             let ed = window.sftp_editor_left.as_ref().unwrap();
             assert_eq!(ed.content, "hello");
@@ -912,17 +991,29 @@ mod tests {
         }
 
         // A payload for the other side's remote panel must not touch it.
-        window.sftp_editor_deliver_file_content(SftpPanel::RightRemote, "/x".to_string(), b"nope".to_vec());
+        window.sftp_editor_deliver_file_content(
+            SftpPanel::RightRemote,
+            "/x".to_string(),
+            b"nope".to_vec(),
+        );
         assert_eq!(window.sftp_editor_left.as_ref().unwrap().content, "hello");
         assert!(window.sftp_editor_right.is_none());
 
         // A non-loading editor ignores further deliveries.
-        window.sftp_editor_deliver_file_content(SftpPanel::LeftRemote, "/srv/a.txt".to_string(), b"late".to_vec());
+        window.sftp_editor_deliver_file_content(
+            SftpPanel::LeftRemote,
+            "/srv/a.txt".to_string(),
+            b"late".to_vec(),
+        );
         assert_eq!(window.sftp_editor_left.as_ref().unwrap().content, "hello");
 
         // Closed editor → delivery is a safe no-op (no panic).
         window.sftp_editor_left = None;
-        window.sftp_editor_deliver_file_content(SftpPanel::LeftRemote, "/srv/a.txt".to_string(), b"boom".to_vec());
+        window.sftp_editor_deliver_file_content(
+            SftpPanel::LeftRemote,
+            "/srv/a.txt".to_string(),
+            b"boom".to_vec(),
+        );
         assert!(window.sftp_editor_left.is_none());
     }
 
@@ -945,6 +1036,11 @@ mod tests {
 
         // Mismatched panel is ignored.
         window.sftp_editor_deliver_file_too_large(SftpPanel::LeftRemote, 1);
-        assert!(!window.sftp_editor_right.as_ref().unwrap().error.contains("(1 bytes)"));
+        assert!(!window
+            .sftp_editor_right
+            .as_ref()
+            .unwrap()
+            .error
+            .contains("(1 bytes)"));
     }
 }

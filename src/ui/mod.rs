@@ -37,24 +37,24 @@
 //! - **SSH**: Remote SSH connection
 //! - Future: Telnet, serial, etc.
 
-pub mod tokens;
-pub mod theme;
-pub mod i18n;
 pub mod fonts;
+pub mod i18n;
 pub mod input;
-pub mod types;
 pub mod pane;
 pub mod pane_view;
+pub mod state;
 pub mod terminal;
+pub mod theme;
+pub mod tokens;
+pub mod types;
 pub mod views;
 pub mod widgets;
-pub mod state;
 
 // Re-export all public types for convenient access via `use ui::*`
-pub use theme::{ThemeColors, ThemePreset};
 pub use i18n::Language;
 pub use pane::AppWindow;
 #[allow(unused_imports)]
-pub use pane_view::{WindowContext, ViewActions};
+pub use pane_view::{ViewActions, WindowContext};
 pub use terminal::render_pane_tree;
+pub use theme::{ThemeColors, ThemePreset};
 pub use tokens::STATUS_BAR_HEIGHT;

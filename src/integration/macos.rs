@@ -36,7 +36,10 @@ impl ShellIntegration for FinderIntegration {
         let contents = home
             .join("Library/Services/New Portal Tab Here.workflow")
             .join("Contents");
-        match (contents.join("Info.plist").exists(), contents.join("document.wflow").exists()) {
+        match (
+            contents.join("Info.plist").exists(),
+            contents.join("document.wflow").exists(),
+        ) {
             // Both files: a bundle the Services daemon can actually register.
             (true, true) => super::IntegrationStatus::Installed,
             // Old layout (document.wflow only): silently ignored by pbs.
@@ -76,19 +79,34 @@ fn install_macos() -> Result<(), String> {
     let dir = services_dir()?;
     let bin = std::env::var("PORTAL_BIN").ok();
     for (name, id, flag) in [
-        ("New Portal Tab Here", "com.portal.app.quickaction.tab-here", "--open-tab"),
-        ("New Portal Window Here", "com.portal.app.quickaction.window-here", "--open-window"),
+        (
+            "New Portal Tab Here",
+            "com.portal.app.quickaction.tab-here",
+            "--open-tab",
+        ),
+        (
+            "New Portal Window Here",
+            "com.portal.app.quickaction.window-here",
+            "--open-window",
+        ),
     ] {
         let contents = dir.join(format!("{name}.workflow")).join("Contents");
-        std::fs::create_dir_all(&contents)
-            .map_err(|e| format!("{}: {}", contents.display(), e))?;
-        std::fs::write(contents.join("document.wflow"), document_wflow(name, flag, bin.as_deref()))
-            .map_err(|e| format!("document.wflow: {}", e))?;
+        std::fs::create_dir_all(&contents).map_err(|e| format!("{}: {}", contents.display(), e))?;
+        // Atomic writes: a crash mid-install leaves the previous bundle
+        // intact instead of a truncated plist that pbs silently ignores.
+        crate::config::atomic_write_file_preserving_mode(
+            &contents.join("document.wflow"),
+            document_wflow(name, flag, bin.as_deref()).as_bytes(),
+        )
+        .map_err(|e| format!("document.wflow: {}", e))?;
         // The registration half: without an Info.plist declaring NSServices,
         // pbs ignores the bundle entirely; without CFBundleIdentifier Finder
         // never resolves it into the context menu.
-        std::fs::write(contents.join("Info.plist"), info_plist(name, id))
-            .map_err(|e| format!("Info.plist: {}", e))?;
+        crate::config::atomic_write_file_preserving_mode(
+            &contents.join("Info.plist"),
+            info_plist(name, id).as_bytes(),
+        )
+        .map_err(|e| format!("Info.plist: {}", e))?;
         // Ad-hoc signature to match what the system expects of a bundle
         // (Automator bundles ship unsigned and work, so this is belt and
         // braces — failure is not fatal).
@@ -121,13 +139,17 @@ fn enable_service(name: &str, bundle_id: &str) {
 
 /// Kick the Services daemon so the new actions appear without re-login.
 fn refresh_services_cache() {
-    let _ = std::process::Command::new("/System/Library/CoreServices/pbs").arg("-update").output();
+    let _ = std::process::Command::new("/System/Library/CoreServices/pbs")
+        .arg("-update")
+        .output();
 }
 
 /// XML-escape text embedded in a plist `<string>` (run before any template
 /// interpolation; `&` first so entities aren't double-escaped).
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// The Run Shell Script action document. `flag` is `--open-tab`/`--open-window`;
@@ -286,8 +308,8 @@ fn info_plist(name: &str, bundle_id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::IntegrationStatus;
+    use super::*;
 
     #[test]
     fn xml_escape_handles_plist_breakers() {
@@ -299,7 +321,10 @@ mod tests {
     #[test]
     fn workflow_command_default_routes_through_bundle() {
         let cmd = workflow_command("--open-tab", None);
-        assert!(cmd.contains("open -nb com.portal.app --args --open-tab \"$dir\""), "{cmd}");
+        assert!(
+            cmd.contains("open -nb com.portal.app --args --open-tab \"$dir\""),
+            "{cmd}"
+        );
         // Folder opens as-is; a file falls back to its parent directory.
         assert!(cmd.contains("if [ -d \"$1\" ]"), "{cmd}");
         assert!(cmd.contains("dir=$(dirname \"$1\")"), "{cmd}");
@@ -308,7 +333,10 @@ mod tests {
     #[test]
     fn workflow_command_dev_override_invokes_binary_directly() {
         let cmd = workflow_command("--open-window", Some("/path/to/portal"));
-        assert!(cmd.contains("\"/path/to/portal\" --open-window \"$dir\" &"), "{cmd}");
+        assert!(
+            cmd.contains("\"/path/to/portal\" --open-window \"$dir\" &"),
+            "{cmd}"
+        );
     }
 
     #[test]
@@ -326,7 +354,10 @@ mod tests {
         // The command body is embedded XML-escaped.
         assert!(doc.contains("\"/p/portal\" --open-tab"));
         assert!(doc.contains("&amp;"));
-        assert!(!doc.contains("--open-window"), "tab workflow must not embed the window flag");
+        assert!(
+            !doc.contains("--open-window"),
+            "tab workflow must not embed the window flag"
+        );
     }
 
     #[test]

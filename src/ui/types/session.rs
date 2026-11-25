@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use crate::config::{HostEntry, PortForwardConfig, ResolvedAuth};
 use crate::llm::types::ExecutionEnvironment;
 use crate::ssh::port_forward::ForwardState;
-use crate::ssh::{SshSession, SshConnectionState, JumpHostInfo, AppNotification};
-use crate::terminal::{TerminalGrid, RealPtySession};
+use crate::ssh::{AppNotification, JumpHostInfo, SshConnectionState, SshSession};
+use crate::terminal::{RealPtySession, TerminalGrid};
 
 /// Session kind, distinguished at the type level.
 ///
@@ -93,11 +93,17 @@ impl SessionKind {
     pub fn start_recording(&self, path: &std::path::Path) -> std::io::Result<()> {
         let (cols, rows, screen) = match self {
             SessionKind::Local(s, _) => {
-                let g = s.grid.lock().map_err(|_| std::io::Error::other("grid lock poisoned"))?;
+                let g = s
+                    .grid
+                    .lock()
+                    .map_err(|_| std::io::Error::other("grid lock poisoned"))?;
                 (g.cols as u16, g.rows as u16, snapshot_screen(&g))
             }
             SessionKind::Ssh(s, _, _) => {
-                let g = s.grid.lock().map_err(|_| std::io::Error::other("grid lock poisoned"))?;
+                let g = s
+                    .grid
+                    .lock()
+                    .map_err(|_| std::io::Error::other("grid lock poisoned"))?;
                 (g.cols as u16, g.rows as u16, snapshot_screen(&g))
             }
         };
@@ -334,8 +340,18 @@ impl SessionKind {
                     })
                     .unwrap_or_else(|| "sh".to_string());
                 ExecutionEnvironment {
-                    os: ssh.os_hint.lock().ok().and_then(|h| h.clone()).unwrap_or_else(|| "unknown".to_string()),
-                    arch: ssh.arch_hint.lock().ok().and_then(|h| h.clone()).unwrap_or_else(|| "unknown".to_string()),
+                    os: ssh
+                        .os_hint
+                        .lock()
+                        .ok()
+                        .and_then(|h| h.clone())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    arch: ssh
+                        .arch_hint
+                        .lock()
+                        .ok()
+                        .and_then(|h| h.clone())
+                        .unwrap_or_else(|| "unknown".to_string()),
                     shell,
                     cwd: String::new(),
                     host: Some(format!("{}@{}", host_entry.username, host_entry.host)),
@@ -363,9 +379,7 @@ impl Selection {
 
     /// Returns (start, end) in normalized order (start <= end)
     pub fn ordered(&self) -> ((usize, usize), (usize, usize)) {
-        if self.start.0 < self.end.0
-            || (self.start.0 == self.end.0 && self.start.1 <= self.end.1)
-        {
+        if self.start.0 < self.end.0 || (self.start.0 == self.end.0 && self.start.1 <= self.end.1) {
             (self.start, self.end)
         } else {
             (self.end, self.start)
@@ -452,19 +466,33 @@ impl TerminalSession {
         // to a dead placeholder session the UI shows as "session ended".
         let spawn = |sh: &str| {
             RealPtySession::with_scrollback_limit(
-                id, 80, 24, sh, scrollback_bytes, cwd, settings.auto_record_sessions,
+                id,
+                80,
+                24,
+                sh,
+                scrollback_bytes,
+                cwd,
+                settings.auto_record_sessions,
             )
         };
         let pty = match spawn(shell) {
             Ok(p) => p,
             Err(e) => {
-                log::error!("Failed to spawn local PTY {:?}: {} — trying $SHELL", shell, e);
+                log::error!(
+                    "Failed to spawn local PTY {:?}: {} — trying $SHELL",
+                    shell,
+                    e
+                );
                 let fallback = crate::terminal::default_shell_path();
                 if fallback == shell {
                     RealPtySession::dead_placeholder(80, 24)
                 } else {
                     spawn(&fallback).unwrap_or_else(|e2| {
-                        log::error!("Fallback PTY {:?} also failed: {} — dead session", fallback, e2);
+                        log::error!(
+                            "Fallback PTY {:?} also failed: {} — dead session",
+                            fallback,
+                            e2
+                        );
                         RealPtySession::dead_placeholder(80, 24)
                     })
                 }
@@ -473,9 +501,11 @@ impl TerminalSession {
         let grid = pty.get_grid();
 
         // Get initial cwd
-        let cwd = cwd
-            .map(|c| c.to_string())
-            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()));
+        let cwd = cwd.map(|c| c.to_string()).or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string())
+        });
 
         Self {
             kind: SessionKind::Local(pty, shell.to_string()),
@@ -520,7 +550,12 @@ impl TerminalSession {
         }
     }
 
-    pub fn new_ssh(host: &HostEntry, auth: ResolvedAuth, runtime: &tokio::runtime::Runtime, jump_host: Option<JumpHostInfo>) -> Self {
+    pub fn new_ssh(
+        host: &HostEntry,
+        auth: ResolvedAuth,
+        runtime: &tokio::runtime::Runtime,
+        jump_host: Option<JumpHostInfo>,
+    ) -> Self {
         // Use current system user if username is empty
         let username = Self::get_effective_username(&host.username);
 
@@ -593,19 +628,22 @@ impl TerminalSession {
                     "shell".to_string()
                 }
             }
-            SessionKind::Ssh(ssh, _, _) => {
-                ssh.get_shell_hint()
-                    .as_deref()
-                    .and_then(|p| p.rsplit('/').next().map(|s| s.to_string()))
-                    .unwrap_or_else(|| "…".to_string())
-            }
+            SessionKind::Ssh(ssh, _, _) => ssh
+                .get_shell_hint()
+                .as_deref()
+                .and_then(|p| p.rsplit('/').next().map(|s| s.to_string()))
+                .unwrap_or_else(|| "…".to_string()),
         }
     }
 
     /// Reconnect a disconnected SSH session. No-op for Local (Local has no
     /// connection concept and can never be reconnected — a dead local shell
     /// is simply closed by the user).
-    pub fn reconnect_ssh(&mut self, runtime: &tokio::runtime::Runtime, jump_host: Option<JumpHostInfo>) {
+    pub fn reconnect_ssh(
+        &mut self,
+        runtime: &tokio::runtime::Runtime,
+        jump_host: Option<JumpHostInfo>,
+    ) {
         if let SessionKind::Ssh(_, host, auth) = &self.kind {
             let host = host.clone();
             let auth = auth.clone();
@@ -709,7 +747,8 @@ impl TerminalSession {
         // resetting, so a drag coalesces; yet the app redraws ~150ms after you
         // stop — a narrowed frame recovers promptly.)
         self.pending_pty_size = Some((cols as u16, rows as u16));
-        self.pty_resize_deadline = Instant::now() + Duration::from_millis(Self::PTY_RESIZE_SETTLE_MS);
+        self.pty_resize_deadline =
+            Instant::now() + Duration::from_millis(Self::PTY_RESIZE_SETTLE_MS);
     }
 }
 
@@ -779,12 +818,18 @@ mod tests {
     fn width_change_keeps_grid_and_pty_in_lockstep() {
         let mut s = grid_only_session(148, 49);
         s.resize(100, 49); // width change
-        assert_eq!(s.pending_pty_size, Some((100, 49)),
-            "must schedule a debounced resize");
+        assert_eq!(
+            s.pending_pty_size,
+            Some((100, 49)),
+            "must schedule a debounced resize"
+        );
         // FIX: the grid must NOT have jumped to 100 — the app would be drawing
         // at the PTY's still-old width (148) into a 100-wide grid → overlap.
-        assert_eq!(s.grid.lock().unwrap().cols, 148,
-            "grid must not resize ahead of the PTY (this is the overlap root cause)");
+        assert_eq!(
+            s.grid.lock().unwrap().cols,
+            148,
+            "grid must not resize ahead of the PTY (this is the overlap root cause)"
+        );
     }
 
     #[test]
@@ -793,7 +838,11 @@ mod tests {
         s.resize(100, 40);
         assert_eq!(s.pending_pty_size, Some((100, 40)));
         assert_eq!(s.grid.lock().unwrap().cols, 148, "grid must not jump early");
-        assert_eq!(s.grid.lock().unwrap().rows, 49, "grid rows must not jump early");
+        assert_eq!(
+            s.grid.lock().unwrap().rows,
+            49,
+            "grid rows must not jump early"
+        );
     }
 
     #[test]
@@ -803,9 +852,16 @@ mod tests {
         // deadline passes → the pending resize is applied to BOTH together
         s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
         s.resize(100, 40);
-        assert!(s.pending_pty_size.is_none(), "pending resize must fire once settled");
+        assert!(
+            s.pending_pty_size.is_none(),
+            "pending resize must fire once settled"
+        );
         assert_eq!(s.grid.lock().unwrap().cols, 100, "grid must follow the PTY");
-        assert_eq!(s.grid.lock().unwrap().rows, 40, "grid rows must follow the PTY");
+        assert_eq!(
+            s.grid.lock().unwrap().rows,
+            40,
+            "grid rows must follow the PTY"
+        );
     }
 
     /// A window drag issues a rapid sequence of different sizes before the
@@ -819,14 +875,23 @@ mod tests {
         s.resize(120, 49);
         s.resize(100, 44);
         // all scheduled to the SAME pending slot — last write wins
-        assert_eq!(s.pending_pty_size, Some((100, 44)),
-            "pending must hold the latest drag size, not an intermediate");
-        assert_eq!(s.grid.lock().unwrap().cols, 148,
-            "grid stays at the ORIGINAL size during the drag");
+        assert_eq!(
+            s.pending_pty_size,
+            Some((100, 44)),
+            "pending must hold the latest drag size, not an intermediate"
+        );
+        assert_eq!(
+            s.grid.lock().unwrap().cols,
+            148,
+            "grid stays at the ORIGINAL size during the drag"
+        );
         // deadline fires → exactly ONE resize to the final size
         s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
         s.resize(100, 44);
-        assert!(s.pending_pty_size.is_none(), "coalesced resize must fire once");
+        assert!(
+            s.pending_pty_size.is_none(),
+            "coalesced resize must fire once"
+        );
         assert_eq!(s.grid.lock().unwrap().cols, 100);
         assert_eq!(s.grid.lock().unwrap().rows, 44);
     }
@@ -844,7 +909,10 @@ mod tests {
             let mut p = Parser::new();
             let mut a = CellAttrs::default();
             for &b in b"\x1b[?2026h".iter() {
-                let mut h = VteHandler { grid: &mut g, attrs: &mut a };
+                let mut h = VteHandler {
+                    grid: &mut g,
+                    attrs: &mut a,
+                };
                 p.advance(&mut h, b);
             }
         }
@@ -853,7 +921,11 @@ mod tests {
         s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
         s.resize(100, 40);
         assert!(s.pending_pty_size.is_some(), "pending kept while in sync");
-        assert_eq!(s.grid.lock().unwrap().cols, 148, "grid not resized mid-batch");
+        assert_eq!(
+            s.grid.lock().unwrap().cols,
+            148,
+            "grid not resized mid-batch"
+        );
         // batch ends
         {
             use crate::terminal::{CellAttrs, VteHandler};
@@ -862,19 +934,23 @@ mod tests {
             let mut p = Parser::new();
             let mut a = CellAttrs::default();
             for &b in b"\x1b[?2026l".iter() {
-                let mut h = VteHandler { grid: &mut g, attrs: &mut a };
+                let mut h = VteHandler {
+                    grid: &mut g,
+                    attrs: &mut a,
+                };
                 p.advance(&mut h, b);
             }
         }
         // a later frame applies the deferred resize
         s.pty_resize_deadline = Instant::now() - Duration::from_millis(1);
         s.resize(100, 40);
-        assert!(s.pending_pty_size.is_none(), "deferred resize applied after batch");
+        assert!(
+            s.pending_pty_size.is_none(),
+            "deferred resize applied after batch"
+        );
         assert_eq!(s.grid.lock().unwrap().cols, 100);
     }
 }
-
-
 
 #[cfg(test)]
 mod sync_defer {
@@ -884,7 +960,11 @@ mod sync_defer {
 
     fn grid_only_session(cols: usize, rows: usize) -> TerminalSession {
         let mut s = TerminalSession::new_local(0, "/bin/sh");
-        s.grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024)));
+        s.grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
+            cols,
+            rows,
+            1024 * 1024,
+        )));
         s.last_cols = cols;
         s.last_rows = rows;
         s
@@ -909,7 +989,12 @@ mod sync_defer {
             let mut a = CellAttrs::default();
             g.program_uses_positioning = true;
             // status at the bottom, then start a redraw batch (clear old frame)
-            feed(&mut g, &mut p, &mut a, "\x1b[30;1HSTATUS_OLD\x1b[?2026h\x1b[H\x1b[2J");
+            feed(
+                &mut g,
+                &mut p,
+                &mut a,
+                "\x1b[30;1HSTATUS_OLD\x1b[?2026h\x1b[H\x1b[2J",
+            );
             assert!(g.in_sync_update, "?2026h must set sync flag");
         }
         // render loop wants to grow; debounce fires
@@ -920,7 +1005,10 @@ mod sync_defer {
         {
             let g = s.grid.lock().unwrap();
             assert_eq!(g.rows, 30, "resize must be deferred during a sync batch");
-            assert!(s.pending_pty_size.is_some(), "pending resize kept while in sync");
+            assert!(
+                s.pending_pty_size.is_some(),
+                "pending resize kept while in sync"
+            );
         }
         // batch ends (?2026l), then a later frame applies the resize
         {
@@ -947,16 +1035,22 @@ mod sync_defer_e2e {
 
     fn grid_only_session(cols: usize, rows: usize) -> TerminalSession {
         let mut s = TerminalSession::new_local(0, "/bin/sh");
-        s.grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols, rows, 1024 * 1024)));
+        s.grid = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
+            cols,
+            rows,
+            1024 * 1024,
+        )));
         s.last_cols = cols;
         s.last_rows = rows;
         s
     }
     fn status_count(grid: &TerminalGrid) -> usize {
-        (0..grid.rows).filter(|&r| {
-            let row: String = grid.cells[r].iter().map(|c| c.c).collect();
-            row.contains("STATUS")
-        }).count()
+        (0..grid.rows)
+            .filter(|&r| {
+                let row: String = grid.cells[r].iter().map(|c| c.c).collect();
+                row.contains("STATUS")
+            })
+            .count()
     }
 
     /// End-to-end: claude clears its OLD frame (a sync batch), the render loop
@@ -974,7 +1068,10 @@ mod sync_defer_e2e {
             // old status at bottom, then claude's redraw batch: clear all + redraw
             // status at old bottom, still inside ?2026h
             for &b in b"\x1b[30;1HSTATUS\x1b[?2026h\x1b[H\x1b[2J\x1b[30;1HSTATUS".iter() {
-                let mut h = VteHandler { grid: &mut g, attrs: &mut a };
+                let mut h = VteHandler {
+                    grid: &mut g,
+                    attrs: &mut a,
+                };
                 p.advance(&mut h, b);
             }
             assert!(g.in_sync_update);
@@ -993,7 +1090,10 @@ mod sync_defer_e2e {
             let mut p = Parser::new();
             let mut a = CellAttrs::default();
             for &b in b"\x1b[?2026l".iter() {
-                let mut h = VteHandler { grid: &mut g, attrs: &mut a };
+                let mut h = VteHandler {
+                    grid: &mut g,
+                    attrs: &mut a,
+                };
                 p.advance(&mut h, b);
             }
         }
@@ -1005,7 +1105,10 @@ mod sync_defer_e2e {
             let mut p = Parser::new();
             let mut a = CellAttrs::default();
             for &b in b"\x1b[H\x1b[2J\x1b[40;1HSTATUS".iter() {
-                let mut h = VteHandler { grid: &mut g, attrs: &mut a };
+                let mut h = VteHandler {
+                    grid: &mut g,
+                    attrs: &mut a,
+                };
                 p.advance(&mut h, b);
             }
         }
@@ -1046,13 +1149,18 @@ mod sync_defer_e2e {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        assert!(prompt_ready, "zsh prompt must be visible before starting the recording");
+        assert!(
+            prompt_ready,
+            "zsh prompt must be visible before starting the recording"
+        );
 
         // Start mid-session, then type a marker the replay must come after.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("mid-session.cast");
         s.kind.start_recording(&path).expect("mid-session start");
-        s.kind.write(b"echo PORTAL_SNAPSHOT_MARKER\n").expect("write marker");
+        s.kind
+            .write(b"echo PORTAL_SNAPSHOT_MARKER\n")
+            .expect("write marker");
 
         let mut marker_seen = false;
         for _ in 0..100 {
@@ -1072,7 +1180,10 @@ mod sync_defer_e2e {
             .position(|e| e.data.contains("PORTAL_SNAPSHOT_MARKER"))
             .expect("marker must be recorded");
         let first = rec.events.first().expect("recording must not be empty");
-        assert!(!first.data.is_empty(), "first event must be the screen snapshot, not blank");
+        assert!(
+            !first.data.is_empty(),
+            "first event must be the screen snapshot, not blank"
+        );
         assert!(
             first.data.contains('%'),
             "first event must contain the pre-start prompt, got {:?}",

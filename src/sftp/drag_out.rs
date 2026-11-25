@@ -42,7 +42,12 @@ impl PromiseRegistry {
     }
 
     /// Register a promise under a provider key.
-    pub(crate) fn insert(&mut self, key: usize, spec: PromiseSpec, cmd_tx: UnboundedSender<SftpCommand>) {
+    pub(crate) fn insert(
+        &mut self,
+        key: usize,
+        spec: PromiseSpec,
+        cmd_tx: UnboundedSender<SftpCommand>,
+    ) {
         self.promises.insert(key, PendingPromise { spec, cmd_tx });
     }
 

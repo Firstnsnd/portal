@@ -49,7 +49,11 @@ pub fn open_editor_in_side(window: &mut AppWindow, panel: SftpPanel, file_name: 
     }
 }
 
-fn open_local_editor(browser: &mut LocalBrowser, panel: SftpPanel, file_name: &str) -> SftpEmbeddedEditor {
+fn open_local_editor(
+    browser: &mut LocalBrowser,
+    panel: SftpPanel,
+    file_name: &str,
+) -> SftpEmbeddedEditor {
     let dir = browser.current_path.clone();
     let (content, error) = match browser.read_file(file_name) {
         Ok(content) => (content, String::new()),
@@ -68,7 +72,11 @@ fn open_local_editor(browser: &mut LocalBrowser, panel: SftpPanel, file_name: &s
     }
 }
 
-fn open_remote_editor(browser: &mut SftpBrowser, panel: SftpPanel, file_name: &str) -> SftpEmbeddedEditor {
+fn open_remote_editor(
+    browser: &mut SftpBrowser,
+    panel: SftpPanel,
+    file_name: &str,
+) -> SftpEmbeddedEditor {
     let dir = browser.current_path.clone();
     let full_path = format!("{}/{}", dir.trim_end_matches('/'), file_name);
     browser.read_file(&full_path);
@@ -90,7 +98,12 @@ fn open_remote_editor(browser: &mut SftpBrowser, panel: SftpPanel, file_name: &s
 /// writes are fire-and-forget followed by a directory re-list. `Ok(())`
 /// means the caller may close the editor; `Err(msg)` should be surfaced
 /// in the editor's error slot.
-pub fn execute_editor_save(window: &mut AppWindow, panel: SftpPanel, path: &str, content: &str) -> Result<(), String> {
+pub fn execute_editor_save(
+    window: &mut AppWindow,
+    panel: SftpPanel,
+    path: &str,
+    content: &str,
+) -> Result<(), String> {
     match panel {
         SftpPanel::LeftLocal => save_local(&mut window.local_browser_left, path, content),
         SftpPanel::RightLocal => save_local(&mut window.local_browser_right, path, content),
@@ -133,7 +146,10 @@ pub fn render_embedded_editor(
     ui: &mut egui::Ui,
     cx: &WindowContext,
 ) -> EditorOutput {
-    let mut out = EditorOutput { close: false, save: None };
+    let mut out = EditorOutput {
+        close: false,
+        save: None,
+    };
 
     // Disarm the close guard when the content is back to its saved state.
     if !editor.is_dirty() {
@@ -152,8 +168,7 @@ pub fn render_embedded_editor(
     );
     // The title strip takes its NATURAL height using the same Frame idiom as
     // the file list's breadcrumb nav, so the two "nav bars" stay equal.
-    let title_max_rect =
-        egui::Rect::from_min_max(full.min, egui::pos2(full.max.x, bar_rect.min.y));
+    let title_max_rect = egui::Rect::from_min_max(full.min, egui::pos2(full.max.x, bar_rect.min.y));
     let title_rect = ui
         .allocate_new_ui(egui::UiBuilder::new().max_rect(title_max_rect), |ui| {
             egui::Frame {
@@ -163,7 +178,11 @@ pub fn render_embedded_editor(
             }
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("\u{1F4C4}").size(12.0).color(cx.theme.accent));
+                    ui.label(
+                        egui::RichText::new("\u{1F4C4}")
+                            .size(12.0)
+                            .color(cx.theme.accent),
+                    );
                     ui.add_space(4.0);
                     let badge = if editor.panel.is_local() {
                         cx.language.t("local")
@@ -180,7 +199,11 @@ pub fn render_embedded_editor(
                     );
                     if editor.is_dirty() {
                         ui.add_space(4.0);
-                        ui.label(egui::RichText::new("\u{25CF}").size(10.0).color(cx.theme.accent));
+                        ui.label(
+                            egui::RichText::new("\u{25CF}")
+                                .size(10.0)
+                                .color(cx.theme.accent),
+                        );
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // ✕ — two-step guard while dirty: first press arms
@@ -188,8 +211,11 @@ pub fn render_embedded_editor(
                         let armed = editor.is_dirty() && editor.confirm_close;
                         let mut close_btn = ui.add(
                             egui::Button::new(
-                                egui::RichText::new("\u{2715}").size(12.0)
-                                    .color(if armed { cx.theme.red } else { cx.theme.fg_dim }),
+                                egui::RichText::new("\u{2715}").size(12.0).color(if armed {
+                                    cx.theme.red
+                                } else {
+                                    cx.theme.fg_dim
+                                }),
                             )
                             .frame(false),
                         );
@@ -254,21 +280,32 @@ pub fn render_embedded_editor(
             }
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("\u{26A0}").size(16.0).color(cx.theme.red));
+                    ui.label(
+                        egui::RichText::new("\u{26A0}")
+                            .size(16.0)
+                            .color(cx.theme.red),
+                    );
                     ui.add_space(6.0);
-                    ui.label(egui::RichText::new(&editor.error).color(cx.theme.red).size(12.0));
+                    ui.label(
+                        egui::RichText::new(&editor.error)
+                            .color(cx.theme.red)
+                            .size(12.0),
+                    );
                 });
                 ui.add_space(16.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(
-                        egui::Button::new(
-                            egui::RichText::new(cx.language.t("cancel")).color(cx.theme.fg_dim).size(13.0),
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(cx.language.t("cancel"))
+                                    .color(cx.theme.fg_dim)
+                                    .size(13.0),
+                            )
+                            .fill(cx.theme.bg_elevated)
+                            .rounding(6.0)
+                            .min_size(egui::vec2(70.0, 32.0)),
                         )
-                        .fill(cx.theme.bg_elevated)
-                        .rounding(6.0)
-                        .min_size(egui::vec2(70.0, 32.0)),
-                    )
-                    .clicked()
+                        .clicked()
                     {
                         out.close = true;
                     }
@@ -312,7 +349,9 @@ pub fn render_embedded_editor(
             // width and a real horizontal scrollbar appears. The measurement
             // lands one frame later — imperceptible on file open.
             let width_key = egui::Id::new("sftp_editor_content_w").with(id_side);
-            let measured = ui.ctx().data_mut(|d| d.get_temp::<f32>(width_key).unwrap_or(0.0));
+            let measured = ui
+                .ctx()
+                .data_mut(|d| d.get_temp::<f32>(width_key).unwrap_or(0.0));
 
             let scroll_out = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(edit_rect), |ui| {
                 egui::ScrollArea::both()
@@ -334,10 +373,7 @@ pub fn render_embedded_editor(
                                     // a 1-line file (min_size applies to the
                                     // outer rect — no font-row-height math);
                                     // longer content grows past it and scrolls.
-                                    .min_size(egui::vec2(
-                                        0.0,
-                                        (edit_rect.height() - 8.0).max(60.0),
-                                    ))
+                                    .min_size(egui::vec2(0.0, (edit_rect.height() - 8.0).max(60.0)))
                                     // Text flush with the top so gutter line
                                     // numbers line up row for row.
                                     .margin(egui::Margin {
@@ -361,7 +397,8 @@ pub fn render_embedded_editor(
                     })
             });
 
-            ui.ctx().data_mut(|d| d.insert_temp(width_key, galley_width.get()));
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(width_key, galley_width.get()));
 
             // ── Line-number gutter — painted at fixed screen coords, synced
             //    to the scroll area's actual vertical offset this frame ──
@@ -376,8 +413,8 @@ pub fn render_embedded_editor(
                 egui::Stroke::new(1.0, cx.theme.border),
             );
             let first = (offset_y / row_h).floor().max(0.0) as usize;
-            let last = (((offset_y + edit_rect.height()) / row_h).ceil() as usize + 1)
-                .min(line_count);
+            let last =
+                (((offset_y + edit_rect.height()) / row_h).ceil() as usize + 1).min(line_count);
             for i in first..last {
                 let y = gutter_rect.min.y + i as f32 * row_h + row_h * 0.5 - offset_y;
                 painter.text(
@@ -402,7 +439,12 @@ pub fn render_embedded_editor(
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(bar_rect), |ui| {
         egui::Frame {
             fill: cx.theme.bg_secondary,
-            inner_margin: egui::Margin { left: 16.0, right: 16.0, top: 8.0, bottom: 8.0 },
+            inner_margin: egui::Margin {
+                left: 16.0,
+                right: 16.0,
+                top: 8.0,
+                bottom: 8.0,
+            },
             ..Default::default()
         }
         .show(ui, |ui| {
@@ -423,15 +465,18 @@ pub fn render_embedded_editor(
                     .family(egui::FontFamily::Monospace),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(
-                        egui::Button::new(
-                            egui::RichText::new(cx.language.t("save")).color(cx.theme.button_text).size(12.0),
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(cx.language.t("save"))
+                                    .color(cx.theme.button_text)
+                                    .size(12.0),
+                            )
+                            .fill(cx.theme.accent)
+                            .rounding(6.0)
+                            .min_size(egui::vec2(64.0, 28.0)),
                         )
-                        .fill(cx.theme.accent)
-                        .rounding(6.0)
-                        .min_size(egui::vec2(64.0, 28.0)),
-                    )
-                    .clicked()
+                        .clicked()
                     {
                         out.save = Some(editor.content.clone());
                     }
@@ -467,7 +512,8 @@ mod tests {
     /// Fresh temp dir with `files` written into it (cleared first so reruns
     /// start clean; per-test tags keep parallel tests out of each other's way).
     fn temp_dir_with(tag: &str, files: &[(&str, &str)]) -> String {
-        let dir = std::env::temp_dir().join(format!("portal_editor_{}_{}", tag, std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("portal_editor_{}_{}", tag, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for (name, content) in files {
@@ -562,9 +608,7 @@ mod tests {
         assert!(window.sftp_editor_right.is_none());
 
         // Save without a browser is fire-and-forget → still Ok.
-        assert!(
-            execute_editor_save(&mut window, SftpPanel::LeftRemote, "/tmp/x.txt", "y").is_ok()
-        );
+        assert!(execute_editor_save(&mut window, SftpPanel::LeftRemote, "/tmp/x.txt", "y").is_ok());
         assert!(window.sftp_editor_left.is_none());
     }
 
@@ -664,8 +708,11 @@ mod tests {
             "TextEdit must fill the half HEIGHT below the title (want ≥660, got {})",
             rect.height()
         );
-        assert!(rect.min.y >= 24.0 && rect.max.y <= 800.0 - 44.0 + 1.0,
-            "TextEdit must sit between the natural title strip and bottom bar, got {:?}", rect);
+        assert!(
+            rect.min.y >= 24.0 && rect.max.y <= 800.0 - 44.0 + 1.0,
+            "TextEdit must sit between the natural title strip and bottom bar, got {:?}",
+            rect
+        );
 
         // ── One 20 000-char line: no folding — the galley extends far past
         //    the viewport so the ScrollArea offers horizontal scrolling.

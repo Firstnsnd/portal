@@ -41,7 +41,11 @@ impl FileSelection {
     /// Select range from anchor to i (Shift+Click).
     pub fn select_range(&mut self, i: usize) {
         let anchor = self.anchor.unwrap_or(0);
-        let (lo, hi) = if anchor <= i { (anchor, i) } else { (i, anchor) };
+        let (lo, hi) = if anchor <= i {
+            (anchor, i)
+        } else {
+            (i, anchor)
+        };
         self.selected.clear();
         for idx in lo..=hi {
             self.selected.insert(idx);
@@ -52,7 +56,11 @@ impl FileSelection {
     /// Extend selection from anchor to i (Shift+Arrow key), keeping anchor.
     pub fn extend_to(&mut self, i: usize) {
         let anchor = self.anchor.unwrap_or(0);
-        let (lo, hi) = if anchor <= i { (anchor, i) } else { (i, anchor) };
+        let (lo, hi) = if anchor <= i {
+            (anchor, i)
+        } else {
+            (i, anchor)
+        };
         self.selected.clear();
         for idx in lo..=hi {
             self.selected.insert(idx);

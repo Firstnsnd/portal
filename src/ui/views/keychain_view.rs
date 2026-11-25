@@ -5,9 +5,9 @@
 use eframe::egui;
 
 // These types are defined in pane_view.rs
-use crate::ui::pane_view::{WindowContext, ViewActions};
-use crate::ui::pane::AppWindow;
 use crate::config::CredentialType;
+use crate::ui::pane::AppWindow;
+use crate::ui::pane_view::{ViewActions, WindowContext};
 use crate::ui::tokens::*;
 use crate::ui::widgets;
 
@@ -32,12 +32,20 @@ pub fn render_keychain_view(
         })
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(cx.language.t("keychain"))
-                    .color(cx.theme.fg_dim)
-                    .size(FONT_BASE)
-                    .strong());
+                ui.label(
+                    egui::RichText::new(cx.language.t("keychain"))
+                        .color(cx.theme.fg_dim)
+                        .size(FONT_BASE)
+                        .strong(),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(widgets::text_button(cx.language.t("new_credential"), cx.theme.accent)).clicked() {
+                    if ui
+                        .add(widgets::text_button(
+                            cx.language.t("new_credential"),
+                            cx.theme.accent,
+                        ))
+                        .clicked()
+                    {
                         new_credential_requested = true;
                     }
                 });
@@ -58,24 +66,36 @@ pub fn render_keychain_view(
                     if cx.credentials.is_empty() {
                         ui.add_space(SPACE_2XL);
                         ui.vertical_centered(|ui| {
-                            ui.label(egui::RichText::new("\u{1f511}").size(SPACE_2XL).color(cx.theme.fg_dim));
+                            ui.label(
+                                egui::RichText::new("\u{1f511}")
+                                    .size(SPACE_2XL)
+                                    .color(cx.theme.fg_dim),
+                            );
                             ui.add_space(SPACE_MD);
-                            ui.label(egui::RichText::new(cx.language.t("keychain_empty")).color(cx.theme.fg_dim).size(FONT_BASE));
+                            ui.label(
+                                egui::RichText::new(cx.language.t("keychain_empty"))
+                                    .color(cx.theme.fg_dim)
+                                    .size(FONT_BASE),
+                            );
                         });
                     } else {
                         // Section header
                         ui.horizontal(|ui| {
                             ui.add_space(SPACE_XL);
-                            ui.label(egui::RichText::new(cx.language.t("credentials_section"))
-                                .color(cx.theme.fg_dim)
-                                .size(FONT_XS)
-                                .strong());
+                            ui.label(
+                                egui::RichText::new(cx.language.t("credentials_section"))
+                                    .color(cx.theme.fg_dim)
+                                    .size(FONT_XS)
+                                    .strong(),
+                            );
                         });
                         ui.add_space(SPACE_XS);
 
                         // Credential rows
                         for cred in cx.credentials.iter() {
-                            let bound_hosts: Vec<String> = cx.hosts.iter()
+                            let bound_hosts: Vec<String> = cx
+                                .hosts
+                                .iter()
                                 .filter(|h| h.credential_id.as_ref() == Some(&cred.id))
                                 .map(|h| h.name.clone())
                                 .collect();
@@ -99,7 +119,11 @@ pub fn render_keychain_view(
                                     if key_path.is_empty() {
                                         cx.language.t("ssh_key").to_string()
                                     } else {
-                                        format!("{}: {}", cx.language.t("key_source_path"), key_path)
+                                        format!(
+                                            "{}: {}",
+                                            cx.language.t("key_source_path"),
+                                            key_path
+                                        )
                                     }
                                 }
                                 CredentialType::Agent { username } => {
@@ -165,17 +189,24 @@ pub fn render_keychain_view(
                                 egui::vec2(type_w, type_h),
                             );
                             ui.painter().rect(
-                                type_rect, RADIUS_SM, egui::Color32::TRANSPARENT,
+                                type_rect,
+                                RADIUS_SM,
+                                egui::Color32::TRANSPARENT,
                                 egui::Stroke::new(1.0, cx.theme.border),
                             );
                             ui.painter().galley(
-                                egui::pos2(type_rect.center().x - type_galley.size().x / 2.0, type_rect.center().y - type_galley.size().y / 2.0),
-                                type_galley, cx.theme.fg_dim,
+                                egui::pos2(
+                                    type_rect.center().x - type_galley.size().x / 2.0,
+                                    type_rect.center().y - type_galley.size().y / 2.0,
+                                ),
+                                type_galley,
+                                cx.theme.fg_dim,
                             );
 
                             // Binding count badge
                             if binding_count > 0 {
-                                let badge_text = format!("{} {}", binding_count, cx.language.t("hosts_bound"));
+                                let badge_text =
+                                    format!("{} {}", binding_count, cx.language.t("hosts_bound"));
                                 let badge_galley = ui.painter().layout_no_wrap(
                                     badge_text,
                                     egui::FontId::proportional(FONT_XS),
@@ -187,10 +218,15 @@ pub fn render_keychain_view(
                                     egui::pos2(badge_x + badge_w / 2.0, rect.center().y),
                                     egui::vec2(badge_w, type_h),
                                 );
-                                ui.painter().rect_filled(badge_rect, RADIUS_SM, cx.theme.badge_bg);
+                                ui.painter()
+                                    .rect_filled(badge_rect, RADIUS_SM, cx.theme.badge_bg);
                                 ui.painter().galley(
-                                    egui::pos2(badge_rect.center().x - badge_galley.size().x / 2.0, badge_rect.center().y - badge_galley.size().y / 2.0),
-                                    badge_galley, cx.theme.accent,
+                                    egui::pos2(
+                                        badge_rect.center().x - badge_galley.size().x / 2.0,
+                                        badge_rect.center().y - badge_galley.size().y / 2.0,
+                                    ),
+                                    badge_galley,
+                                    cx.theme.accent,
                                 );
                             }
 
@@ -207,14 +243,18 @@ pub fn render_keychain_view(
     // Delete confirmation dialog
     let mut credential_to_delete = None;
     if let Some(delete_id) = &window.credential_dialog.confirm_delete.clone() {
-        let cred_name = cx.credentials.iter()
+        let cred_name = cx
+            .credentials
+            .iter()
             .find(|c| c.id == *delete_id)
             .map(|c| c.name.clone())
             .unwrap_or_default();
         // Isolation transparency: list the hosts still bound to this
         // credential — deletion unbinds them all, so their saved logins
         // stop working until a new credential is assigned.
-        let bound_hosts: Vec<String> = cx.hosts.iter()
+        let bound_hosts: Vec<String> = cx
+            .hosts
+            .iter()
             .filter(|h| h.credential_id.as_ref() == Some(delete_id))
             .map(|h| h.name.clone())
             .collect();
@@ -229,29 +269,57 @@ pub fn render_keychain_view(
             .frame(widgets::dialog_frame(cx.theme))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("\u{26A0}").size(18.0).color(cx.theme.red));
+                    ui.label(
+                        egui::RichText::new("\u{26A0}")
+                            .size(18.0)
+                            .color(cx.theme.red),
+                    );
                     ui.add_space(SPACE_XS);
-                    ui.label(egui::RichText::new(cx.language.t("delete_credential")).size(15.0).color(cx.theme.fg_primary).strong());
+                    ui.label(
+                        egui::RichText::new(cx.language.t("delete_credential"))
+                            .size(15.0)
+                            .color(cx.theme.fg_primary)
+                            .strong(),
+                    );
                 });
                 ui.add_space(10.0);
-                ui.label(egui::RichText::new(cx.language.tf("delete_confirm", &cred_name)).color(cx.theme.fg_primary).size(FONT_BASE));
+                ui.label(
+                    egui::RichText::new(cx.language.tf("delete_confirm", &cred_name))
+                        .color(cx.theme.fg_primary)
+                        .size(FONT_BASE),
+                );
                 ui.add_space(SPACE_XS);
                 if !bound_hosts.is_empty() {
-                    ui.label(egui::RichText::new(
-                        cx.language.tf("delete_credential_bound_warning", &bound_hosts.join(", ")),
-                    ).color(cx.theme.red).size(FONT_SM));
+                    ui.label(
+                        egui::RichText::new(
+                            cx.language
+                                .tf("delete_credential_bound_warning", &bound_hosts.join(", ")),
+                        )
+                        .color(cx.theme.red)
+                        .size(FONT_SM),
+                    );
                     ui.add_space(SPACE_XS);
                 }
-                ui.label(egui::RichText::new(cx.language.t("confirm_delete")).color(cx.theme.fg_dim).size(FONT_SM));
+                ui.label(
+                    egui::RichText::new(cx.language.t("confirm_delete"))
+                        .color(cx.theme.fg_dim)
+                        .size(FONT_SM),
+                );
                 ui.add_space(SPACE_LG);
 
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(widgets::danger_button(cx.language.t("delete"), cx.theme)).clicked() {
+                        if ui
+                            .add(widgets::danger_button(cx.language.t("delete"), cx.theme))
+                            .clicked()
+                        {
                             credential_to_delete = Some(delete_id.clone());
                             window.credential_dialog.confirm_delete = None;
                         }
-                        if ui.add(widgets::secondary_button(cx.language.t("cancel"), cx.theme)).clicked() {
+                        if ui
+                            .add(widgets::secondary_button(cx.language.t("cancel"), cx.theme))
+                            .clicked()
+                        {
                             window.credential_dialog.confirm_delete = None;
                         }
                     });
@@ -280,7 +348,11 @@ pub fn render_keychain_view(
 }
 
 /// Render the add/edit credential drawer (shadcn/ui style)
-pub fn render_credential_drawer(window: &mut AppWindow, ctx: &egui::Context, cx: &mut WindowContext) {
+pub fn render_credential_drawer(
+    window: &mut AppWindow,
+    ctx: &egui::Context,
+    cx: &mut WindowContext,
+) {
     if !window.credential_dialog.open {
         return;
     }

@@ -6,17 +6,17 @@
 //! The platform-specific font sets (stock monospace + CJK fallback paths)
 //! live in per-OS sibling modules behind [`install_platform_fonts`]:
 
-#[cfg(target_os = "macos")]
-mod macos;
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(windows)]
 mod windows;
 
-#[cfg(target_os = "macos")]
-pub use macos::install_platform_fonts;
 #[cfg(target_os = "linux")]
 pub use linux::install_platform_fonts;
+#[cfg(target_os = "macos")]
+pub use macos::install_platform_fonts;
 #[cfg(windows)]
 pub use windows::install_platform_fonts;
 
@@ -24,14 +24,21 @@ use eframe::egui;
 
 /// Probe `path` and, if readable, register it under `name` as a fallback for
 /// `families` (appended — existing fonts keep priority, this only fills gaps).
-fn push_font(fonts: &mut egui::FontDefinitions, name: &str, path: &str, families: &[egui::FontFamily]) {
+fn push_font(
+    fonts: &mut egui::FontDefinitions,
+    name: &str,
+    path: &str,
+    families: &[egui::FontFamily],
+) {
     if let Ok(font_data) = std::fs::read(path) {
-        fonts.font_data.insert(name.to_owned(), egui::FontData::from_owned(font_data));
+        fonts
+            .font_data
+            .insert(name.to_owned(), egui::FontData::from_owned(font_data));
         for family in families {
             fonts
                 .families
                 .entry(family.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(name.to_owned());
         }
     }
@@ -67,7 +74,8 @@ pub fn load_fonts(custom_font_path: &str) -> egui::FontDefinitions {
                 "CustomFont".to_owned(),
                 egui::FontData::from_owned(font_data),
             );
-            fonts.families
+            fonts
+                .families
                 .entry(egui::FontFamily::Monospace)
                 .or_insert_with(Vec::new)
                 .insert(0, "CustomFont".to_owned());

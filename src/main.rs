@@ -1,7 +1,7 @@
 //! Portal - Modern Terminal Emulator with egui
 //! Termius-inspired UI with native terminal input
 
-#![allow(unexpected_cfgs)]  // Suppress warnings from objc crate's macros
+#![allow(unexpected_cfgs)] // Suppress warnings from objc crate's macros
 
 mod app;
 mod config;
@@ -10,9 +10,9 @@ mod integration;
 mod ipc;
 mod llm;
 mod local_auth;
-mod repaint;
 mod opener;
 mod platform_hooks;
+mod repaint;
 mod secret_store;
 mod sftp;
 mod ssh;
@@ -42,7 +42,8 @@ impl eframe::App for PortalApp {
         // the app stays open; startup alone doesn't bound that. No-op when no
         // policy is set (enforce_retention early-returns).
         if std::time::Instant::now() >= self.next_retention_check {
-            self.next_retention_check = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+            self.next_retention_check =
+                std::time::Instant::now() + std::time::Duration::from_secs(3600);
             let removed = portal::terminal::cast::enforce_retention(
                 &portal::terminal::cast::recordings_dir(),
                 self.recordings_retention_days,
@@ -180,11 +181,8 @@ impl eframe::App for PortalApp {
                     let viewport_id = egui::ViewportId::from_hash_of(format!("window_{}", id_val));
                     let next_id = dw.next_id;
                     dw.next_id += 100;
-                    self.windows.push(AppWindow::new_window(
-                        viewport_id,
-                        tab,
-                        next_id,
-                    ));
+                    self.windows
+                        .push(AppWindow::new_window(viewport_id, tab, next_id));
                 }
             }
         }
@@ -215,7 +213,11 @@ impl eframe::App for PortalApp {
 
             // Handle async file read results for the editor
             if let Some((path, data)) = pending_content {
-                window.sftp_editor_deliver_file_content(ui::types::SftpPanel::RightRemote, path, data);
+                window.sftp_editor_deliver_file_content(
+                    ui::types::SftpPanel::RightRemote,
+                    path,
+                    data,
+                );
             }
             if let Some((_path, size)) = pending_too_large {
                 window.sftp_editor_deliver_file_too_large(ui::types::SftpPanel::RightRemote, size);
@@ -242,7 +244,11 @@ impl eframe::App for PortalApp {
 
             // Handle async file read results for the editor
             if let Some((path, data)) = pending_content {
-                window.sftp_editor_deliver_file_content(ui::types::SftpPanel::LeftRemote, path, data);
+                window.sftp_editor_deliver_file_content(
+                    ui::types::SftpPanel::LeftRemote,
+                    path,
+                    data,
+                );
             }
             if let Some((_path, size)) = pending_too_large {
                 window.sftp_editor_deliver_file_too_large(ui::types::SftpPanel::LeftRemote, size);
@@ -277,10 +283,7 @@ impl PortalApp {
                     if let Some(cwd) = path.to_str() {
                         self.add_local_tab_to_window_in(idx, Some(cwd));
                         if let Some(w) = self.windows.get(idx) {
-                            ctx.send_viewport_cmd_to(
-                                w.viewport_id,
-                                egui::ViewportCommand::Focus,
-                            );
+                            ctx.send_viewport_cmd_to(w.viewport_id, egui::ViewportCommand::Focus);
                         }
                     }
                 }

@@ -6,8 +6,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 use crate::config::{ResolvedAuth, ResolvedProxy};
+use crate::sftp::types::{
+    safe_download_name, SftpCommand, SftpEntry, SftpEntryKind, SftpResponse, TransferProgress,
+};
 use crate::ssh::AuthPromptBridge;
-use crate::sftp::types::{safe_download_name, SftpEntry, SftpEntryKind, SftpCommand, SftpResponse, TransferProgress};
 
 /// Variant of sftp_task that navigates to a specific path after connecting (used for auto-reconnect).
 #[allow(clippy::too_many_arguments)]
@@ -25,8 +27,17 @@ pub async fn sftp_task_with_initial_path(
     proxy: Option<ResolvedProxy>,
 ) {
     sftp_task_inner(
-        host, port, username, auth, cmd_rx, resp_tx, cancel_flag,
-        auth_prompt, host_key_policy, initial_path, proxy,
+        host,
+        port,
+        username,
+        auth,
+        cmd_rx,
+        resp_tx,
+        cancel_flag,
+        auth_prompt,
+        host_key_policy,
+        initial_path,
+        proxy,
     )
     .await
 }
@@ -46,8 +57,17 @@ pub async fn sftp_task(
     proxy: Option<ResolvedProxy>,
 ) {
     sftp_task_inner(
-        host, port, username, auth, cmd_rx, resp_tx, cancel_flag,
-        auth_prompt, host_key_policy, None, proxy,
+        host,
+        port,
+        username,
+        auth,
+        cmd_rx,
+        resp_tx,
+        cancel_flag,
+        auth_prompt,
+        host_key_policy,
+        None,
+        proxy,
     )
     .await
 }
@@ -101,11 +121,15 @@ async fn sftp_task_inner(
     {
         Ok(Ok(h)) => h,
         Ok(Err(e)) => {
-            if !cancelled() { let _ = resp_tx.send(SftpResponse::Error(e)); }
+            if !cancelled() {
+                let _ = resp_tx.send(SftpResponse::Error(e));
+            }
             return;
         }
         Err(_) => {
-            if !cancelled() { let _ = resp_tx.send(SftpResponse::Error("Connection timed out".to_string())); }
+            if !cancelled() {
+                let _ = resp_tx.send(SftpResponse::Error("Connection timed out".to_string()));
+            }
             return;
         }
     };
@@ -114,20 +138,28 @@ async fn sftp_task_inner(
     // a 2FA user may take minutes to type an OTP. The bridge's cancel
     // (pane closed / user cancel) and the cancel_flag still abort.
     if let Err(e) = crate::ssh::authenticate(&mut handle, &username, &auth, &auth_prompt).await {
-        if !cancelled() { let _ = resp_tx.send(SftpResponse::Error(e)); }
+        if !cancelled() {
+            let _ = resp_tx.send(SftpResponse::Error(e));
+        }
         return;
     }
-    if cancelled() { return; }
+    if cancelled() {
+        return;
+    }
 
     // 2. Open a session channel and request SFTP subsystem
     let channel = match handle.channel_open_session().await {
         Ok(ch) => ch,
         Err(e) => {
-            if !cancelled() { let _ = resp_tx.send(SftpResponse::Error(format!("Channel open failed: {}", e))); }
+            if !cancelled() {
+                let _ = resp_tx.send(SftpResponse::Error(format!("Channel open failed: {}", e)));
+            }
             return;
         }
     };
-    if cancelled() { return; }
+    if cancelled() {
+        return;
+    }
 
     if let Err(e) = channel.request_subsystem(true, "sftp").await {
         if !cancelled() {
@@ -138,7 +170,9 @@ async fn sftp_task_inner(
         }
         return;
     }
-    if cancelled() { return; }
+    if cancelled() {
+        return;
+    }
 
     // 3. Create SFTP session from channel stream
     let sftp = match russh_sftp::client::SftpSession::new(channel.into_stream()).await {
@@ -153,7 +187,9 @@ async fn sftp_task_inner(
             return;
         }
     };
-    if cancelled() { return; }
+    if cancelled() {
+        return;
+    }
 
     // 4. Resolve initial path (reconnect path or home directory)
     let start_path = if let Some(ref path) = initial_path {
@@ -168,7 +204,9 @@ async fn sftp_task_inner(
 
     // List the initial directory
     if let Err(e) = list_dir(&sftp, &start_path, &resp_tx).await {
-        if !cancelled() { let _ = resp_tx.send(SftpResponse::Error(e)); }
+        if !cancelled() {
+            let _ = resp_tx.send(SftpResponse::Error(e));
+        }
         return;
     }
 
@@ -182,16 +220,18 @@ async fn sftp_task_inner(
             }
             Some(SftpCommand::ListDir(path)) => {
                 const OP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-                let canonical = match tokio::time::timeout(OP_TIMEOUT, sftp.canonicalize(&path)).await {
-                    Ok(Ok(p)) => p,
-                    Ok(Err(_)) => path.clone(),
-                    Err(_) => {
-                        // Timeout — connection is likely dead
-                        let _ = resp_tx.send(SftpResponse::Disconnected);
-                        break;
-                    }
-                };
-                match tokio::time::timeout(OP_TIMEOUT, list_dir(&sftp, &canonical, &resp_tx)).await {
+                let canonical =
+                    match tokio::time::timeout(OP_TIMEOUT, sftp.canonicalize(&path)).await {
+                        Ok(Ok(p)) => p,
+                        Ok(Err(_)) => path.clone(),
+                        Err(_) => {
+                            // Timeout — connection is likely dead
+                            let _ = resp_tx.send(SftpResponse::Disconnected);
+                            break;
+                        }
+                    };
+                match tokio::time::timeout(OP_TIMEOUT, list_dir(&sftp, &canonical, &resp_tx)).await
+                {
                     Ok(Ok(())) => {}
                     Ok(Err(e)) => {
                         if is_disconnect_error(&e) {
@@ -208,7 +248,8 @@ async fn sftp_task_inner(
             }
             Some(SftpCommand::Download { remote, local }) => {
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
-                if let Err(e) = download_file(&sftp, &remote, &local, &resp_tx, &cancel_flag).await {
+                if let Err(e) = download_file(&sftp, &remote, &local, &resp_tx, &cancel_flag).await
+                {
                     if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
                         if is_disconnect_error(&e) {
                             let _ = resp_tx.send(SftpResponse::Disconnected);
@@ -232,9 +273,14 @@ async fn sftp_task_inner(
                 }
                 let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
-            Some(SftpCommand::UploadDir { local_dir, remote_dir }) => {
+            Some(SftpCommand::UploadDir {
+                local_dir,
+                remote_dir,
+            }) => {
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
-                if let Err(e) = upload_dir(&sftp, &local_dir, &remote_dir, &resp_tx, &cancel_flag).await {
+                if let Err(e) =
+                    upload_dir(&sftp, &local_dir, &remote_dir, &resp_tx, &cancel_flag).await
+                {
                     if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
                         if is_disconnect_error(&e) {
                             let _ = resp_tx.send(SftpResponse::Disconnected);
@@ -245,9 +291,14 @@ async fn sftp_task_inner(
                 }
                 let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
-            Some(SftpCommand::DownloadDir { remote_dir, local_dir }) => {
+            Some(SftpCommand::DownloadDir {
+                remote_dir,
+                local_dir,
+            }) => {
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
-                if let Err(e) = download_dir(&sftp, &remote_dir, &local_dir, &resp_tx, &cancel_flag).await {
+                if let Err(e) =
+                    download_dir(&sftp, &remote_dir, &local_dir, &resp_tx, &cancel_flag).await
+                {
                     if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
                         if is_disconnect_error(&e) {
                             let _ = resp_tx.send(SftpResponse::Disconnected);
@@ -258,22 +309,27 @@ async fn sftp_task_inner(
                 }
                 let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
-            Some(SftpCommand::DownloadSync { remote, local, done }) => {
+            Some(SftpCommand::DownloadSync {
+                remote,
+                local,
+                done,
+            }) => {
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
                 let mut fatal = false;
-                let result = match download_file(&sftp, &remote, &local, &resp_tx, &cancel_flag).await {
-                    Ok(()) => Ok(()),
-                    Err(e) => {
-                        if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                            if is_disconnect_error(&e) {
-                                fatal = true;
-                            } else {
-                                let _ = resp_tx.send(SftpResponse::Error(e.clone()));
+                let result =
+                    match download_file(&sftp, &remote, &local, &resp_tx, &cancel_flag).await {
+                        Ok(()) => Ok(()),
+                        Err(e) => {
+                            if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                                if is_disconnect_error(&e) {
+                                    fatal = true;
+                                } else {
+                                    let _ = resp_tx.send(SftpResponse::Error(e.clone()));
+                                }
                             }
+                            Err(e)
                         }
-                        Err(e)
-                    }
-                };
+                    };
                 // Ack before any loop break so the blocked promise delegate wakes.
                 let _ = done.send(result);
                 if fatal {
@@ -282,10 +338,22 @@ async fn sftp_task_inner(
                 }
                 let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
-            Some(SftpCommand::DownloadDirSync { remote_dir, local_dir, done }) => {
+            Some(SftpCommand::DownloadDirSync {
+                remote_dir,
+                local_dir,
+                done,
+            }) => {
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
                 let mut fatal = false;
-                let result = match download_dir(&sftp, &remote_dir, &local_dir, &resp_tx, &cancel_flag).await {
+                let result = match download_dir(
+                    &sftp,
+                    &remote_dir,
+                    &local_dir,
+                    &resp_tx,
+                    &cancel_flag,
+                )
+                .await
+                {
                     Ok(()) => Ok(()),
                     Err(e) => {
                         if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -305,10 +373,15 @@ async fn sftp_task_inner(
                 }
                 let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
-            Some(SftpCommand::UploadSync { local, remote, done }) => {
+            Some(SftpCommand::UploadSync {
+                local,
+                remote,
+                done,
+            }) => {
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
                 let mut fatal = false;
-                let result = match upload_file(&sftp, &local, &remote, &resp_tx, &cancel_flag).await {
+                let result = match upload_file(&sftp, &local, &remote, &resp_tx, &cancel_flag).await
+                {
                     Ok(()) => Ok(()),
                     Err(e) => {
                         if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -329,10 +402,22 @@ async fn sftp_task_inner(
                 }
                 let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
-            Some(SftpCommand::UploadDirSync { local_dir, remote_dir, done }) => {
+            Some(SftpCommand::UploadDirSync {
+                local_dir,
+                remote_dir,
+                done,
+            }) => {
                 cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
                 let mut fatal = false;
-                let result = match upload_dir(&sftp, &local_dir, &remote_dir, &resp_tx, &cancel_flag).await {
+                let result = match upload_dir(
+                    &sftp,
+                    &local_dir,
+                    &remote_dir,
+                    &resp_tx,
+                    &cancel_flag,
+                )
+                .await
+                {
                     Ok(()) => Ok(()),
                     Err(e) => {
                         if !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -378,81 +463,85 @@ async fn sftp_task_inner(
                 }
                 let _ = resp_tx.send(SftpResponse::TransferComplete);
             }
-            Some(SftpCommand::Rename { from, to }) => {
-                match sftp.rename(&from, &to).await {
-                    Ok(_) => { let _ = resp_tx.send(SftpResponse::OperationComplete); }
-                    Err(e) => {
-                        let err_msg = format!("Rename failed: {}", e);
-                        if is_disconnect_error(&err_msg) {
-                            let _ = resp_tx.send(SftpResponse::Disconnected);
-                            break;
-                        }
-                        let _ = resp_tx.send(SftpResponse::Error(err_msg));
-                    }
+            Some(SftpCommand::Rename { from, to }) => match sftp.rename(&from, &to).await {
+                Ok(_) => {
+                    let _ = resp_tx.send(SftpResponse::OperationComplete);
                 }
-            }
-            Some(SftpCommand::Delete(path)) => {
-                match sftp.metadata(&path).await {
-                    Ok(meta) => {
-                        let is_dir = meta.permissions.is_some_and(|p| (p & 0o170000) == 0o040000);
-                        let result = if is_dir {
-                            remove_dir_recursive(&sftp, &path).await
-                        } else {
-                            sftp.remove_file(&path).await.map_err(|e| format!("Delete failed: {}", e))
-                        };
-                        match result {
-                            Ok(_) => { let _ = resp_tx.send(SftpResponse::OperationComplete); }
-                            Err(e) => {
-                                if is_disconnect_error(&e) {
-                                    let _ = resp_tx.send(SftpResponse::Disconnected);
-                                    break;
-                                }
-                                let _ = resp_tx.send(SftpResponse::Error(e));
+                Err(e) => {
+                    let err_msg = format!("Rename failed: {}", e);
+                    if is_disconnect_error(&err_msg) {
+                        let _ = resp_tx.send(SftpResponse::Disconnected);
+                        break;
+                    }
+                    let _ = resp_tx.send(SftpResponse::Error(err_msg));
+                }
+            },
+            Some(SftpCommand::Delete(path)) => match sftp.metadata(&path).await {
+                Ok(meta) => {
+                    let is_dir = meta.permissions.is_some_and(|p| (p & 0o170000) == 0o040000);
+                    let result = if is_dir {
+                        remove_dir_recursive(&sftp, &path).await
+                    } else {
+                        sftp.remove_file(&path)
+                            .await
+                            .map_err(|e| format!("Delete failed: {}", e))
+                    };
+                    match result {
+                        Ok(_) => {
+                            let _ = resp_tx.send(SftpResponse::OperationComplete);
+                        }
+                        Err(e) => {
+                            if is_disconnect_error(&e) {
+                                let _ = resp_tx.send(SftpResponse::Disconnected);
+                                break;
                             }
+                            let _ = resp_tx.send(SftpResponse::Error(e));
                         }
-                    }
-                    Err(e) => {
-                        let err_msg = format!("Cannot stat: {}", e);
-                        if is_disconnect_error(&err_msg) {
-                            let _ = resp_tx.send(SftpResponse::Disconnected);
-                            break;
-                        }
-                        let _ = resp_tx.send(SftpResponse::Error(err_msg));
                     }
                 }
-            }
-            Some(SftpCommand::CreateDir(path)) => {
-                match sftp.create_dir(&path).await {
-                    Ok(_) => { let _ = resp_tx.send(SftpResponse::OperationComplete); }
-                    Err(e) => {
-                        let err_msg = format!("Create dir failed: {}", e);
-                        if is_disconnect_error(&err_msg) {
-                            let _ = resp_tx.send(SftpResponse::Disconnected);
-                            break;
-                        }
-                        let _ = resp_tx.send(SftpResponse::Error(err_msg));
+                Err(e) => {
+                    let err_msg = format!("Cannot stat: {}", e);
+                    if is_disconnect_error(&err_msg) {
+                        let _ = resp_tx.send(SftpResponse::Disconnected);
+                        break;
                     }
+                    let _ = resp_tx.send(SftpResponse::Error(err_msg));
                 }
-            }
-            Some(SftpCommand::ReadFile { path }) => {
-                match read_file_content(&sftp, &path).await {
-                    Ok(data) => { let _ = resp_tx.send(SftpResponse::FileContent { path, data }); }
-                    Err(e) if e.starts_with("TOO_LARGE:") => {
-                        let size: u64 = e.trim_start_matches("TOO_LARGE:").parse().unwrap_or(0);
-                        let _ = resp_tx.send(SftpResponse::FileTooLarge { path, size });
-                    }
-                    Err(e) => {
-                        if is_disconnect_error(&e) {
-                            let _ = resp_tx.send(SftpResponse::Disconnected);
-                            break;
-                        }
-                        let _ = resp_tx.send(SftpResponse::Error(e));
-                    }
+            },
+            Some(SftpCommand::CreateDir(path)) => match sftp.create_dir(&path).await {
+                Ok(_) => {
+                    let _ = resp_tx.send(SftpResponse::OperationComplete);
                 }
-            }
+                Err(e) => {
+                    let err_msg = format!("Create dir failed: {}", e);
+                    if is_disconnect_error(&err_msg) {
+                        let _ = resp_tx.send(SftpResponse::Disconnected);
+                        break;
+                    }
+                    let _ = resp_tx.send(SftpResponse::Error(err_msg));
+                }
+            },
+            Some(SftpCommand::ReadFile { path }) => match read_file_content(&sftp, &path).await {
+                Ok(data) => {
+                    let _ = resp_tx.send(SftpResponse::FileContent { path, data });
+                }
+                Err(e) if e.starts_with("TOO_LARGE:") => {
+                    let size: u64 = e.trim_start_matches("TOO_LARGE:").parse().unwrap_or(0);
+                    let _ = resp_tx.send(SftpResponse::FileTooLarge { path, size });
+                }
+                Err(e) => {
+                    if is_disconnect_error(&e) {
+                        let _ = resp_tx.send(SftpResponse::Disconnected);
+                        break;
+                    }
+                    let _ = resp_tx.send(SftpResponse::Error(e));
+                }
+            },
             Some(SftpCommand::WriteFile { path, data }) => {
                 match write_file_content(&sftp, &path, &data).await {
-                    Ok(_) => { let _ = resp_tx.send(SftpResponse::OperationComplete); }
+                    Ok(_) => {
+                        let _ = resp_tx.send(SftpResponse::OperationComplete);
+                    }
                     Err(e) => {
                         if is_disconnect_error(&e) {
                             let _ = resp_tx.send(SftpResponse::Disconnected);
@@ -557,8 +646,44 @@ async fn remove_dir_recursive(
 // upload_dir_inner, upload_file_for_dir, download_dir_inner, download_file_for_dir)
 // are kept in the original session.rs file for now. They can be extracted in a future refactoring.
 
+/// Identity of a partially downloaded file, persisted next to it as
+/// `<local>.portal-partial`. Resume requires a matching marker: a leftover
+/// local file whose source differs restarts from scratch instead of merging
+/// mismatched bytes into a corrupt file.
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
+struct PartialDownloadMarker {
+    remote_path: String,
+    remote_size: u64,
+}
+
+/// Decide where a download should start given the local partial and its
+/// (optional) sidecar marker. Resume only when the partial is genuinely
+/// shorter than the source AND the marker names the same source and size;
+/// every other case restarts from scratch.
+fn resume_start_offset(
+    existing_len: u64,
+    total_bytes: u64,
+    marker: Option<&PartialDownloadMarker>,
+    remote_path: &str,
+) -> u64 {
+    match marker {
+        Some(m)
+            if existing_len < total_bytes
+                && m.remote_path == remote_path
+                && m.remote_size == total_bytes =>
+        {
+            existing_len
+        }
+        _ => 0,
+    }
+}
+
 /// Download a remote file to local disk with progress reporting.
-/// Supports resume: if local file exists, continues from where it left off.
+/// Supports resume: a cancelled or failed attempt leaves the partial file
+/// plus a matching `.portal-partial` marker; re-issuing the same download
+/// continues from where it left off. A partial without a marker (or with one
+/// that names a different source/size) is discarded and the transfer
+/// restarts. Completion clears the marker.
 pub async fn download_file(
     sftp: &russh_sftp::client::SftpSession,
     remote_path: &str,
@@ -585,26 +710,52 @@ pub async fn download_file(
         .await
         .map_err(|e| format!("Cannot open remote file: {}", e))?;
 
-    let mut local_file = match tokio::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .read(true)
+    // Resume is only safe for a partial that actually belongs to THIS source.
+    // A leftover local file of the same name (older download, different
+    // content) must not be treated as a partial — that would merge mismatched
+    // bytes into a silently corrupt file. The `.portal-partial` sidecar
+    // written when the transfer starts records the source identity; resume
+    // requires it to match, anything else restarts from scratch.
+    let marker_path = format!("{}.portal-partial", local_path);
+    let existing_len = tokio::fs::metadata(&local_path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let marker: Option<PartialDownloadMarker> = tokio::fs::read_to_string(&marker_path)
+        .await
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
+    let start_offset = resume_start_offset(existing_len, total_bytes, marker.as_ref(), remote_path);
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create(true).read(true);
+    if start_offset == 0 {
+        options.truncate(true);
+    }
+    let mut local_file = options
         .open(&local_path)
         .await
-    {
-        Ok(f) => f,
-        Err(e) => return Err(format!("Cannot open local file: {}", e)),
-    };
-
-    let start_offset = local_file.metadata().await.map(|m| m.len()).unwrap_or(0);
+        .map_err(|e| format!("Cannot open local file: {}", e))?;
 
     if start_offset > 0 && start_offset < total_bytes {
         // Resume: seek both files to resume position
-        local_file.seek(std::io::SeekFrom::Start(start_offset)).await
+        local_file
+            .seek(std::io::SeekFrom::Start(start_offset))
+            .await
             .map_err(|e| format!("Cannot seek local file: {}", e))?;
-        remote_file.seek(std::io::SeekFrom::Start(start_offset)).await
+        remote_file
+            .seek(std::io::SeekFrom::Start(start_offset))
+            .await
             .map_err(|e| format!("Cannot seek remote file: {}", e))?;
+    }
+
+    // Record the source identity so a later interrupted attempt can resume.
+    // Cleared on completion; a cancel or error leaves it behind.
+    let identity = PartialDownloadMarker {
+        remote_path: remote_path.to_string(),
+        remote_size: total_bytes,
+    };
+    if let Ok(json) = serde_json::to_string(&identity) {
+        let _ = tokio::fs::write(&marker_path, json).await;
     }
 
     let mut progress = TransferProgress {
@@ -636,7 +787,9 @@ pub async fn download_file(
             break;
         }
 
-        local_file.write_all(&buffer[..n]).await
+        local_file
+            .write_all(&buffer[..n])
+            .await
             .map_err(|e| format!("Write error: {}", e))?;
 
         progress.bytes_transferred += n as u64;
@@ -648,13 +801,18 @@ pub async fn download_file(
         }
     }
 
+    // Natural completion: the partial marker has served its purpose.
+    let _ = tokio::fs::remove_file(&marker_path).await;
     let _ = resp_tx.send(SftpResponse::Progress(progress));
     Ok(())
 }
 
 /// Upload a local file to a remote path with progress reporting.
-/// Supports resume: if remote file exists and is smaller than local file,
-/// continues from where it left off.
+/// Supports resume: if the remote file exists and is smaller than the local
+/// file, the transfer continues past the remote prefix (explicit seek — no
+/// reliance on server-side append semantics). Cancelled and failed uploads
+/// therefore resume from where they left off when re-issued; matching sizes
+/// restart from scratch.
 pub async fn upload_file(
     sftp: &russh_sftp::client::SftpSession,
     local_path: &str,
@@ -683,17 +841,28 @@ pub async fn upload_file(
         Ok(remote_meta) => {
             let remote_size = remote_meta.size.unwrap_or(0);
             if remote_size > 0 && remote_size < total_bytes {
-                let remote_file = sftp
+                // Resume: reopen without TRUNC and seek both sides past the
+                // existing prefix. Deliberately NOT OpenFlags::APPEND —
+                // OpenSSH's sftp-server ignores SSH_FXF_APPEND, so the writes
+                // would land at the client-side offsets (0, 64K, …) and
+                // overwrite the remote prefix. An explicit seek sends the
+                // right offset with every write, on every server.
+                let mut remote_file = sftp
                     .open_with_flags(
                         remote_path,
                         russh_sftp::protocol::OpenFlags::WRITE
-                            | russh_sftp::protocol::OpenFlags::CREATE
-                            | russh_sftp::protocol::OpenFlags::APPEND,
+                            | russh_sftp::protocol::OpenFlags::CREATE,
                     )
                     .await
-                    .map_err(|e| format!("Cannot open remote file for append: {}", e))?;
+                    .map_err(|e| format!("Cannot open remote file for resume: {}", e))?;
+                remote_file
+                    .seek(std::io::SeekFrom::Start(remote_size))
+                    .await
+                    .map_err(|e| format!("Cannot seek remote file: {}", e))?;
 
-                local_file.seek(std::io::SeekFrom::Start(remote_size)).await
+                local_file
+                    .seek(std::io::SeekFrom::Start(remote_size))
+                    .await
                     .map_err(|e| format!("Cannot seek local file: {}", e))?;
 
                 (remote_file, remote_size)
@@ -743,7 +912,9 @@ pub async fn upload_file(
             break;
         }
 
-        remote_file.write_all(&buffer[..n]).await
+        remote_file
+            .write_all(&buffer[..n])
+            .await
             .map_err(|e| format!("Write error: {}", e))?;
 
         progress.bytes_transferred += n as u64;
@@ -767,10 +938,14 @@ pub async fn upload_dir(
     resp_tx: &mpsc::UnboundedSender<SftpResponse>,
     cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
-    sftp.create_dir(remote_dir).await
+    sftp.create_dir(remote_dir)
+        .await
         .map_err(|e| format!("Failed to create remote dir: {}", e))?;
 
-    Box::pin(upload_dir_inner(sftp, local_dir, remote_dir, resp_tx, cancel)).await
+    Box::pin(upload_dir_inner(
+        sftp, local_dir, remote_dir, resp_tx, cancel,
+    ))
+    .await
 }
 
 async fn upload_dir_inner(
@@ -784,20 +959,32 @@ async fn upload_dir_inner(
         .await
         .map_err(|e| format!("Cannot read local dir: {}", e))?;
 
-    while let Some(entry) = entries.next_entry().await
+    while let Some(entry) = entries
+        .next_entry()
+        .await
         .map_err(|e| format!("Cannot read dir entry: {}", e))?
     {
         let name = entry.file_name().to_string_lossy().to_string();
         let local_path = format!("{}/{}", local_dir.trim_end_matches('/'), &name);
         let remote_path = format!("{}/{}", remote_dir.trim_end_matches('/'), &name);
 
-        let ft = entry.file_type().await
+        let ft = entry
+            .file_type()
+            .await
             .map_err(|e| format!("Cannot get file type: {}", e))?;
 
         if ft.is_dir() {
-            sftp.create_dir(&remote_path).await
+            sftp.create_dir(&remote_path)
+                .await
                 .map_err(|e| format!("Failed to create remote dir: {}", e))?;
-            Box::pin(upload_dir_inner(sftp, &local_path, &remote_path, resp_tx, cancel)).await?;
+            Box::pin(upload_dir_inner(
+                sftp,
+                &local_path,
+                &remote_path,
+                resp_tx,
+                cancel,
+            ))
+            .await?;
         } else {
             upload_file_for_dir(sftp, &local_path, &remote_path, resp_tx, cancel).await?;
         }
@@ -858,7 +1045,9 @@ async fn upload_file_for_dir(
             break;
         }
 
-        remote_file.write_all(&buffer[..n]).await
+        remote_file
+            .write_all(&buffer[..n])
+            .await
             .map_err(|e| format!("Write error: {}", e))?;
 
         transferred += n as u64;
@@ -928,7 +1117,14 @@ async fn download_dir_inner(
             tokio::fs::create_dir_all(&local_path)
                 .await
                 .map_err(|e| format!("Failed to create local dir: {}", e))?;
-            Box::pin(download_dir_inner(sftp, &remote_path, &local_path, resp_tx, cancel)).await?;
+            Box::pin(download_dir_inner(
+                sftp,
+                &remote_path,
+                &local_path,
+                resp_tx,
+                cancel,
+            ))
+            .await?;
         } else {
             download_file_for_dir(sftp, &remote_path, &local_path, resp_tx, cancel).await?;
         }
@@ -990,7 +1186,9 @@ async fn download_file_for_dir(
             break;
         }
 
-        local_file.write_all(&buffer[..n]).await
+        local_file
+            .write_all(&buffer[..n])
+            .await
             .map_err(|e| format!("Write error: {}", e))?;
 
         transferred += n as u64;
@@ -1074,7 +1272,8 @@ pub async fn copy_remote_file(
             break;
         }
 
-        dst.write_all(&buffer[..n]).await
+        dst.write_all(&buffer[..n])
+            .await
             .map_err(|e| format!("Write error: {}", e))?;
 
         progress.bytes_transferred += n as u64;
@@ -1103,7 +1302,10 @@ pub async fn copy_remote_dir(
         .await
         .map_err(|e| format!("Failed to create destination dir: {}", e))?;
 
-    Box::pin(copy_remote_dir_inner(sftp, from_dir, to_dir, resp_tx, cancel)).await
+    Box::pin(copy_remote_dir_inner(
+        sftp, from_dir, to_dir, resp_tx, cancel,
+    ))
+    .await
 }
 
 async fn copy_remote_dir_inner(
@@ -1137,7 +1339,10 @@ async fn copy_remote_dir_inner(
             sftp.create_dir(&to_path)
                 .await
                 .map_err(|e| format!("Failed to create destination dir: {}", e))?;
-            Box::pin(copy_remote_dir_inner(sftp, &from_path, &to_path, resp_tx, cancel)).await?;
+            Box::pin(copy_remote_dir_inner(
+                sftp, &from_path, &to_path, resp_tx, cancel,
+            ))
+            .await?;
         } else {
             copy_remote_file(sftp, &from_path, &to_path, resp_tx, cancel).await?;
         }
@@ -1167,7 +1372,8 @@ async fn read_file_content(
         .map_err(|e| format!("Cannot open file: {}", e))?;
 
     let mut buffer = Vec::with_capacity(size as usize);
-    file.read_to_end(&mut buffer).await
+    file.read_to_end(&mut buffer)
+        .await
         .map_err(|e| format!("Read error: {}", e))?;
 
     Ok(buffer)
@@ -1184,8 +1390,95 @@ async fn write_file_content(
         .await
         .map_err(|e| format!("Cannot create file: {}", e))?;
 
-    file.write_all(data).await
+    file.write_all(data)
+        .await
         .map_err(|e| format!("Write error: {}", e))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn marker(path: &str, size: u64) -> PartialDownloadMarker {
+        PartialDownloadMarker {
+            remote_path: path.to_string(),
+            remote_size: size,
+        }
+    }
+
+    #[test]
+    fn resume_continues_from_a_matching_partial() {
+        assert_eq!(
+            resume_start_offset(
+                500,
+                1000,
+                Some(&marker("/srv/data.tar", 1000)),
+                "/srv/data.tar",
+            ),
+            500
+        );
+    }
+
+    #[test]
+    fn restarts_without_a_marker() {
+        // The pre-marker behaviour: any local file of the same name counted as
+        // a partial. Without the sidecar there is no proof of identity, so a
+        // restart is the only safe choice.
+        assert_eq!(resume_start_offset(500, 1000, None, "/srv/data.tar"), 0);
+    }
+
+    #[test]
+    fn restarts_when_the_marker_names_a_different_source() {
+        // Same name, different remote file: resuming would merge mismatched
+        // bytes into a corrupt file.
+        assert_eq!(
+            resume_start_offset(
+                500,
+                1000,
+                Some(&marker("/srv/other.tar", 1000)),
+                "/srv/data.tar",
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn restarts_when_the_source_size_changed() {
+        // The remote file was replaced between attempts; the partial no
+        // longer corresponds to it.
+        assert_eq!(
+            resume_start_offset(
+                500,
+                1200,
+                Some(&marker("/srv/data.tar", 1000)),
+                "/srv/data.tar",
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn complete_or_oversized_local_files_restart() {
+        let m = marker("/srv/data.tar", 1000);
+        // Already at full size: nothing to resume, rewrite cleanly.
+        assert_eq!(
+            resume_start_offset(1000, 1000, Some(&m), "/srv/data.tar"),
+            0
+        );
+        // Stale longer file: truncate and start over.
+        assert_eq!(
+            resume_start_offset(1200, 1000, Some(&m), "/srv/data.tar"),
+            0
+        );
+    }
+
+    #[test]
+    fn marker_roundtrips_through_json() {
+        let m = marker("/srv/data.tar", 1000);
+        let json = serde_json::to_string(&m).unwrap();
+        let back: PartialDownloadMarker = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, m);
+    }
 }

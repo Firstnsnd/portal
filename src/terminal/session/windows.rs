@@ -6,20 +6,33 @@
 //! through the pty mutex instead of a dup'd descriptor.
 
 use std::io;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
-use super::RealPtySession;
 use super::super::{Pty, PtySize, Result};
+use super::RealPtySession;
 use crate::terminal::grid::TerminalGrid;
 use crate::terminal::windows_pty::WindowsPty;
 
 impl RealPtySession {
-    pub fn with_scrollback_limit(id: usize, cols: u16, rows: u16, shell: &str, scrollback_limit_bytes: usize, cwd: Option<&str>, record: bool) -> Result<Self> {
+    pub fn with_scrollback_limit(
+        id: usize,
+        cols: u16,
+        rows: u16,
+        shell: &str,
+        scrollback_limit_bytes: usize,
+        cwd: Option<&str>,
+        record: bool,
+    ) -> Result<Self> {
         let _ = id;
 
-        let grid: Arc<Mutex<TerminalGrid>> = Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(cols as usize, rows as usize, scrollback_limit_bytes)));
+        let grid: Arc<Mutex<TerminalGrid>> =
+            Arc::new(Mutex::new(TerminalGrid::with_scrollback_limit(
+                cols as usize,
+                rows as usize,
+                scrollback_limit_bytes,
+            )));
 
         // Shells differ in startup flags; only ones we know get any. (Unix
         // hardcodes `["-l"]` — a login flag that does not exist on Windows
@@ -54,8 +67,7 @@ impl RealPtySession {
         // thread spawns so capture starts at the very first byte.
         let recorder = super::make_recorder_slot(record, shell, cols, rows);
         let recorder_clone = Arc::clone(&recorder);
-        let ai_capture: crate::terminal::ai_capture::AiCaptureSlot =
-            Arc::new(Mutex::new(None));
+        let ai_capture: crate::terminal::ai_capture::AiCaptureSlot = Arc::new(Mutex::new(None));
         let ai_capture_clone = Arc::clone(&ai_capture);
 
         let reader_thread = thread::Builder::new()
@@ -111,7 +123,9 @@ impl RealPtySession {
                     }
                 }
             })
-            .map_err(|_| super::super::Error::SpawnFailed("Failed to spawn reader thread".to_string()))?;
+            .map_err(|_| {
+                super::super::Error::SpawnFailed("Failed to spawn reader thread".to_string())
+            })?;
 
         let cached_shell_name = Arc::new(Mutex::new(None));
         let last_shell_check = Arc::new(Mutex::new(std::time::Instant::now()));
@@ -142,9 +156,14 @@ impl RealPtySession {
     pub fn write(&self, data: &[u8]) -> io::Result<()> {
         if let Some(ref pty) = self.pty {
             let mut pty_ref = pty.lock().unwrap();
-            return pty_ref.write(data).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()));
+            return pty_ref
+                .write(data)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()));
         }
-        Err(io::Error::new(io::ErrorKind::NotConnected, "PTY not available"))
+        Err(io::Error::new(
+            io::ErrorKind::NotConnected,
+            "PTY not available",
+        ))
     }
 
     /// Refresh the cached shell name synchronously. Windows detection is a

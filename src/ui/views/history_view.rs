@@ -8,16 +8,15 @@
 
 use eframe::egui;
 
-use crate::ui::pane_view::{WindowContext, ViewActions};
-use crate::ui::pane::AppWindow;
 use crate::config::HostEntry;
+use crate::ui::pane::AppWindow;
+use crate::ui::pane_view::{ViewActions, WindowContext};
 use crate::ui::tokens::*;
 use crate::ui::widgets;
 
 /// Local datetime for a history record's unix timestamp.
 fn record_local(ts: u64) -> Option<chrono::DateTime<chrono::Local>> {
-    chrono::DateTime::from_timestamp(ts as i64, 0)
-        .map(chrono::DateTime::<chrono::Local>::from)
+    chrono::DateTime::from_timestamp(ts as i64, 0).map(chrono::DateTime::<chrono::Local>::from)
 }
 
 /// Render the connection history page. Draws its own top bar + central
@@ -40,9 +39,20 @@ pub fn render_history_view(
         })
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(cx.language.t("connection_history")).color(cx.theme.fg_dim).size(FONT_BASE).strong());
+                ui.label(
+                    egui::RichText::new(cx.language.t("connection_history"))
+                        .color(cx.theme.fg_dim)
+                        .size(FONT_BASE)
+                        .strong(),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(widgets::text_button(cx.language.t("clear_history"), cx.theme.fg_dim)).clicked() {
+                    if ui
+                        .add(widgets::text_button(
+                            cx.language.t("clear_history"),
+                            cx.theme.fg_dim,
+                        ))
+                        .clicked()
+                    {
                         actions.clear_history = true;
                     }
                 });
@@ -65,27 +75,41 @@ pub fn render_history_view(
                     ui.horizontal(|ui| {
                         ui.add_space(SPACE_XL);
                         let search_w = (ui.available_width() - 160.0).max(120.0);
-                        widgets::fixed_input(ui, &mut window.history_view_state.search,
-                            cx.language.t("search_placeholder"), search_w, cx.theme);
+                        widgets::fixed_input(
+                            ui,
+                            &mut window.history_view_state.search,
+                            cx.language.t("search_placeholder"),
+                            search_w,
+                            cx.theme,
+                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(SPACE_XL);
-                            ui.label(egui::RichText::new(
-                                cx.language.tf("history_count", &cx.connection_history.len().to_string()))
-                                .color(cx.theme.fg_dim).size(11.0));
+                            ui.label(
+                                egui::RichText::new(
+                                    cx.language.tf(
+                                        "history_count",
+                                        &cx.connection_history.len().to_string(),
+                                    ),
+                                )
+                                .color(cx.theme.fg_dim)
+                                .size(11.0),
+                            );
                         });
                     });
                     ui.add_space(SPACE_SM);
 
                     let query = window.history_view_state.search.trim().to_lowercase();
-                    let records: Vec<&crate::config::ConnectionRecord> =
-                        cx.connection_history.iter().rev()
-                            .filter(|r| {
-                                query.is_empty()
-                                    || r.host_name.to_lowercase().contains(&query)
-                                    || r.host.to_lowercase().contains(&query)
-                                    || r.username.to_lowercase().contains(&query)
-                            })
-                            .collect();
+                    let records: Vec<&crate::config::ConnectionRecord> = cx
+                        .connection_history
+                        .iter()
+                        .rev()
+                        .filter(|r| {
+                            query.is_empty()
+                                || r.host_name.to_lowercase().contains(&query)
+                                || r.host.to_lowercase().contains(&query)
+                                || r.username.to_lowercase().contains(&query)
+                        })
+                        .collect();
 
                     if records.is_empty() {
                         ui.add_space(SPACE_XL);
@@ -134,8 +158,11 @@ pub fn render_history_view(
                             if resp.hovered() {
                                 ui.painter().rect_filled(
                                     egui::Rect::from_min_max(
-                                        egui::pos2(rect.min.x, rect.max.y - 1.0), rect.max),
-                                    0.0, cx.theme.hover_shadow,
+                                        egui::pos2(rect.min.x, rect.max.y - 1.0),
+                                        rect.max,
+                                    ),
+                                    0.0,
+                                    cx.theme.hover_shadow,
                                 );
                                 ui.painter().rect_filled(rect, 0.0, cx.theme.hover_bg);
                             }
@@ -143,7 +170,11 @@ pub fn render_history_view(
                             ui.painter().circle_filled(
                                 egui::pos2(rect.min.x + 24.0, rect.min.y + 22.0),
                                 3.0,
-                                if record.success { cx.theme.green } else { cx.theme.red },
+                                if record.success {
+                                    cx.theme.green
+                                } else {
+                                    cx.theme.red
+                                },
                             );
                             let display_name = if record.host_name.is_empty() {
                                 format!("{}:{}", record.host, record.port)
@@ -157,7 +188,8 @@ pub fn render_history_view(
                                 egui::FontId::proportional(13.0),
                                 cx.theme.fg_primary,
                             );
-                            let detail = format!("{}@{}:{}", record.username, record.host, record.port);
+                            let detail =
+                                format!("{}@{}:{}", record.username, record.host, record.port);
                             ui.painter().text(
                                 egui::pos2(rect.min.x + 46.0, rect.min.y + 30.0),
                                 egui::Align2::LEFT_CENTER,
@@ -182,22 +214,28 @@ pub fn render_history_view(
                                 // credential/protected settings); fall back
                                 // to an ad-hoc SSH target for records whose
                                 // host was deleted or was never saved.
-                                connect_target = Some(cx.hosts.iter().find(|h| {
-                                    !h.is_local
-                                        && h.host == record.host
-                                        && h.port == record.port
-                                        && h.username == record.username
-                                }).cloned().unwrap_or_else(|| {
-                                    HostEntry::new_ssh(
-                                        record.host_name.clone(),
-                                        record.host.clone(),
-                                        record.port,
-                                        record.username.clone(),
-                                        String::new(),
-                                        None,
-                                        Vec::new(),
-                                    )
-                                }));
+                                connect_target = Some(
+                                    cx.hosts
+                                        .iter()
+                                        .find(|h| {
+                                            !h.is_local
+                                                && h.host == record.host
+                                                && h.port == record.port
+                                                && h.username == record.username
+                                        })
+                                        .cloned()
+                                        .unwrap_or_else(|| {
+                                            HostEntry::new_ssh(
+                                                record.host_name.clone(),
+                                                record.host.clone(),
+                                                record.port,
+                                                record.username.clone(),
+                                                String::new(),
+                                                None,
+                                                Vec::new(),
+                                            )
+                                        }),
+                                );
                             }
                         }
                     }

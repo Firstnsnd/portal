@@ -27,10 +27,10 @@
 
 use std::path::PathBuf;
 
-#[cfg(target_os = "macos")]
-pub(crate) mod macos;
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) mod linux;
+#[cfg(target_os = "macos")]
+pub(crate) mod macos;
 #[cfg(windows)]
 pub(crate) mod windows;
 
@@ -72,13 +72,15 @@ fn platform_integration() -> &'static dyn ShellIntegration {
 /// Install the file-manager actions for the current OS.
 pub fn install() -> Result<(), String> {
     let it = platform_integration();
-    it.install().inspect(|_| log::info!("[{}] file-manager actions installed", it.name()))
+    it.install()
+        .inspect(|_| log::info!("[{}] file-manager actions installed", it.name()))
 }
 
 /// Remove the file-manager actions.
 pub fn uninstall() -> Result<(), String> {
     let it = platform_integration();
-    it.uninstall().inspect(|_| log::info!("[{}] file-manager actions removed", it.name()))
+    it.uninstall()
+        .inspect(|_| log::info!("[{}] file-manager actions removed", it.name()))
 }
 
 /// Current install state, for the Settings UI.
@@ -95,7 +97,11 @@ pub(crate) fn portal_bin() -> String {
     std::env::var("PORTAL_BIN")
         .ok()
         .filter(|b| !b.is_empty())
-        .or_else(|| std::env::current_exe().ok().map(|p| p.to_string_lossy().into_owned()))
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        })
         .unwrap_or_else(|| "portal".to_string())
 }
 

@@ -12,8 +12,8 @@
 use eframe::egui;
 
 use crate::ssh::{AuthPrompt, AuthPromptBridge};
-use crate::ui::theme::ThemeColors;
 use crate::ui::i18n::Language;
+use crate::ui::theme::ThemeColors;
 
 /// Pure state-sync: keep the input buffers in step with the prompt.
 ///
@@ -147,23 +147,22 @@ pub fn render_auth_prompt_window(
 
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                let submit = ui.add(
-                    egui::Button::new(
-                        egui::RichText::new(language.t("ssh_2fa_submit"))
-                            .color(theme.bg_primary)
-                            .size(13.0)
-                            .strong(),
-                    ),
-                );
-                if ui.add(
-                    egui::Button::new(
-                        egui::RichText::new(language.t("cancel"))
-                            .color(theme.red)
-                            .size(13.0),
+                let submit = ui.add(egui::Button::new(
+                    egui::RichText::new(language.t("ssh_2fa_submit"))
+                        .color(theme.bg_primary)
+                        .size(13.0)
+                        .strong(),
+                ));
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new(language.t("cancel"))
+                                .color(theme.red)
+                                .size(13.0),
+                        )
+                        .frame(false),
                     )
-                    .frame(false),
-                )
-                .clicked()
+                    .clicked()
                 {
                     action = AuthPromptUiAction::Cancelled;
                 }

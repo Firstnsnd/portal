@@ -70,7 +70,14 @@ impl ReplayState {
             Err(e) => Self {
                 path: path.to_path_buf(),
                 recording: CastRecording {
-                    header: CastHeader { version: 2, width: 80, height: 24, timestamp: 0, title: None, portal_host: None },
+                    header: CastHeader {
+                        version: 2,
+                        width: 80,
+                        height: 24,
+                        timestamp: 0,
+                        title: None,
+                        portal_host: None,
+                    },
                     events: Vec::new(),
                     duration: 0.0,
                 },
@@ -91,7 +98,14 @@ impl ReplayState {
     /// Apply every event at or before timeline position `t`. Idempotent in
     /// `t`: advancing to an earlier position is a no-op (no scrubbing in v1).
     fn apply_until(&mut self, t: f64) {
-        let Self { grid, parser, attrs, cursor, recording, .. } = self;
+        let Self {
+            grid,
+            parser,
+            attrs,
+            cursor,
+            recording,
+            ..
+        } = self;
         while *cursor < recording.events.len() && recording.events[*cursor].time <= t {
             let event = &recording.events[*cursor];
             match event.kind {
@@ -163,7 +177,8 @@ impl ReplayState {
     /// Change playback speed, re-anchoring so the picture doesn't jump.
     pub fn set_speed(&mut self, speed: f32) {
         if self.playing {
-            let t = self.anchor_vt + self.anchor_instant.elapsed().as_secs_f64() * self.speed as f64;
+            let t =
+                self.anchor_vt + self.anchor_instant.elapsed().as_secs_f64() * self.speed as f64;
             self.virtual_t = self.virtual_t.max(t);
             self.anchor_vt = self.virtual_t;
             self.anchor_instant = Instant::now();
@@ -296,18 +311,36 @@ pub fn render_replay_view(
                 if let Some(state) = window.replay.as_mut() {
                     // Title: the header title when present ("zsh", "u@h"),
                     // else the file name; full path on hover.
-                    let title = state.recording.header.title.clone()
-                        .or_else(|| state.path.file_name()
-                            .map(|n| n.to_string_lossy().to_string()))
+                    let title = state
+                        .recording
+                        .header
+                        .title
+                        .clone()
+                        .or_else(|| {
+                            state
+                                .path
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                        })
                         .unwrap_or_else(|| language.t("replay").to_string());
-                    ui.add(egui::Label::new(
-                        egui::RichText::new(title).color(theme.fg_dim).size(FONT_BASE).strong(),
-                    ).truncate()).on_hover_text(state.path.display().to_string());
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(title)
+                                .color(theme.fg_dim)
+                                .size(FONT_BASE)
+                                .strong(),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(state.path.display().to_string());
                     // Which machine the session ran on, next to the title.
                     if let Some(host) = &state.recording.header.portal_host {
                         ui.add_space(SPACE_SM);
-                        ui.label(egui::RichText::new(format!("\u{25cf} {host}"))
-                            .color(theme.accent).size(FONT_SM));
+                        ui.label(
+                            egui::RichText::new(format!("\u{25cf} {host}"))
+                                .color(theme.accent)
+                                .size(FONT_SM),
+                        );
                     }
 
                     let play_label = if state.is_playing() {
@@ -316,28 +349,40 @@ pub fn render_replay_view(
                         language.t("replay_play")
                     };
                     ui.add_space(SPACE_MD);
-                    if ui.add(widgets::text_button(play_label, theme.accent)).clicked() {
+                    if ui
+                        .add(widgets::text_button(play_label, theme.accent))
+                        .clicked()
+                    {
                         state.toggle_play();
                     }
 
                     // Speed segment — same selected style as the port-forward
                     // kind selector on the hosts page.
                     for &speed in &SPEEDS {
-                        let label =
-                            if speed < 1.0 { format!("{:.1}x", speed) } else { format!("{}x", speed) };
+                        let label = if speed < 1.0 {
+                            format!("{:.1}x", speed)
+                        } else {
+                            format!("{}x", speed)
+                        };
                         let selected = (state.speed - speed).abs() < f32::EPSILON;
                         let color = if selected { theme.accent } else { theme.fg_dim };
-                        let bg =
-                            if selected { theme.accent_alpha(15) } else { egui::Color32::TRANSPARENT };
-                        let btn = egui::Button::new(
-                            egui::RichText::new(label).size(12.0).color(color),
-                        )
-                        .fill(bg)
-                        .rounding(4.0)
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            if selected { theme.accent } else { egui::Color32::TRANSPARENT },
-                        ));
+                        let bg = if selected {
+                            theme.accent_alpha(15)
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        };
+                        let btn =
+                            egui::Button::new(egui::RichText::new(label).size(12.0).color(color))
+                                .fill(bg)
+                                .rounding(4.0)
+                                .stroke(egui::Stroke::new(
+                                    1.0,
+                                    if selected {
+                                        theme.accent
+                                    } else {
+                                        egui::Color32::TRANSPARENT
+                                    },
+                                ));
                         if ui.add(btn).clicked() {
                             state.set_speed(speed);
                         }
@@ -345,18 +390,31 @@ pub fn render_replay_view(
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Back to the library (rightmost).
-                        if ui.add(egui::Button::new(
-                            egui::RichText::new("\u{2715}").size(12.0).color(theme.fg_dim),
-                        ).frame(false)).clicked() {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("\u{2715}")
+                                        .size(12.0)
+                                        .color(theme.fg_dim),
+                                )
+                                .frame(false),
+                            )
+                            .clicked()
+                        {
                             close_clicked = true;
                         }
                         ui.add_space(SPACE_MD);
                         let pos = state.virtual_t.min(state.recording.duration);
-                        ui.label(egui::RichText::new(format!(
-                            "{} / {}",
-                            fmt_mmss(pos),
-                            fmt_mmss(state.recording.duration),
-                        )).monospace().color(theme.fg_primary).size(12.0));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} / {}",
+                                fmt_mmss(pos),
+                                fmt_mmss(state.recording.duration),
+                            ))
+                            .monospace()
+                            .color(theme.fg_primary)
+                            .size(12.0),
+                        );
                     });
                 } else {
                     // Library chrome on one bar, like the hosts page: page
@@ -364,15 +422,22 @@ pub fn render_replay_view(
                     ui.label(widgets::section_header(language.t("replay"), theme));
                     ui.add_space(SPACE_MD);
                     let total: u64 = recordings.iter().map(|r| r.size_bytes).sum();
-                    ui.label(egui::RichText::new(format!(
-                        "{} · {}",
-                        language.tf("recordings_files", &recordings.len().to_string()),
-                        fmt_size(total)
-                    )).color(theme.fg_dim).size(FONT_SM));
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} · {}",
+                            language.tf("recordings_files", &recordings.len().to_string()),
+                            fmt_size(total)
+                        ))
+                        .color(theme.fg_dim)
+                        .size(FONT_SM),
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if select_mode {
                             // \u{2713} marks the armed (two-step) delete.
-                            if ui.add(widgets::text_button(language.t("cancel"), theme.fg_dim)).clicked() {
+                            if ui
+                                .add(widgets::text_button(language.t("cancel"), theme.fg_dim))
+                                .clicked()
+                            {
                                 exit_select = true;
                             }
                             ui.add_space(SPACE_SM);
@@ -384,10 +449,13 @@ pub fn render_replay_view(
                             } else {
                                 language.t("replay_delete_selected").to_string()
                             };
-                            if ui.add(widgets::text_button(
-                                &label,
-                                if batch_armed { theme.red } else { theme.accent },
-                            )).clicked() {
+                            if ui
+                                .add(widgets::text_button(
+                                    &label,
+                                    if batch_armed { theme.red } else { theme.accent },
+                                ))
+                                .clicked()
+                            {
                                 if batch_armed && n > 0 {
                                     delete_selected = true;
                                 } else if n > 0 {
@@ -398,16 +466,31 @@ pub fn render_replay_view(
                                 }
                             }
                         } else {
-                            open_clicked =
-                                ui.add(widgets::text_button(language.t("replay_open"), theme.accent))
-                                    .clicked();
+                            open_clicked = ui
+                                .add(widgets::text_button(
+                                    language.t("replay_open"),
+                                    theme.accent,
+                                ))
+                                .clicked();
                             ui.add_space(SPACE_SM);
-                            if ui.add(widgets::text_button(language.t("replay_select"), theme.fg_dim)).clicked() {
+                            if ui
+                                .add(widgets::text_button(
+                                    language.t("replay_select"),
+                                    theme.fg_dim,
+                                ))
+                                .clicked()
+                            {
                                 enter_select = true;
                             }
                             ui.add_space(SPACE_SM);
                         }
-                        if ui.add(widgets::text_button(language.t("replay_open_folder"), theme.fg_dim)).clicked() {
+                        if ui
+                            .add(widgets::text_button(
+                                language.t("replay_open_folder"),
+                                theme.fg_dim,
+                            ))
+                            .clicked()
+                        {
                             open_folder = true;
                         }
                     });
@@ -432,12 +515,17 @@ pub fn render_replay_view(
                             ui.centered_and_justified(|ui| {
                                 ui.vertical_centered(|ui| {
                                     ui.add_space(SPACE_2XL);
-                                    ui.label(egui::RichText::new("\u{25b6}")
-                                        .size(36.0).color(theme.fg_dim));
+                                    ui.label(
+                                        egui::RichText::new("\u{25b6}")
+                                            .size(36.0)
+                                            .color(theme.fg_dim),
+                                    );
                                     ui.add_space(SPACE_SM);
-                                    ui.label(egui::RichText::new(
-                                        language.t("replay_no_recordings"),
-                                    ).color(theme.fg_dim).size(FONT_MD));
+                                    ui.label(
+                                        egui::RichText::new(language.t("replay_no_recordings"))
+                                            .color(theme.fg_dim)
+                                            .size(FONT_MD),
+                                    );
                                 });
                             });
                             return;
@@ -446,17 +534,22 @@ pub fn render_replay_view(
                         // portal_host. Also the landing state for the
                         // context-menu "View Host Recordings…" jump.
                         let host_filter = window.replay_host_filter.clone();
-                        let mut hosts: Vec<String> = recordings
-                            .iter()
-                            .filter_map(|r| r.host.clone())
-                            .collect();
+                        let mut hosts: Vec<String> =
+                            recordings.iter().filter_map(|r| r.host.clone()).collect();
                         hosts.sort();
                         hosts.dedup();
                         if !hosts.is_empty() {
                             ui.add_space(SPACE_SM);
                             ui.horizontal(|ui| {
                                 ui.add_space(SPACE_XL);
-                                if host_chip(ui, language.t("replay_all_hosts"), host_filter.is_none(), theme).clicked() {
+                                if host_chip(
+                                    ui,
+                                    language.t("replay_all_hosts"),
+                                    host_filter.is_none(),
+                                    theme,
+                                )
+                                .clicked()
+                                {
                                     host_filter_clear = true;
                                 }
                                 for h in &hosts {
@@ -478,9 +571,14 @@ pub fn render_replay_view(
                             ui.centered_and_justified(|ui| {
                                 ui.vertical_centered(|ui| {
                                     ui.add_space(SPACE_2XL);
-                                    ui.label(egui::RichText::new(
-                                        language.tf("replay_none_for_host", host_filter.as_deref().unwrap_or("")),
-                                    ).color(theme.fg_dim).size(FONT_MD));
+                                    ui.label(
+                                        egui::RichText::new(language.tf(
+                                            "replay_none_for_host",
+                                            host_filter.as_deref().unwrap_or(""),
+                                        ))
+                                        .color(theme.fg_dim)
+                                        .size(FONT_MD),
+                                    );
                                 });
                             });
                             return;
@@ -488,24 +586,44 @@ pub fn render_replay_view(
                         ui.add_space(SPACE_SM);
                         for rec in shown {
                             // Inline rename replaces the normal row while active.
-                            if window.replay_rename.as_ref().is_some_and(|(p, _)| *p == rec.path) {
+                            if window
+                                .replay_rename
+                                .as_ref()
+                                .is_some_and(|(p, _)| *p == rec.path)
+                            {
                                 ui.add_space(SPACE_XS);
                                 ui.horizontal(|ui| {
                                     ui.add_space(SPACE_XL);
                                     if let Some((_, text)) = window.replay_rename.as_mut() {
                                         let resp = ui.add(
                                             egui::TextEdit::singleline(text)
-                                                .desired_width((ui.available_width() - 200.0).max(160.0))
+                                                .desired_width(
+                                                    (ui.available_width() - 200.0).max(160.0),
+                                                )
                                                 .font(egui::FontId::proportional(13.0)),
                                         );
-                                        if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                        if resp.lost_focus()
+                                            && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                        {
                                             rename_commit = Some((rec.path.clone(), text.clone()));
                                         }
                                         ui.add_space(SPACE_SM);
-                                        if ui.add(widgets::text_button(language.t("rename"), theme.accent)).clicked() {
+                                        if ui
+                                            .add(widgets::text_button(
+                                                language.t("rename"),
+                                                theme.accent,
+                                            ))
+                                            .clicked()
+                                        {
                                             rename_commit = Some((rec.path.clone(), text.clone()));
                                         }
-                                        if ui.add(widgets::text_button(language.t("cancel"), theme.fg_dim)).clicked() {
+                                        if ui
+                                            .add(widgets::text_button(
+                                                language.t("cancel"),
+                                                theme.fg_dim,
+                                            ))
+                                            .clicked()
+                                        {
                                             rename_cancel = true;
                                         }
                                     }
@@ -548,7 +666,11 @@ pub fn render_replay_view(
                                     egui::pos2(rect.min.x + 30.0, rect.center().y),
                                     egui::vec2(14.0, 14.0),
                                 );
-                                ui.painter().rect_stroke(cb, 3.0, egui::Stroke::new(1.0, theme.fg_dim));
+                                ui.painter().rect_stroke(
+                                    cb,
+                                    3.0,
+                                    egui::Stroke::new(1.0, theme.fg_dim),
+                                );
                                 if ticked {
                                     ui.painter().rect_filled(cb.shrink(2.0), 2.0, theme.accent);
                                     ui.painter().text(
@@ -569,7 +691,8 @@ pub fn render_replay_view(
                                 );
                             }
                             let name = rec.title.clone().unwrap_or_else(|| {
-                                rec.path.file_name()
+                                rec.path
+                                    .file_name()
                                     .map(|n| n.to_string_lossy().to_string())
                                     .unwrap_or_default()
                             });
@@ -584,14 +707,22 @@ pub fn render_replay_view(
                             // (hosts-page badge style) when there IS a title;
                             // when the title IS the filename, the host joins
                             // the meta line so it still says where it ran.
-                            if let Some(host) = rec.host.as_deref().filter(|_| rec.title.is_some()) {
-                                let name_w = ui.fonts(|f| f.layout_no_wrap(
-                                    name.clone(),
-                                    egui::FontId::proportional(FONT_BASE),
-                                    egui::Color32::PLACEHOLDER,
-                                ).rect.width());
+                            if let Some(host) = rec.host.as_deref().filter(|_| rec.title.is_some())
+                            {
+                                let name_w = ui.fonts(|f| {
+                                    f.layout_no_wrap(
+                                        name.clone(),
+                                        egui::FontId::proportional(FONT_BASE),
+                                        egui::Color32::PLACEHOLDER,
+                                    )
+                                    .rect
+                                    .width()
+                                });
                                 ui.painter().text(
-                                    egui::pos2(rect.min.x + 46.0 + name_w + 10.0, rect.min.y + 18.0),
+                                    egui::pos2(
+                                        rect.min.x + 46.0 + name_w + 10.0,
+                                        rect.min.y + 18.0,
+                                    ),
                                     egui::Align2::LEFT_CENTER,
                                     format!("\u{25cf} {host}"),
                                     egui::FontId::proportional(FONT_XS),
@@ -639,14 +770,12 @@ pub fn render_replay_view(
                                 egui::pos2(rect.max.x - 8.0, rect.max.y),
                             );
                             let chip_rect = |zone: egui::Rect| {
-                                egui::Rect::from_center_size(
-                                    zone.center(),
-                                    egui::vec2(24.0, 20.0),
-                                )
+                                egui::Rect::from_center_size(zone.center(), egui::vec2(24.0, 20.0))
                             };
                             if armed {
                                 let confirm = chip_rect(reveal_zone);
-                                ui.painter().rect(confirm, 4.0, theme.red, egui::Stroke::NONE);
+                                ui.painter()
+                                    .rect(confirm, 4.0, theme.red, egui::Stroke::NONE);
                                 ui.painter().text(
                                     confirm.center(),
                                     egui::Align2::CENTER_CENTER,
@@ -661,42 +790,81 @@ pub fn render_replay_view(
                                     egui::FontId::proportional(FONT_SM),
                                     theme.fg_dim,
                                 );
-                                zone_tooltip(ui, reveal_zone, "replay_confirm_delete", language.t("confirm_delete"));
-                                zone_tooltip(ui, delete_zone, "replay_cancel_delete", language.t("delete"));
+                                zone_tooltip(
+                                    ui,
+                                    reveal_zone,
+                                    "replay_confirm_delete",
+                                    language.t("confirm_delete"),
+                                );
+                                zone_tooltip(
+                                    ui,
+                                    delete_zone,
+                                    "replay_cancel_delete",
+                                    language.t("delete"),
+                                );
                             } else if resp.hovered() && !select_mode {
                                 let pointer = ui.input(|i| i.pointer.hover_pos());
                                 let over_rev = pointer.is_some_and(|p| reveal_zone.contains(p));
                                 let over_del = pointer.is_some_and(|p| delete_zone.contains(p));
-                                let chip = |zone: egui::Rect, glyph: &str, glyph_color: egui::Color32, ring: egui::Color32, fill: egui::Color32| {
-                                    let r = chip_rect(zone);
-                                    ui.painter().rect(r, 4.0, fill, egui::Stroke::new(1.0, ring));
-                                    ui.painter().text(
-                                        r.center(),
-                                        egui::Align2::CENTER_CENTER,
-                                        glyph,
-                                        egui::FontId::proportional(FONT_MD),
-                                        glyph_color,
-                                    );
-                                };
+                                let chip =
+                                    |zone: egui::Rect,
+                                     glyph: &str,
+                                     glyph_color: egui::Color32,
+                                     ring: egui::Color32,
+                                     fill: egui::Color32| {
+                                        let r = chip_rect(zone);
+                                        ui.painter().rect(
+                                            r,
+                                            4.0,
+                                            fill,
+                                            egui::Stroke::new(1.0, ring),
+                                        );
+                                        ui.painter().text(
+                                            r.center(),
+                                            egui::Align2::CENTER_CENTER,
+                                            glyph,
+                                            egui::FontId::proportional(FONT_MD),
+                                            glyph_color,
+                                        );
+                                    };
                                 chip(
                                     reveal_zone,
                                     "\u{2197}",
                                     if over_rev { theme.accent } else { theme.fg_dim },
                                     if over_rev { theme.accent } else { theme.border },
-                                    if over_rev { theme.bg_elevated } else { egui::Color32::TRANSPARENT },
+                                    if over_rev {
+                                        theme.bg_elevated
+                                    } else {
+                                        egui::Color32::TRANSPARENT
+                                    },
                                 );
                                 chip(
                                     delete_zone,
                                     "\u{2715}",
                                     if over_del { theme.red } else { theme.fg_dim },
                                     if over_del { theme.red } else { theme.border },
-                                    if over_del { theme.bg_elevated } else { egui::Color32::TRANSPARENT },
+                                    if over_del {
+                                        theme.bg_elevated
+                                    } else {
+                                        egui::Color32::TRANSPARENT
+                                    },
                                 );
-                                zone_tooltip(ui, reveal_zone, "replay_reveal", language.t("replay_reveal"));
-                                zone_tooltip(ui, delete_zone, "replay_delete", language.t("delete"));
+                                zone_tooltip(
+                                    ui,
+                                    reveal_zone,
+                                    "replay_reveal",
+                                    language.t("replay_reveal"),
+                                );
+                                zone_tooltip(
+                                    ui,
+                                    delete_zone,
+                                    "replay_delete",
+                                    language.t("delete"),
+                                );
                             }
                             if resp.clicked() {
-                                let pos = resp.interact_pointer_pos()
+                                let pos = resp
+                                    .interact_pointer_pos()
                                     .or_else(|| resp.hover_pos())
                                     .unwrap_or_else(|| rect.center());
                                 if select_mode {
@@ -743,8 +911,11 @@ pub fn render_replay_view(
                 ui.centered_and_justified(|ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(SPACE_2XL);
-                        ui.label(egui::RichText::new(language.tf("replay_load_failed", err))
-                            .color(theme.red).size(FONT_MD));
+                        ui.label(
+                            egui::RichText::new(language.tf("replay_load_failed", err))
+                                .color(theme.red)
+                                .size(FONT_MD),
+                        );
                     });
                 });
                 return;
@@ -875,38 +1046,48 @@ fn reveal_in_file_manager(path: &std::path::Path) {
 
 /// Filter chip button (speed-selector visual: accent when selected, dim
 /// ghost otherwise).
-fn host_chip(ui: &mut egui::Ui, label: &str, selected: bool, theme: &ThemeColors) -> egui::Response {
+fn host_chip(
+    ui: &mut egui::Ui,
+    label: &str,
+    selected: bool,
+    theme: &ThemeColors,
+) -> egui::Response {
     let color = if selected { theme.accent } else { theme.fg_dim };
-    let bg = if selected { theme.accent_alpha(15) } else { egui::Color32::TRANSPARENT };
-    ui.add(egui::Button::new(
-        egui::RichText::new(label).size(FONT_SM).color(color),
+    let bg = if selected {
+        theme.accent_alpha(15)
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    ui.add(
+        egui::Button::new(egui::RichText::new(label).size(FONT_SM).color(color))
+            .fill(bg)
+            .rounding(4.0)
+            .stroke(egui::Stroke::new(
+                1.0,
+                if selected {
+                    theme.accent
+                } else {
+                    egui::Color32::TRANSPARENT
+                },
+            )),
     )
-    .fill(bg)
-    .rounding(4.0)
-    .stroke(egui::Stroke::new(
-        1.0,
-        if selected { theme.accent } else { egui::Color32::TRANSPARENT },
-    )))
 }
 
 /// Tooltip anchored to a painted glyph zone (the row's action glyphs are
 /// painted, not widgets, so `Response::on_hover_text` can't reach them).
 fn zone_tooltip(ui: &egui::Ui, zone: egui::Rect, id: &str, text: &str) {
     if ui.rect_contains_pointer(zone) {
-        egui::containers::popup::show_tooltip(
-            ui.ctx(),
-            ui.layer_id(),
-            egui::Id::new(id),
-            |tip| {
-                tip.label(text);
-            },
-        );
+        egui::containers::popup::show_tooltip(ui.ctx(), ui.layer_id(), egui::Id::new(id), |tip| {
+            tip.label(text);
+        });
     }
 }
 
 /// `SystemTime` → "YYYY-MM-DD HH:MM" (local time).
 fn fmt_date(t: std::time::SystemTime) -> String {
-    chrono::DateTime::<chrono::Local>::from(t).format("%Y-%m-%d %H:%M").to_string()
+    chrono::DateTime::<chrono::Local>::from(t)
+        .format("%Y-%m-%d %H:%M")
+        .to_string()
 }
 
 /// Paint the replayed grid into `rect`. A mini terminal painter: the live
@@ -955,8 +1136,12 @@ fn paint_grid(
             // Chunk runs of same-styled cells into one galley — a row of
             // uniform text is a single layout instead of one per glyph.
             let key = (
-                cell.fg_color, cell.bg_color, cell.bold,
-                cell.italic, cell.underline, cell.dim,
+                cell.fg_color,
+                cell.bg_color,
+                cell.bold,
+                cell.italic,
+                cell.underline,
+                cell.dim,
             );
             let start = col;
             let mut text = String::new();
@@ -969,10 +1154,7 @@ fn paint_grid(
                     col += 1;
                     continue;
                 }
-                if (
-                    c.fg_color, c.bg_color, c.bold,
-                    c.italic, c.underline, c.dim,
-                ) != key {
+                if (c.fg_color, c.bg_color, c.bold, c.italic, c.underline, c.dim) != key {
                     break;
                 }
                 text.push(c.c);
@@ -997,7 +1179,11 @@ fn paint_grid(
 
     // Soft accent block for the recorded cursor position.
     if grid.cursor_visible {
-        if let Some(cell) = grid.cells.get(grid.cursor_row).and_then(|r| r.get(grid.cursor_col)) {
+        if let Some(cell) = grid
+            .cells
+            .get(grid.cursor_row)
+            .and_then(|r| r.get(grid.cursor_col))
+        {
             if !(cell.c == '\0' || cell.c == ' ' && cell.bg_color == DEFAULT_BG) {
                 let cpos = egui::Pos2::new(
                     origin.x + grid.cursor_col as f32 * char_w,
@@ -1024,11 +1210,30 @@ mod tests {
     fn apply_until_replays_events_in_time_order() {
         let mut state = {
             let rec = CastRecording {
-                header: CastHeader { version: 2, width: 20, height: 5, timestamp: 0, title: None, portal_host: None },
+                header: CastHeader {
+                    version: 2,
+                    width: 20,
+                    height: 5,
+                    timestamp: 0,
+                    title: None,
+                    portal_host: None,
+                },
                 events: vec![
-                    CastEvent { time: 0.0, kind: EventKind::Output, data: "hel".into() },
-                    CastEvent { time: 1.0, kind: EventKind::Output, data: "lo".into() },
-                    CastEvent { time: 2.0, kind: EventKind::Output, data: " world".into() },
+                    CastEvent {
+                        time: 0.0,
+                        kind: EventKind::Output,
+                        data: "hel".into(),
+                    },
+                    CastEvent {
+                        time: 1.0,
+                        kind: EventKind::Output,
+                        data: "lo".into(),
+                    },
+                    CastEvent {
+                        time: 2.0,
+                        kind: EventKind::Output,
+                        data: " world".into(),
+                    },
                 ],
                 duration: 2.0,
             };
