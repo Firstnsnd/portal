@@ -54,6 +54,9 @@ pub fn show_nav_panel(
             if nav_button(ui, "\u{1f511}", language.t("keychain"), current_view == AppView::Keychain, theme) {
                 clicked_view = Some(AppView::Keychain);
             }
+            if nav_button(ui, "\u{1f559}", language.t("connection_history"), current_view == AppView::History, theme) {
+                clicked_view = Some(AppView::History);
+            }
             if nav_button(ui, "\u{2318}", language.t("snippets"), current_view == AppView::Snippets, theme) {
                 clicked_view = Some(AppView::Snippets);
             }

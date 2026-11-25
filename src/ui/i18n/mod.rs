@@ -115,18 +115,6 @@ impl Language {
 }
 
 /// Format a timestamp as "time ago" (e.g., "5 min ago").
-pub fn format_time_ago(secs_ago: u64, lang: &Language) -> String {
-    match lang {
-        Language::English => en::format_time_ago(secs_ago),
-        Language::Chinese => zh::format_time_ago(secs_ago),
-        Language::Japanese => ja::format_time_ago(secs_ago),
-        Language::Korean => ko::format_time_ago(secs_ago),
-        Language::Spanish => es::format_time_ago(secs_ago),
-        Language::Russian => ru::format_time_ago(secs_ago),
-        Language::French => fr::format_time_ago(secs_ago),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;

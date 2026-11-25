@@ -177,9 +177,11 @@ pub fn t(key: &str) -> &'static str {
         "search" => "搜索",
         "no_matches" => "无匹配",
         "search_placeholder" => "搜索...",
-        "recent_connections" => "最近连接",
         "clear_history" => "清除",
-        "just_now" => "刚刚",
+        "connection_history" => "连接历史",
+        "history_empty" => "暂无连接记录",
+        "history_today" => "今天",
+        "history_yesterday" => "昨天",
         "keyboard_shortcuts" => "快捷键",
         "press_key" => "按下快捷键...",
         "reset_defaults" => "恢复默认",
@@ -357,6 +359,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "delete_file_confirm" => format!("将永久删除 \"{}\"", arg),
         "delete_items_confirm" => format!("将永久删除 {} 个项目", arg),
         "n_selected" => format!("已选择 {} 项", arg),
+        "history_count" => format!("{} 条记录", arg),
         "n_items" => format!("{} 个项目", arg),
         "ssh_error" => format!("SSH 错误: {}", arg),
         "disconnected" => format!("[已断开: {}]", arg),
@@ -382,22 +385,6 @@ pub fn tf2(key: &str, arg1: &str, arg2: &str) -> String {
         "lines_and_chars" => format!("{} 行  {} 字符", arg1, arg2),
         _ => format!("{}: {}, {}", key, arg1, arg2),
     }
-}
-
-pub fn format_time_ago(secs_ago: u64) -> String {
-    if secs_ago < 60 {
-        return "刚刚".to_string();
-    }
-    let minutes = secs_ago / 60;
-    if minutes < 60 {
-        return format!("{} 分钟前", minutes);
-    }
-    let hours = secs_ago / 3600;
-    if hours < 24 {
-        return format!("{} 小时前", hours);
-    }
-    let days = secs_ago / 86400;
-    format!("{} 天前", days)
 }
 
 pub const LABEL: &str = "中文";

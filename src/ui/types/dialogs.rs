@@ -460,6 +460,13 @@ impl SnippetViewState {
 }
 
 
+/// Connection-history page view state (dedicated History page): the
+/// search box filtering the day-grouped record list.
+#[derive(Default)]
+pub struct HistoryViewState {
+    pub search: String,
+}
+
 /// Host filter state for the hosts list view
 #[derive(Default, Clone)]
 pub struct HostFilter {
@@ -509,6 +516,8 @@ pub enum AppView {
     Terminal,
     Sftp,
     Keychain,
+    /// Dedicated connection-history page (moved off the hosts page).
+    History,
     Snippets,
     Settings,
     Replay,

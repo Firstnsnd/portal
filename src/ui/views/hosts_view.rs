@@ -11,7 +11,6 @@ use crate::ui::pane::AppWindow;
 use crate::config::HostEntry;
 use crate::ssh::test_connection;
 use crate::ui::types::dialogs::{AuthMethodChoice, TestConnState, KeySourceChoice, CredentialMode};
-use crate::ui::i18n::format_time_ago;
 use crate::ui::tokens::*;
 use crate::ui::widgets;
 
@@ -25,7 +24,6 @@ pub fn render_hosts_view(
     let mut actions = ViewActions::default();
     let mut connect_ssh_host_idx: Option<usize> = None;
     let mut edit_host_index: Option<usize> = None;
-    let mut connect_history_host: Option<HostEntry> = None;
 
     ui.add_space(0.0);
 
@@ -141,159 +139,6 @@ pub fn render_hosts_view(
                     });
 
                     ui.add_space(SPACE_SM);
-
-                    // RECENT CONNECTIONS section
-                    {
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs();
-                        let history = &cx.connection_history;
-                        let mut seen = std::collections::HashSet::new();
-                        let recent: Vec<_> = history.iter().rev()
-                            .filter(|r| {
-                                let key = (r.host.clone(), r.port, r.username.clone());
-                                seen.insert(key)
-                            })
-                            .take(10)
-                            .collect();
-
-                        if !recent.is_empty() {
-                            ui.horizontal(|ui| {
-                                ui.add_space(SPACE_XL);
-                                ui.label(egui::RichText::new(cx.language.t("recent_connections")).color(cx.theme.fg_dim).size(FONT_XS).strong());
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.add_space(SPACE_XL);
-                                    if ui.add(
-                                        egui::Button::new(egui::RichText::new(cx.language.t("clear_history")).color(cx.theme.fg_dim).size(10.0))
-                                            .frame(false)
-                                    ).clicked() {
-                                        actions.clear_history = true;
-                                    }
-                                });
-                            });
-                            ui.add_space(SPACE_XS);
-
-                            for record in &recent {
-                                let row_h = 44.0;
-                                let width = ui.available_width();
-                                let (rect, resp) = ui.allocate_exact_size(
-                                    egui::vec2(width, row_h),
-                                    egui::Sense::click(),
-                                );
-                                let hovered = resp.hovered();
-                                if hovered {
-                                    ui.painter().rect_filled(
-                                        egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - 1.0), rect.max),
-                                        0.0, cx.theme.hover_shadow,
-                                    );
-                                    ui.painter().rect_filled(rect, 0.0, cx.theme.hover_bg);
-                                }
-                                let display_name = if record.host_name.is_empty() {
-                                    format!("{}:{}", record.host, record.port)
-                                } else {
-                                    record.host_name.clone()
-                                };
-                                ui.painter().text(
-                                    egui::pos2(rect.min.x + 24.0, rect.min.y + 14.0),
-                                    egui::Align2::LEFT_CENTER,
-                                    "@",
-                                    egui::FontId::proportional(12.0),
-                                    cx.theme.accent,
-                                );
-                                ui.painter().text(
-                                    egui::pos2(rect.min.x + 46.0, rect.min.y + 14.0),
-                                    egui::Align2::LEFT_CENTER,
-                                    &display_name,
-                                    egui::FontId::proportional(13.0),
-                                    cx.theme.fg_primary,
-                                );
-                                let detail = format!("{}@{}:{}", record.username, record.host, record.port);
-                                ui.painter().text(
-                                    egui::pos2(rect.min.x + 46.0, rect.min.y + 30.0),
-                                    egui::Align2::LEFT_CENTER,
-                                    &detail,
-                                    egui::FontId::proportional(10.0),
-                                    cx.theme.fg_dim,
-                                );
-                                let secs_ago = now.saturating_sub(record.timestamp);
-                                let time_text = format_time_ago(secs_ago, &cx.language);
-                                let visible_right = ui.clip_rect().max.x;
-
-                                let time_galley = ui.painter().layout_no_wrap(
-                                    time_text.clone(),
-                                    egui::FontId::proportional(10.0),
-                                    cx.theme.fg_dim,
-                                );
-                                let time_width = time_galley.size().x;
-                                let time_x = visible_right - 24.0;
-                                ui.painter().text(
-                                    egui::pos2(time_x, rect.min.y + 22.0),
-                                    egui::Align2::RIGHT_CENTER,
-                                    &time_text,
-                                    egui::FontId::proportional(10.0),
-                                    cx.theme.fg_dim,
-                                );
-
-                                if hovered {
-                                    let btn_width = 56.0;
-                                    let btn_x = time_x - time_width - 8.0;
-                                    let btn_rect = egui::Rect::from_center_size(
-                                        egui::pos2(btn_x - btn_width / 2.0, rect.min.y + 22.0),
-                                        egui::vec2(btn_width, 20.0),
-                                    );
-                                    let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
-                                    let over_btn = pointer_pos.is_some_and(|p| btn_rect.contains(p));
-                                    let btn_bg = if over_btn { cx.theme.accent } else { cx.theme.bg_elevated };
-                                    let btn_text_color = if over_btn { cx.theme.bg_primary } else { cx.theme.accent };
-                                    ui.painter().rect(btn_rect, 4.0, btn_bg, egui::Stroke::new(1.0, cx.theme.accent));
-                                    ui.painter().text(
-                                        btn_rect.center(),
-                                        egui::Align2::CENTER_CENTER,
-                                        cx.language.t("connect"),
-                                        egui::FontId::proportional(10.0),
-                                        btn_text_color,
-                                    );
-                                    if resp.clicked() && over_btn {
-                                        if let Some(host_entry) = cx.hosts.iter().find(|h| {
-                                            !h.is_local && h.host == record.host && h.port == record.port && h.username == record.username
-                                        }).cloned() {
-                                            connect_history_host = Some(host_entry);
-                                        } else {
-                                            connect_history_host = Some(HostEntry::new_ssh(
-                                                record.host_name.clone(),
-                                                record.host.clone(),
-                                                record.port,
-                                                record.username.clone(),
-                                                String::new(),
-                                                None,
-                                                Vec::new(),
-                                            ));
-                                        }
-                                    }
-                                }
-                                if resp.double_clicked() {
-                                    if let Some(host_entry) = cx.hosts.iter().find(|h| {
-                                        !h.is_local && h.host == record.host && h.port == record.port && h.username == record.username
-                                    }).cloned() {
-                                        connect_history_host = Some(host_entry);
-                                    } else {
-                                        connect_history_host = Some(HostEntry::new_ssh(
-                                            record.host_name.clone(),
-                                            record.host.clone(),
-                                            record.port,
-                                            record.username.clone(),
-                                            String::new(),
-                                            None,
-                                            Vec::new(),
-                                        ));
-                                    }
-                                }
-                            }
-
-                            ui.add_space(SPACE_XL);
-                        }
-                    }
 
                     // LOCAL section
                     ui.horizontal(|ui| {
@@ -620,9 +465,6 @@ pub fn render_hosts_view(
         if idx < cx.hosts.len() {
             actions.request_edit_host = Some(idx);
         }
-    }
-    if let Some(host) = connect_history_host {
-        actions.connect_ssh = Some(host);
     }
 
     actions

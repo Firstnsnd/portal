@@ -12,7 +12,7 @@ use crate::ui::pane::AppWindow;
 use crate::ui::{ThemeColors, Language};
 
 // Import view rendering functions
-use crate::ui::views::{hosts_view, keychain_view, snippets_view, sftp_view};
+use crate::ui::views::{hosts_view, history_view, keychain_view, snippets_view, sftp_view};
 
 /// Actions that a view may request to be performed after rendering.
 /// These are returned from view methods and executed by the caller.
@@ -148,6 +148,9 @@ impl AppWindow {
             }
             AppView::Keychain => {
                 keychain_view::render_keychain_view(self, ctx, ui, cx)
+            }
+            AppView::History => {
+                history_view::render_history_view(self, ctx, cx)
             }
             AppView::Settings => {
                 // Settings rendering

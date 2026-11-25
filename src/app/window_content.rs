@@ -540,6 +540,26 @@ impl PortalApp {
                         };
                         self.handle_view_actions(view_actions, window_idx, ctx);
                     }
+                    AppView::History => {
+                        let view_actions = {
+                            let mut cx = WindowContext::new(
+                                &mut self.hosts,
+                                &mut self.credentials,
+                                &mut self.snippets,
+                                &mut self.connection_history,
+                                &self.hosts_file,
+                                &self.credentials_file,
+                                &self.theme,
+                                self.language,
+                                &self.runtime,
+                                self.font_size,
+                                &self.llm_config,
+                                &self.host_sftp_support,
+                            );
+                            self.windows[window_idx].render_central_content(ctx, ui, &mut cx)
+                        };
+                        self.handle_view_actions(view_actions, window_idx, ctx);
+                    }
                     AppView::Replay => {
                         crate::ui::views::replay_view::render_replay_view(
                             &mut self.windows[window_idx],

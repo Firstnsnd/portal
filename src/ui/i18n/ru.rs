@@ -175,9 +175,11 @@ pub fn t(key: &str) -> &'static str {
         "search" => "Поиск",
         "no_matches" => "Нет совпадений",
         "search_placeholder" => "Поиск...",
-        "recent_connections" => "Недавние",
         "clear_history" => "Очистить",
-        "just_now" => "Только что",
+        "connection_history" => "История подключений",
+        "history_empty" => "Записей о подключениях пока нет",
+        "history_today" => "Сегодня",
+        "history_yesterday" => "Вчера",
         "keyboard_shortcuts" => "Горячие клавиши",
         "press_key" => "Нажмите сочетание клавиш...",
         "reset_defaults" => "По умолчанию",
@@ -339,6 +341,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "delete_file_confirm" => format!("Окончательно удалить \"{}\"?", arg),
         "delete_items_confirm" => format!("Окончательно удалить {} элементов(а)?", arg),
         "n_selected" => format!("{} выбрано", arg),
+        "history_count" => format!("Записей: {}", arg),
         "n_items" => format!("{} элементов", arg),
         "ssh_error" => format!("Ошибка SSH: {}", arg),
         "disconnected" => format!("[Отключено: {}]", arg),
@@ -364,22 +367,6 @@ pub fn tf2(key: &str, arg1: &str, arg2: &str) -> String {
         "lines_and_chars" => format!("{} строк  {} символов", arg1, arg2),
         _ => format!("{}: {}, {}", key, arg1, arg2),
     }
-}
-
-pub fn format_time_ago(secs_ago: u64) -> String {
-    if secs_ago < 60 {
-        return "Только что".to_string();
-    }
-    let minutes = secs_ago / 60;
-    if minutes < 60 {
-        return format!("{} мин. назад", minutes);
-    }
-    let hours = secs_ago / 3600;
-    if hours < 24 {
-        return format!("{} ч. назад", hours);
-    }
-    let days = secs_ago / 86400;
-    format!("{} дн. назад", days)
 }
 
 pub const LABEL: &str = "Русский";

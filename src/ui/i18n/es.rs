@@ -175,9 +175,11 @@ pub fn t(key: &str) -> &'static str {
         "search" => "Buscar",
         "no_matches" => "Sin resultados",
         "search_placeholder" => "Buscar...",
-        "recent_connections" => "Recientes",
         "clear_history" => "Limpiar",
-        "just_now" => "Ahora",
+        "connection_history" => "Historial de conexiones",
+        "history_empty" => "Aún no hay registros de conexión",
+        "history_today" => "Hoy",
+        "history_yesterday" => "Ayer",
         "keyboard_shortcuts" => "Atajos de teclado",
         "press_key" => "Presione una combinaci\u{00f3}n...",
         "reset_defaults" => "Restablecer",
@@ -339,6 +341,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "delete_file_confirm" => format!("¿Eliminar permanentemente \"{}\"?", arg),
         "delete_items_confirm" => format!("¿Eliminar permanentemente {} elementos?", arg),
         "n_selected" => format!("{} seleccionados", arg),
+        "history_count" => format!("{} registros", arg),
         "n_items" => format!("{} elementos", arg),
         "ssh_error" => format!("Error SSH: {}", arg),
         "disconnected" => format!("[Desconectado: {}]", arg),
@@ -364,22 +367,6 @@ pub fn tf2(key: &str, arg1: &str, arg2: &str) -> String {
         "lines_and_chars" => format!("{} líneas  {} caracteres", arg1, arg2),
         _ => format!("{}: {}, {}", key, arg1, arg2),
     }
-}
-
-pub fn format_time_ago(secs_ago: u64) -> String {
-    if secs_ago < 60 {
-        return "Ahora".to_string();
-    }
-    let minutes = secs_ago / 60;
-    if minutes < 60 {
-        return format!("hace {} min", minutes);
-    }
-    let hours = secs_ago / 3600;
-    if hours < 24 {
-        return format!("hace {} h", hours);
-    }
-    let days = secs_ago / 86400;
-    format!("hace {} días", days)
 }
 
 pub const LABEL: &str = "Español";

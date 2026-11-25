@@ -77,7 +77,7 @@ use crate::sftp::{LocalBrowser, SftpBrowser};
 use crate::ui::views::sftp::types::SftpClipboard;
 use crate::ui::types::{
     session::TerminalSession,
-    dialogs::{AppView, AddHostDialog, CredentialDialog, SnippetViewState, HostFilter},
+    dialogs::{AppView, AddHostDialog, CredentialDialog, SnippetViewState, HostFilter, HistoryViewState},
     sftp_types::{SftpContextMenu, SftpRenameDialog, SftpNewFolderDialog, SftpNewFileDialog, SftpConfirmDelete, SftpEmbeddedEditor, SftpErrorDialog, SftpPanel, SftpSide},
 };
 
@@ -397,6 +397,8 @@ pub struct AppWindow {
 
     // Page-related dialog states (per-window)
     pub add_host_dialog: AddHostDialog,
+    /// Connection-history page state (dedicated History view).
+    pub history_view_state: HistoryViewState,
     pub credential_dialog: CredentialDialog,
     pub snippet_view_state: SnippetViewState,
     pub host_filter: HostFilter,
@@ -508,6 +510,7 @@ impl AppWindow {
             sftp_clipboard: None,
             sftp_os_drag_active: false,
             add_host_dialog: AddHostDialog::default(),
+            history_view_state: HistoryViewState::default(),
             credential_dialog: CredentialDialog::default(),
             snippet_view_state: SnippetViewState::default(),
             host_filter: HostFilter::default(),

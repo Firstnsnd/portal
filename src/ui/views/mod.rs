@@ -10,6 +10,7 @@
 //! - **sftp_view**: SFTP file browser view
 //! - **settings_view**: Application settings
 //! - **hosts_view**: Hosts management view
+//! - **history_view**: Connection history page
 //! - **keychain_view**: Credentials/keychain view
 //! - **snippets_view**: Command snippets view
 
@@ -19,6 +20,7 @@ pub mod sftp;
 pub mod sftp_view;
 pub mod settings_view;
 pub mod hosts_view;
+pub mod history_view;
 pub mod keychain_view;
 pub mod snippets_view;
 pub mod metrics_drawer;

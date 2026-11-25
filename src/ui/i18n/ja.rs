@@ -175,9 +175,11 @@ pub fn t(key: &str) -> &'static str {
         "search" => "検索",
         "no_matches" => "一致なし",
         "search_placeholder" => "検索...",
-        "recent_connections" => "最近の接続",
         "clear_history" => "クリア",
-        "just_now" => "たった今",
+        "connection_history" => "接続履歴",
+        "history_empty" => "接続履歴はまだありません",
+        "history_today" => "今日",
+        "history_yesterday" => "昨日",
         "keyboard_shortcuts" => "キーボードショートカット",
         "press_key" => "キーを押してください...",
         "reset_defaults" => "デフォルトに戻す",
@@ -339,6 +341,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "delete_file_confirm" => format!("\"{}\" を完全に削除します", arg),
         "delete_items_confirm" => format!("{}件を完全に削除します", arg),
         "n_selected" => format!("{}件選択中", arg),
+        "history_count" => format!("{}件の記録", arg),
         "n_items" => format!("{}件", arg),
         "ssh_error" => format!("SSH エラー: {}", arg),
         "disconnected" => format!("[切断: {}]", arg),
@@ -364,22 +367,6 @@ pub fn tf2(key: &str, arg1: &str, arg2: &str) -> String {
         "lines_and_chars" => format!("{} 行  {} 文字", arg1, arg2),
         _ => format!("{}: {}, {}", key, arg1, arg2),
     }
-}
-
-pub fn format_time_ago(secs_ago: u64) -> String {
-    if secs_ago < 60 {
-        return "たった今".to_string();
-    }
-    let minutes = secs_ago / 60;
-    if minutes < 60 {
-        return format!("{} 分前", minutes);
-    }
-    let hours = secs_ago / 3600;
-    if hours < 24 {
-        return format!("{} 時間前", hours);
-    }
-    let days = secs_ago / 86400;
-    format!("{} 日前", days)
 }
 
 pub const LABEL: &str = "日本語";

@@ -126,6 +126,7 @@ impl PortalApp {
             AppView::Hosts => self.language.t("hosts").to_string(),
             AppView::Sftp => self.language.t("sftp").to_string(),
             AppView::Keychain => self.language.t("keychain").to_string(),
+            AppView::History => self.language.t("connection_history").to_string(),
             AppView::Settings => self.language.t("settings").to_string(),
             AppView::Snippets => "Snippets".to_string(),
             AppView::Replay => "Replay".to_string(),

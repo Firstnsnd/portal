@@ -175,9 +175,11 @@ pub fn t(key: &str) -> &'static str {
         "search" => "검색",
         "no_matches" => "일치 없음",
         "search_placeholder" => "검색...",
-        "recent_connections" => "최근 연결",
         "clear_history" => "지우기",
-        "just_now" => "방금",
+        "connection_history" => "연결 기록",
+        "history_empty" => "연결 기록이 없습니다",
+        "history_today" => "오늘",
+        "history_yesterday" => "어제",
         "keyboard_shortcuts" => "키보드 단축키",
         "press_key" => "키 조합을 누르세요...",
         "reset_defaults" => "기본값으로 복원",
@@ -339,6 +341,7 @@ pub fn tf(key: &str, arg: &str) -> String {
         "delete_file_confirm" => format!("\"{}\"이(가) 영구 삭제됩니다", arg),
         "delete_items_confirm" => format!("{}개 항목을 영구 삭제합니다", arg),
         "n_selected" => format!("{}개 선택됨", arg),
+        "history_count" => format!("기록 {}개", arg),
         "n_items" => format!("{}개 항목", arg),
         "ssh_error" => format!("SSH 오류: {}", arg),
         "disconnected" => format!("[연결 끊김: {}]", arg),
@@ -364,22 +367,6 @@ pub fn tf2(key: &str, arg1: &str, arg2: &str) -> String {
         "lines_and_chars" => format!("{} 줄  {} 문자", arg1, arg2),
         _ => format!("{}: {}, {}", key, arg1, arg2),
     }
-}
-
-pub fn format_time_ago(secs_ago: u64) -> String {
-    if secs_ago < 60 {
-        return "방금".to_string();
-    }
-    let minutes = secs_ago / 60;
-    if minutes < 60 {
-        return format!("{}분 전", minutes);
-    }
-    let hours = secs_ago / 3600;
-    if hours < 24 {
-        return format!("{}시간 전", hours);
-    }
-    let days = secs_ago / 86400;
-    format!("{}일 전", days)
 }
 
 pub const LABEL: &str = "한국어";
