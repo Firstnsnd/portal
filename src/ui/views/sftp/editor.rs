@@ -263,6 +263,20 @@ pub fn render_embedded_editor(
     let has_error = !editor.error.is_empty();
     let interactive = !editor.loading && !has_error;
 
+    // Cmd/Ctrl+S → save (mirrors the bottom Save button). Scoped to the
+    // focused editor so that a single press with two side-by-side editors
+    // only saves the half the user is actually editing. `command` is Cmd on
+    // macOS and Ctrl elsewhere; `ctrl` also matches a literal Ctrl+S on macOS.
+    let content_id = egui::Id::new("sftp_editor_content").with(id_side);
+    if interactive
+        && ui.ctx().memory(|m| m.has_focus(content_id))
+        && ui.ctx().input(|i| {
+            i.key_pressed(egui::Key::S) && (i.modifiers.command || i.modifiers.ctrl)
+        })
+    {
+        out.save = Some(editor.content.clone());
+    }
+
     // ── Body ─────────────────────────────────────────────────────────────
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(body_rect), |ui| {
         if editor.loading {
@@ -367,7 +381,7 @@ pub fn render_embedded_editor(
                         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(child_rect), |ui| {
                             ui.add(
                                 egui::TextEdit::multiline(&mut editor.content)
-                                    .id(egui::Id::new("sftp_editor_content").with(id_side))
+                                    .id(content_id)
                                     .desired_width(f32::INFINITY)
                                     // Fill the whole viewport height even for
                                     // a 1-line file (min_size applies to the
